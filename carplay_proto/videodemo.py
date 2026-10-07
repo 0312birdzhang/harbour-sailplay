@@ -135,6 +135,7 @@ class UiCommands:
         self.path = path
         self.fd = self.writer = None
         self.buffer = b''
+        self.resume = threading.Event()
         if os.path.lexists(path):
             old = os.lstat(path)
             if not stat.S_ISFIFO(old.st_mode) or old.st_uid != os.geteuid():
@@ -153,6 +154,8 @@ class UiCommands:
             pass
         lines = self.buffer.split(b'\n')
         self.buffer = lines.pop()[-128:]
+        if b'show-carplay' in lines:
+            self.resume.set()
         return b'return-car' in lines
 
     def close(self):
@@ -165,11 +168,12 @@ class UiCommands:
 
 class ScreenFeedback:
     """Keep control requests away from the video producer's critical path."""
-    def __init__(self,client,commands=None,modes=None,resume=None):
+    def __init__(self,client,commands=None,modes=None,resume=None,screen=None):
         self.client=client
         self.commands=commands
         self.modes=modes
         self.resume=resume
+        self.screen=screen
         self.stop=threading.Event()
         self.thread=threading.Thread(target=self.run,daemon=True)
         self.thread.start()
@@ -179,10 +183,13 @@ class ScreenFeedback:
         while not self.stop.wait(0.1):
             try:
                 returning=self.commands and self.commands.return_requested()
-                resuming=self.resume is not None and self.resume.is_set()
+                resuming=(self.resume is not None and self.resume.is_set()) or (self.commands and self.commands.resume.is_set())
                 if returning or resuming:
                     if resuming:
-                        self.resume.clear()
+                        if self.resume is not None:
+                            self.resume.clear()
+                        if self.commands:
+                            self.commands.resume.clear()
                     print('Screen ownership command: {}'.format('CarPlay' if resuming else 'OEM'),flush=True)
                     proposed=copy.deepcopy(self.modes)
                     screen=next(r for r in proposed['resources'] if r['resourceID']==1)
@@ -195,6 +202,8 @@ class ScreenFeedback:
                     accepted=status==200 and command_status==0
                     if accepted:
                         next(r for r in self.modes['resources'] if r['resourceID']==1).update(entity=owner,permanentEntity=owner)
+                        if self.screen:
+                            self.screen.ownership(owner)
                     print('Screen ownership response owner={} status={} command_status={} accepted={}'.format(owner,status,command_status,accepted),flush=True)
                 if time.monotonic()<next_feedback:
                     continue
@@ -239,6 +248,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                     if transfer in (1,3): resource['entity']=2
                     elif transfer in (2,4): resource['entity']=1
                     if transfer in (1,2):resource['permanentEntity']=resource['entity']
+                    if resource['resourceID']==1 and resource['entity']==1:
+                        resume.set()
             if audio:
                 audio.gain=1.0 if modes['resources'][1]['entity']==1 else 0.0
             print('HU mode request applied: {}'.format(modes['resources']),flush=True)
@@ -253,6 +264,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
     video = None
     feedback = None
     commands = None
+    screen = None
     try:
         events = DemoEvents(address,int(setup_info['eventPort']),interface,shared,
                             event_command)
@@ -296,7 +308,9 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             audio.start(audio_stream,client.sock.sock.getpeername())
         encoder = ScreenEncoder(shared,stream_id)
         if live:
-            feedback=ScreenFeedback(client,commands,modes,resume)
+            from .screenstream import ScreenStream
+            screen=ScreenStream(client,address,interface,shared,display,video,stream_id)
+            feedback=ScreenFeedback(client,commands,modes,resume,screen)
         if live:
             import itertools
             source = itertools.chain([first_live_frame],source)
@@ -312,6 +326,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                 raise RuntimeError('control feedback ended')
             if on_activity:
                 on_activity()
+            if live and not screen.send(config,nals,time.monotonic_ns()):
+                continue
             if config!=previous_config:
                 if sample:
                     sps_size=int.from_bytes(config[6:8],'big')
@@ -320,7 +336,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                     pps_size=int.from_bytes(config[pps_pos:pps_pos+2],'big')
                     sample.write(b'\x00\x00\x00\x01'+sps+b'\x00\x00\x00\x01'+config[pps_pos+2:pps_pos+2+pps_size])
                     sample.flush()
-                video.sendall(encoder.config(config,1920,720))
+                if not live:
+                    video.sendall(encoder.config(config,1920,720))
                 previous_config=config
                 print('Screen configuration sent: {} bytes'.format(len(config)),flush=True)
             delay = 0 if live else start+count/30-time.monotonic()
@@ -329,10 +346,11 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             if sample and count<60:
                 sample.write(b''.join(b'\x00\x00\x00\x01'+n for n in nals))
                 sample.flush()
-            packet=encoder.frame(nals,time.monotonic_ns())
+            packet=encoder.frame(nals,time.monotonic_ns()) if not live else None
             before=time.monotonic()
             try:
-                video.sendall(packet)
+                if not live:
+                    video.sendall(packet)
             except Exception as error:
                 print('VIDEO failed t={:.3f} frame={} error={}'.format(time.monotonic(),count,type(error).__name__),flush=True)
                 raise
@@ -340,7 +358,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             if count==1:
                 print('Screen first IDR sent',flush=True)
             now=time.monotonic()
-            if now-last_keepalive>=1:
+            if not live and now-last_keepalive>=1:
                 video.sendall(struct.pack('<IB',0,2)+bytes(123))
                 last_keepalive=now
             if count%300==0:
@@ -353,6 +371,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             sample.close()
         if feedback:
             feedback.close()
+        if screen:
+            screen.close()
         if commands:
             commands.close()
         if pipeline:

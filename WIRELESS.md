@@ -12,8 +12,8 @@ A previous implementation rejected incoming RFCOMM channels whenever a worker fo
 
 The installed service now has an Install section and is enabled by RPM installation. A complete device reboot followed by automatic connection remains a pending hardware validation.
 
-## Screen ownership limitation
+## Screen ownership lifecycle
 
-The tested head unit acknowledges the modesChanged message used by the return tile, but this did not demonstrate a switch to its native UI. Pausing video after that acknowledgement froze the displayed Sailplay frame. That candidate was reverted. The return tile currently displays a limitation notice; native screen switching requires further protocol and hardware validation.
+The return tile sends modesChanged and shuts down the screen TCP socket before a screen-only TEARDOWN (type 110 and display UUID). Audio and control remain active. The native head-unit UI switch was confirmed in a device test. A subsequent head-unit requestUI caused fresh screen-only SETUP and RECORD, followed by IDR-started video transmission. Resume uses a new stream connection ID and encryption key. Earlier video-pause behavior only froze the picture and has been replaced. Version 0.1.0-17 was installed and the user confirmed the full tile return, head-unit CarPlay re-entry and restored-touch round trip.
 
 Device-specific captures, certificates, pins, private identities and operational scripts are kept locally and are not repository fixtures.

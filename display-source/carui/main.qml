@@ -118,8 +118,8 @@ Window {
                             id: appTouch; anchors.fill: parent
                             onClicked: {
                                 if (oem) {
-                                    root.notice = "返回车机功能正在修复，请使用车机主页键"
-                                    noticeTimer.restart()
+                                    carController.returnToCar()
+
                                 } else carController.tileClicked(appIndex)
                             }
                         }

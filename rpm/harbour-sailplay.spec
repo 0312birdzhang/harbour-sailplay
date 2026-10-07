@@ -1,6 +1,6 @@
 Name: harbour-sailplay
 Version: 0.1.0
-Release: 16
+Release: 17
 Summary: SailfishOS wireless CarPlay phone and virtual vehicle display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2

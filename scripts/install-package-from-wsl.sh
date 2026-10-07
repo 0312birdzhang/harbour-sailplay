@@ -2,7 +2,7 @@
 set -eu
 : "${SAILPLAY_HOST:?Set SAILPLAY_HOST to the tablet address}"
 cd /mnt/d/code/sfos-carlife
-sshpass -e scp harbour-sailplay-0.1.0-16.aarch64.rpm "defaultuser@${SAILPLAY_HOST}":/tmp/harbour-sailplay.rpm
+sshpass -e scp harbour-sailplay-0.1.0-17.aarch64.rpm "defaultuser@${SAILPLAY_HOST}":/tmp/harbour-sailplay.rpm
 sshpass -e ssh "defaultuser@${SAILPLAY_HOST}" sh -s <<'REMOTE'
 cat > /tmp/sailplay-install.sh <<'ROOT'
 #!/bin/sh
