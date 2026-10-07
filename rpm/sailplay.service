@@ -1,0 +1,18 @@
+[Unit]
+Description=Sailplay wireless CarPlay
+After=bluetooth.service connman.service
+Wants=bluetooth.service connman.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=2
+ExecStart=/usr/bin/python3 /opt/sailplay/scripts/wireless-phone-advertise.py --seconds 0 --device /org/bluez/hci0/dev_EC_A7_AD_81_EA_86 --accessory-key /opt/sailplay/diagnostics/corolla-accessory-key.json --session-out /tmp/sailplay-session.json --announce-wireless --wifi-handover --sustained
+KillMode=control-group
+ExecStopPost=-/usr/bin/systemctl stop sailplay-handover-*.service
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

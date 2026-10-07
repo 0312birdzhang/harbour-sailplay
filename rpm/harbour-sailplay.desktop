@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Sailplay
+Comment=Choose apps for the CarPlay display
+Comment[zh_CN]=选择车机主页显示的应用
+Icon=harbour-sailplay
+Exec=/usr/bin/invoker --type=silica-qt5 -s -n -d 5 /opt/sailplay/carui/carui /opt/sailplay/carui/mobile-settings.qml
+X-Nemo-Application-Type=silica-qt5

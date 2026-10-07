@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "harbour-sailplay"
+version = "0.1.0"
+description = "CarPlay media-device protocol stack: iAP2 CSM framing and link codecs"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.6"
+authors = [
+    { name = "sailplay contributors" },
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "-q"
+
+[tool.setuptools]
+packages = ["carplay_proto"]
