@@ -11,6 +11,7 @@
 #include <QProcess>
 #include <QFile>
 #include <QFileInfo>
+#include <QSettings>
 #include <QDir>
 #include <QDateTime>
 #include <QDBusConnection>
@@ -628,24 +629,62 @@ private:
     }
     void updateStatus()
     {
-        // Statefs is Sailfish's status provider; missing values stay unknown.
-        QFile battery(QStringLiteral("/run/state/namespaces/Battery/ChargePercentage"));
-        if (battery.open(QIODevice::ReadOnly)) {
-            bool ok = false;
-            int level = battery.readAll().trimmed().toInt(&ok);
-            if (ok) setStatus("battery", qBound(0, level, 100));
+        // Prefer kernel battery data; some devices have no Statefs/UPower battery.
+        int level = -1;
+        bool chargingKnown = false, isCharging = false;
+        QStringList supplies;
+        supplies << QStringLiteral("battery");
+        const QDir power(QStringLiteral("/sys/class/power_supply"));
+        for (const QString &name : power.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            if (name == "battery") continue;
+            QFile type(power.filePath(name + "/type"));
+            if (type.open(QIODevice::ReadOnly) && type.readAll().trimmed() == "Battery")
+                supplies << name;
         }
-        QFile charging(QStringLiteral("/run/state/namespaces/Battery/IsCharging"));
-        if (charging.open(QIODevice::ReadOnly)) setStatus("charging", charging.readAll().trimmed() == "1");
-        query("org.freedesktop.UPower", "/org/freedesktop/UPower/devices/DisplayDevice",
-              "org.freedesktop.DBus.Properties", "GetAll", [this](const QDBusMessage &r) {
-            if (r.arguments().isEmpty()) return;
-            QVariantMap p = qdbus_cast<QVariantMap>(r.arguments().first());
-            if (p.value("IsPresent").toBool()) {
-                setStatus("battery", qBound(0, qRound(p.value("Percentage").toDouble()), 100));
-                setStatus("charging", p.value("State").toInt() == 1);
+        for (const QString &name : supplies) {
+            QFile capacity(power.filePath(name + "/capacity"));
+            bool ok = false;
+            if (!capacity.open(QIODevice::ReadOnly)) continue;
+            int value = capacity.readAll().trimmed().toInt(&ok);
+            if (!ok || value < 0 || value > 100) continue;
+            level = value;
+            QFile state(power.filePath(name + "/status"));
+            if (state.open(QIODevice::ReadOnly)) {
+                const QByteArray value = state.readAll().trimmed();
+                chargingKnown = value == "Charging" || value == "Discharging"
+                    || value == "Full" || value == "Not charging";
+                isCharging = value == "Charging";
             }
-        }, {QStringLiteral("org.freedesktop.UPower.Device")});
+            break;
+        }
+        if (level < 0) {
+            QFile battery(QStringLiteral("/run/state/namespaces/Battery/ChargePercentage"));
+            if (battery.open(QIODevice::ReadOnly)) {
+                bool ok = false;
+                int value = battery.readAll().trimmed().toInt(&ok);
+                if (ok && value >= 0 && value <= 100) level = value;
+            }
+        }
+        if (!chargingKnown) {
+            QFile charging(QStringLiteral("/run/state/namespaces/Battery/IsCharging"));
+            if (charging.open(QIODevice::ReadOnly)) {
+                const QByteArray value = charging.readAll().trimmed();
+                chargingKnown = value == "1" || value == "0";
+                isCharging = value == "1";
+            }
+        }
+        setStatus("battery", level);
+        setStatus("charging", chargingKnown && isCharging);
+        if (level < 0 || !chargingKnown)
+            query("org.freedesktop.UPower", "/org/freedesktop/UPower/devices/DisplayDevice",
+                  "org.freedesktop.DBus.Properties", "GetAll", [this, level, chargingKnown](const QDBusMessage &r) {
+                if (r.arguments().isEmpty()) return;
+                QVariantMap p = qdbus_cast<QVariantMap>(r.arguments().first());
+                if (!p.value("IsPresent").toBool()) return;
+                if (level < 0 && p.contains("Percentage"))
+                    setStatus("battery", qBound(0, qRound(p.value("Percentage").toDouble()), 100));
+                if (!chargingKnown) setStatus("charging", p.value("State").toInt() == 1);
+            }, {QStringLiteral("org.freedesktop.UPower.Device")});
         query("net.connman", "/", "net.connman.Manager", "GetServices", [this](const QDBusMessage &r) {
             if (r.arguments().isEmpty()) return;
             const QDBusArgument a = r.arguments().first().value<QDBusArgument>();
@@ -664,6 +703,14 @@ private:
             setStatus("wifiConnected", connected);
             setStatus("wifiStrength", strength);
         });
+        QSettings ril(QStringLiteral("/etc/ofono/ril_subscription.conf"), QSettings::IniFormat);
+        const bool mobileSupported = !ril.value(QStringLiteral("Settings/EmptyConfig"), false).toBool();
+        setStatus("mobileSupported", mobileSupported);
+        if (!mobileSupported) {
+            setStatus("mobileStrength", -1);
+            setStatus("mobileType", "");
+            return;
+        }
         query("org.ofono", "/", "org.ofono.Manager", "GetModems", [this](const QDBusMessage &r) {
             if (r.arguments().isEmpty()) return;
             const QDBusArgument a = r.arguments().first().value<QDBusArgument>();

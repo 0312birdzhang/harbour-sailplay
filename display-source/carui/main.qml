@@ -26,9 +26,9 @@ Window {
         width: 140; height: parent.height; color: "#dd090c14"
         Text { y: 25; anchors.horizontalCenter: parent.horizontalCenter; text: root.clockText; color: "white"; font.pixelSize: 37; font.bold: true }
         Row {
-            x: 16; y: 83; spacing: 7
+            anchors.horizontalCenter: parent.horizontalCenter; y: 83; spacing: 7
             Row {
-                spacing: 3; height: 24
+                visible: root.status.mobileSupported === true; spacing: 3; height: 24
                 Repeater {
                     model: 4
                     Rectangle {
@@ -37,7 +37,7 @@ Window {
                     }
                 }
             }
-            Text { width: 33; text: root.mobile < 0 ? "—" : (root.status.mobileType || ""); color: "white"; font.pixelSize: 18; anchors.verticalCenter: parent.verticalCenter }
+            Text { visible: root.status.mobileSupported === true; width: 33; text: root.mobile < 0 ? "—" : (root.status.mobileType || ""); color: "white"; font.pixelSize: 18; anchors.verticalCenter: parent.verticalCenter }
             Canvas {
                 width: 32; height: 27
                 property int strength: root.status.wifiConnected ? root.status.wifiStrength : -1

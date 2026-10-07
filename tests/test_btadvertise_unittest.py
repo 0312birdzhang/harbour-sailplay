@@ -27,6 +27,11 @@ def event(kind, index, opcode, status):
 
 
 class AdvertisementTests(unittest.TestCase):
+    def test_command_uses_selected_adapter_and_ignores_other_controller(self):
+        sock = FakeSocket([event(1, 0, 0x10, 0), event(1, 1, 0x10, 0)])
+        module.command(sock, 0x10, b'uuid', adapter_index=1)
+        self.assertEqual(sock.written, [struct.pack('<HHH', 0x10, 1, 4) + b'uuid'])
+
     def test_phone_uuid_little_endian_and_complete(self):
         value = uuid.UUID(module.PHONE_EIR).bytes[::-1]
         self.assertEqual(value.hex(), '1a29eaab0173bc881c454de166248d2d')

@@ -4,14 +4,15 @@ Wireless CarPlay phone/source implementation for SailfishOS, tested on Xiaomi Pa
 
 ## Current status
 
-Version 0.1.0-17 includes Bluetooth RFCOMM/iAP2, accessory certificate pinning and challenge verification, ConnMan Wi-Fi handover, encrypted AirPlay control/video/audio, a virtual 1920x720 compositor and reverse touch input.
+Version 0.1.0-20 includes Bluetooth RFCOMM/iAP2, accessory certificate pinning and challenge verification, ConnMan Wi-Fi handover, encrypted AirPlay control/video/audio, a virtual 1920x720 compositor and reverse touch input.
 
 - Continuous projection, application launching and touch have been confirmed on the head unit.
 - A standalone Sailplay tablet app selects the applications shown on the car display; changes save automatically.
-- The car launcher has network/battery indicators, a recent-app dock and horizontally paginated application grids.
+- The car launcher has network/battery indicators, a recent-app dock and horizontally paginated application grids. Devices with ofono Settings/EmptyConfig=true hide cellular indicators; battery readings prefer sysfs, with Statefs/UPower fallbacks.
+- Bluetooth adapter selection follows BlueZ-exported adapters, including hci1 phones; advertising, monitoring and target-device paths use the selected controller.
 - Old RFCOMM channels are retired on reconnection; failed profile connections retry while Bluetooth is connected. Active media sessions are protected from unnecessary reconnect attempts.
 - The service is configured for boot startup. A full cold-boot connection cycle has not yet been verified.
-- Audio packet transmission and capture are implemented; audible head-unit output remains unverified.
+- Audio packet transmission and capture are implemented. A dedicated nopolicy capture group prevents Sailfish audio policy from selecting microphone input; the helper also verifies its private monitor. Audible head-unit output remains unverified.
 - Return to the original head-unit UI closes only the screen stream, keeping audio and control connected. Native UI switching was confirmed on the head unit; its requestUI event also re-established video. The packaged return tile, head-unit CarPlay re-entry and restored touch were confirmed on the tested head unit.
 
 ## Source layout
@@ -30,7 +31,7 @@ python3 -m pytest
 python3 -m unittest discover -s tests -p '*unittest.py'
 ```
 
-The device uses system OpenSSL and PulseAudio; development tests use Python cryptography. The latest focused unittest run passed 32 tests.
+The device uses system OpenSSL and PulseAudio; development tests use Python cryptography. The latest focused unittest run passed 40 tests.
 
 ## Build and device configuration
 

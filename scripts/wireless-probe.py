@@ -19,6 +19,7 @@ import subprocess
 import fcntl
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from carplay_proto.bluezadapter import select_adapter
 from carplay_proto.iap2link import (ACK, DETECT, EAK, RST, SYN, Decoder,
                                    Packet, encode, parse_synchronization,
                                    synchronization)
@@ -287,7 +288,11 @@ def main():
     from gi.repository import GLib
     DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
-    local_address = str(dbus.Interface(bus.get_object('org.bluez', '/org/bluez/hci0'),
+    objects = dbus.Interface(bus.get_object('org.bluez', '/'),
+                             'org.freedesktop.DBus.ObjectManager').GetManagedObjects()
+    adapter, args.device = select_adapter(objects, args.device)
+    logging.info('using Bluetooth adapter %s, target %s', adapter, args.device)
+    local_address = str(dbus.Interface(bus.get_object('org.bluez', adapter),
                             'org.freedesktop.DBus.Properties').Get('org.bluez.Adapter1', 'Address'))
     loop = GLib.MainLoop()
     workers = {}

@@ -1,6 +1,6 @@
 Name: harbour-sailplay
 Version: 0.1.0
-Release: 17
+Release: 20
 Summary: SailfishOS wireless CarPlay phone and virtual vehicle display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
@@ -37,10 +37,12 @@ install -D -m 0644 display-source/carui/harbour-sailplay.png %{buildroot}/usr/sh
 install -m 0644 display-source/carui/carui-apps.conf %{buildroot}/opt/sailplay/carui-apps.conf
 touch %{buildroot}/opt/sailplay/diagnostics/display-ui
 install -D -m 0644 rpm/sailplay.service %{buildroot}/usr/lib/systemd/system/sailplay.service
+install -D -m 0644 rpm/sailplay-xpolicy.conf %{buildroot}/etc/pulse/xpolicy.conf.d/sailplay.conf
 
 %post
 systemctl daemon-reload || :
 systemctl enable sailplay.service || :
+su defaultuser -s /bin/sh -c 'env XDG_RUNTIME_DIR=/run/user/100000 python3 /opt/sailplay/scripts/reload-audio-policy.py' || echo 'Sailplay audio policy activation failed; see PulseAudio logs'
 systemctl try-restart sailplay.service || :
 
 %preun
@@ -60,5 +62,6 @@ systemctl daemon-reload || :
 %attr(2755,root,privileged) /opt/sailplay/imira-comp
 %attr(2755,root,privileged) /opt/sailplay/carlife-capture
 /usr/lib/systemd/system/sailplay.service
+/etc/pulse/xpolicy.conf.d/sailplay.conf
 /usr/share/applications/harbour-sailplay.desktop
 /usr/share/icons/hicolor/172x172/apps/harbour-sailplay.png

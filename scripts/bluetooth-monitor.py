@@ -7,7 +7,8 @@ import threading
 
 
 class Monitor:
-    def __init__(self):
+    def __init__(self, adapter_index=0):
+        self.adapter_index = adapter_index
         self.stop = threading.Event()
         self.pending = {}
         self.rfcomm = set()
@@ -35,7 +36,7 @@ class Monitor:
                 continue
             opcode, index, size = struct.unpack('<HHH', raw[:6])
             data = raw[6:6 + size]
-            if index != 0:
+            if index != self.adapter_index:
                 continue
             if opcode == 3 and len(data) >= 6 and data[0] == 5:
                 status, handle, reason = struct.unpack('<BHB', data[2:6])

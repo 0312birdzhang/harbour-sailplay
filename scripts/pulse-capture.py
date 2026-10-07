@@ -69,7 +69,7 @@ def main():
             peeked=False
             try:
                 source=lib.pa_stream_get_device_name(s)
-                if source!=(name+'.monitor').encode():raise RuntimeError('recording source moved away from private monitor')
+                if source!=(name+'.monitor').encode():raise RuntimeError('recording source mismatch: actual=%r expected=%r' % (source, (name+'.monitor').encode()))
                 pointer=C.c_void_p();length=C.c_size_t()
                 if lib.pa_stream_peek(s,C.byref(pointer),C.byref(length))<0:raise RuntimeError('monitor read failed')
                 peeked=bool(length.value)
@@ -79,7 +79,7 @@ def main():
                     while view:
                         written=os.write(1,view);view=view[written:]
             except Exception as error:
-                print('Audio capture stopped: '+type(error).__name__,file=sys.stderr,flush=True);stop[0]=True
+                print('Audio capture stopped: '+type(error).__name__+' '+str(error),file=sys.stderr,flush=True);stop[0]=True
             finally:
                 if peeked:lib.pa_stream_drop(s)
         callbacks.append(read);lib.pa_stream_set_read_callback(stream,read,None)
@@ -108,5 +108,5 @@ def main():
 if __name__=='__main__':
     try:main()
     except Exception as error:
-        print('Audio capture failed: '+type(error).__name__,file=sys.stderr,flush=True)
+        print('Audio capture failed: '+type(error).__name__+' '+str(error),file=sys.stderr,flush=True)
         sys.exit(1)
