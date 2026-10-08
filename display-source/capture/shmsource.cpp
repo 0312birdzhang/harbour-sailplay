@@ -10,6 +10,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <vector>
+#include <chrono>
+#include <thread>
 
 namespace imira {
 
@@ -73,9 +75,12 @@ bool ShmFrameSource::start(int fps, const FrameCallback &cb)
 
             std::vector<uint8_t> copy(frameBytes);
             uint32_t lastSeq = 0;
-            int idleTicks = 0;
+            auto lastFrame = std::chrono::steady_clock::now();
             bool stale = false;
             while (m_running && !stale) {
+                const auto nextTick = std::chrono::steady_clock::now()
+                    + std::chrono::microseconds(interval);
+                bool captured = false;
                 uint32_t seq =
                     __atomic_load_n(&header->seq, __ATOMIC_ACQUIRE);
                 if (seq != lastSeq && (seq & 1) == 0) {
@@ -84,11 +89,12 @@ bool ShmFrameSource::start(int fps, const FrameCallback &cb)
                         __atomic_load_n(&header->seq, __ATOMIC_ACQUIRE);
                     if (after == seq) { // no tear: frame was stable
                         lastSeq = seq;
-                        idleTicks = 0;
+                        lastFrame = std::chrono::steady_clock::now();
+                        captured = true;
                         cb(copy.data(), (int)hdr.width, (int)hdr.height,
                            (int)hdr.width * 4, 0, /*transform=*/2);
                     }
-                } else if (++idleTicks > 2 * fps) {
+                } else if (std::chrono::steady_clock::now() - lastFrame > std::chrono::seconds(2)) {
                     // Two seconds without a new frame: the writer is gone
                     // (or we mapped a leftover). Reattach to the current
                     // file — the live compositor keeps its seq moving.
@@ -96,7 +102,10 @@ bool ShmFrameSource::start(int fps, const FrameCallback &cb)
                                     "reattaching\n");
                     stale = true;
                 }
-                usleep(interval);
+                // Conversion takes time; sleeping a whole interval afterwards
+                // adds that cost to every frame and lowers the actual rate.
+                if (captured) std::this_thread::sleep_until(nextTick);
+                else usleep(1000); // Retry a writer-busy sequence; don't lose a whole frame interval.
             }
             munmap(const_cast<uint8_t *>(shm),
                    sizeof(ShmHeader) + frameBytes);

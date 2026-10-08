@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from carplay_proto.bluezadapter import select_adapter
+from carplay_proto.bluezadapter import select_adapter, select_head_unit, previous_head_unit, remember_head_unit
 
 
 def configured_device(exec_start):
@@ -23,7 +23,11 @@ def main():
     target = configured_device(command)
     bus = dbus.SystemBus()
     manager = dbus.Interface(bus.get_object('org.bluez', '/'), 'org.freedesktop.DBus.ObjectManager')
-    adapter, target = select_adapter(manager.GetManagedObjects(), target)
+    objects = manager.GetManagedObjects()
+    adapter, target = select_adapter(objects, target)
+    target = select_head_unit(objects, target, previous_head_unit())
+    adapter, target = select_adapter(objects, target)
+    print('Reconnect target: {}'.format(target), flush=True)
     props = dbus.Interface(bus.get_object('org.bluez', adapter), 'org.freedesktop.DBus.Properties')
     props.Set('org.bluez.Adapter1', 'Powered', dbus.Boolean(True))
     # The service owns RFCOMM and all handover units. Restarting it retires
@@ -35,6 +39,7 @@ def main():
     except dbus.DBusException as error:
         if error.get_dbus_name() != 'org.bluez.Error.AlreadyConnected':
             raise
+    remember_head_unit(target)
     print('Head-unit Bluetooth connected; Sailplay will negotiate iAP2, Wi-Fi and AirPlay', flush=True)
 
 

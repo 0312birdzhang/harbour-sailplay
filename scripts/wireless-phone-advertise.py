@@ -50,6 +50,10 @@ def main():
     adapter_index = int(adapter.rsplit('/hci', 1)[1])
     props = dbus.Interface(bus.get_object('org.bluez', adapter),
                            'org.freedesktop.DBus.Properties')
+    try:
+        props.Set('org.bluez.Adapter1', 'Connectable', dbus.Boolean(True))
+    except dbus.DBusException:
+        logging.info('adapter does not expose Connectable; using system defaults')
     existing = [str(v).lower() for v in props.Get('org.bluez.Adapter1', 'UUIDs')]
     probe = os.path.join(os.path.dirname(__file__), 'wireless-probe.py')
     if PHONE_EIR in existing:
@@ -101,4 +105,7 @@ if __name__ == '__main__':
     def terminate(signum, frame):
         raise KeyboardInterrupt()
     signal.signal(signal.SIGTERM, terminate)
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(0)

@@ -84,19 +84,20 @@ ApplicationWindow {
                     SectionHeader { text: app.textFor("Car display home apps", "车机主页应用") }
                     ComboBox {
                         label: app.textFor("Resolution", "分辨率")
+                        visible: carController.projectionResolutions.length > 0
                         currentIndex: carController.resolutionIndex
                         menu: ContextMenu {
-                            MenuItem { text: "1920 × 720"; onClicked: carController.setProjectionSettings(0, carController.projectionFps) }
-                            MenuItem { text: "1600 × 600"; onClicked: carController.setProjectionSettings(1, carController.projectionFps) }
-                            MenuItem { text: "1280 × 480"; onClicked: carController.setProjectionSettings(2, carController.projectionFps) }
+                            MenuItem { text: carController.projectionResolutions[0] || ""; onClicked: carController.setProjectionSettings(0, carController.projectionFps) }
+                            MenuItem { text: carController.projectionResolutions[1] || ""; onClicked: carController.setProjectionSettings(1, carController.projectionFps) }
+                            MenuItem { text: carController.projectionResolutions[2] || ""; onClicked: carController.setProjectionSettings(2, carController.projectionFps) }
                         }
                     }
                     ComboBox {
                         label: app.textFor("Frame rate", "帧率")
                         currentIndex: carController.projectionFps === 60 ? 1 : 0
                         menu: ContextMenu {
-                            MenuItem { text: "30 fps"; onClicked: carController.setProjectionSettings(carController.resolutionIndex, 30) }
-                            MenuItem { text: "60 fps"; onClicked: carController.setProjectionSettings(carController.resolutionIndex, 60) }
+                            MenuItem { text: Math.min(30, carController.maximumFps) + " fps"; onClicked: carController.setProjectionSettings(carController.resolutionIndex, 30) }
+                            MenuItem { text: "60 fps"; visible: carController.maximumFps >= 60; onClicked: carController.setProjectionSettings(carController.resolutionIndex, 60) }
                         }
                     }
                     Label {
@@ -105,7 +106,11 @@ ApplicationWindow {
                         wrapMode: Text.WordWrap
                         font.pixelSize: Theme.fontSizeSmall
                         color: Theme.secondaryColor
-                        text: app.textFor("Saved automatically. Tap Connect / reconnect to car to apply. Compatibility and performance depend on the car and device.", "自动保存，点击“连接车机／重新连接”后生效。实际效果取决于车机兼容性和设备性能。")
+                        text: carController.projectionResolutions.length > 0
+                              ? app.textFor("Car display: ", "车机屏幕：") + carController.projectionResolutions[0]
+                                + app.textFor("; maximum ", "；最高 ") + carController.maximumFps + " fps. "
+                                + app.textFor("Lower resolutions reduce encoding load. Reconnect to apply.", "较低分辨率可降低编码负载，重新连接后生效。")
+                              : app.textFor("Connect once to read the car display resolution and frame-rate limit.", "连接车机后读取屏幕分辨率和帧率上限。")
                     }
                     Label {
                         id: saveNotice

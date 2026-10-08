@@ -1508,6 +1508,7 @@ int main(int argc, char *argv[])
 
     // --- render + publish loop ------------------------------------------
     QTimer frameTimer;
+    frameTimer.setTimerType(Qt::PreciseTimer);
     frameTimer.setInterval(1000 / fps);
     QObject::connect(&frameTimer, &QTimer::timeout, [&]() {
         context.makeCurrent(&offscreen);

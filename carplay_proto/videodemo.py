@@ -225,8 +225,9 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
     pipeline = None
     width,height,fps=1920,720,30
     if live:
-        from .displaysettings import load_settings
-        width,height,fps=load_settings()
+        from .displaysettings import load_settings, publish_display
+        publish_display(display)
+        width,height,fps=load_settings(display=display)
         print('Projection settings: {}x{} {}fps'.format(width,height,fps),flush=True)
     if not live:
         with open(path,'rb') as demo_file:

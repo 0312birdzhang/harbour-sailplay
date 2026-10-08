@@ -27,9 +27,11 @@ def raw_ecdsa_to_der(signature):
 
 
 class PinnedAccessory:
-    def __init__(self, filename):
-        with open(filename) as source:
-            pin = json.load(source)
+    def __init__(self, filename=None, pin=None):
+        if pin is None:
+            with open(filename) as source:
+                pin = json.load(source)
+        self.pending_pin = None
         if pin['algorithm'] != 'ecdsa-p256-sha256':
             raise ValueError('unsupported accessory key algorithm')
         self.certificate_hash = pin['certificate_sha256']
@@ -88,7 +90,80 @@ class PinnedAccessory:
                                                   digest_buffer, len(challenge))
             if result != 1:
                 raise ValueError('accessory challenge signature rejected')
+            if self.pending_pin:
+                path, pin = self.pending_pin
+                descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(descriptor, 'w') as output:
+                    json.dump(pin, output)
+                self.pending_pin = None
         finally:
             if context:
                 self.crypto.EVP_PKEY_CTX_free(context)
             self.crypto.EVP_PKEY_free(key)
+
+
+def certificate_key(certificate):
+    """Extract exactly one P256 certificate key through system libcrypto."""
+    crypto = ctypes.CDLL(ctypes.util.find_library('crypto'))
+    vp = ctypes.c_void_p
+    signatures = {
+        'd2i_CMS_ContentInfo': ([vp, ctypes.POINTER(vp), ctypes.c_long], vp),
+        'CMS_get1_certs': ([vp], vp), 'CMS_ContentInfo_free': ([vp], None),
+        'OPENSSL_sk_num': ([vp], ctypes.c_int), 'OPENSSL_sk_value': ([vp, ctypes.c_int], vp),
+        'OPENSSL_sk_free': ([vp], None), 'X509_free': ([vp], None),
+        'X509_get_pubkey': ([vp], vp), 'i2d_PUBKEY': ([vp, ctypes.POINTER(vp)], ctypes.c_int),
+        'EVP_PKEY_free': ([vp], None),
+    }
+    for name, (arguments, result) in signatures.items():
+        function = getattr(crypto, name)
+        function.argtypes, function.restype = arguments, result
+    buffer = ctypes.create_string_buffer(certificate)
+    cursor = ctypes.cast(buffer, vp)
+    cms = crypto.d2i_CMS_ContentInfo(None, ctypes.byref(cursor), len(certificate))
+    if not cms:
+        raise ValueError('invalid accessory PKCS7 certificate')
+    stack = key = None
+    try:
+        stack = crypto.CMS_get1_certs(cms)
+        if not stack or crypto.OPENSSL_sk_num(stack) != 1:
+            raise ValueError('expected exactly one accessory certificate')
+        key = crypto.X509_get_pubkey(crypto.OPENSSL_sk_value(stack, 0))
+        if not key:
+            raise ValueError('accessory certificate has no public key')
+        length = crypto.i2d_PUBKEY(key, None)
+        if not 0 < length <= 1024:
+            raise ValueError('invalid accessory public key length')
+        output = ctypes.create_string_buffer(length)
+        pointer = ctypes.cast(output, vp)
+        if crypto.i2d_PUBKEY(key, ctypes.byref(pointer)) != length:
+            raise ValueError('accessory key encoding failed')
+        encoded = output.raw
+        prefix = bytes.fromhex('3059301306072a8648ce3d020106082a8648ce3d03010703420004')
+        if len(encoded) != 91 or not encoded.startswith(prefix):
+            raise ValueError('only P256 accessory certificates are supported')
+        return encoded
+    finally:
+        if key: crypto.EVP_PKEY_free(key)
+        if stack:
+            for index in range(crypto.OPENSSL_sk_num(stack)):
+                crypto.X509_free(crypto.OPENSSL_sk_value(stack, index))
+            crypto.OPENSSL_sk_free(stack)
+        crypto.CMS_ContentInfo_free(cms)
+
+
+def paired_accessory(certificate, path, fallback=None):
+    """First-use pin for a paired device; persist only after challenge proof.
+
+    This proves key possession, not trust in an Apple CA. Existing pins are
+    immutable: a changed certificate fails begin() rather than being relearned.
+    """
+    if os.path.exists(path):
+        return PinnedAccessory(path)
+    digest = hashlib.sha256(certificate).hexdigest()
+    if fallback and hmac.compare_digest(digest, fallback.certificate_hash):
+        return fallback
+    pin = {'algorithm': 'ecdsa-p256-sha256', 'certificate_sha256': digest,
+           'public_key_der': base64.b64encode(certificate_key(certificate)).decode('ascii')}
+    authenticator = PinnedAccessory(pin=pin)
+    authenticator.pending_pin = (path, pin)
+    return authenticator

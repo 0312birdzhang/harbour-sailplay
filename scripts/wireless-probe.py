@@ -19,12 +19,12 @@ import subprocess
 import fcntl
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from carplay_proto.bluezadapter import select_adapter, adapter_name
+from carplay_proto.bluezadapter import select_adapter, adapter_name, select_head_unit, previous_head_unit, remember_head_unit
 from carplay_proto.iap2link import (ACK, DETECT, EAK, RST, SYN, Decoder,
                                    Packet, encode, parse_synchronization,
                                    synchronization)
 from carplay_proto.wire import Frame, Framer, encode_param
-from carplay_proto.accessoryauth import PinnedAccessory
+from carplay_proto.accessoryauth import PinnedAccessory, paired_accessory
 from carplay_proto.wireless import parse_wifi_configuration, request_wifi_configuration, parse_start_session
 
 PHONE_UUID = '00000000-deca-fade-deca-deafdecacafe'
@@ -83,7 +83,7 @@ def media_active(path='/run/sailplay-media.lock'):
 
 def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
           announce_wireless=False, local_address=None, session_out=None, wifi_handover=False,sustained=False,
-          local_name='SailfishOS'):
+          local_name='SailfishOS', paired_pin_path=None):
     handover_started = False
     decoder, csm = Decoder(), Framer()
     deadline = time.monotonic() + duration if duration else float('inf')
@@ -196,10 +196,12 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                                              os.O_TRUNC | os.O_NOFOLLOW, 0o600)
                                         with os.fdopen(descriptor, 'wb') as output:
                                             output.write(certificate)
+                                    if paired_pin_path:
+                                        authenticator = paired_accessory(certificate, paired_pin_path, authenticator)
                                     if authenticator:
                                         challenge = authenticator.begin(certificate)
                                         outgoing.append(Frame(0xaa02, encode_param(0, challenge)))
-                                        logging.info('certificate matches observed pin; random challenge queued')
+                                        logging.info('accessory certificate selected; random challenge queued')
                                     else:
                                         logging.info('accessory certificate received; challenge verification disabled')
                                 elif frame.message_id == 0xaa03:
@@ -297,6 +299,10 @@ def main():
     objects = dbus.Interface(bus.get_object('org.bluez', '/'),
                              'org.freedesktop.DBus.ObjectManager').GetManagedObjects()
     adapter, args.device = select_adapter(objects, args.device)
+    args.device = select_head_unit(objects, args.device, previous_head_unit())
+    if args.device and objects.get(args.device, {}).get('org.bluez.Device1', {}).get('Connected'):
+        remember_head_unit(args.device)
+    adapter, args.device = select_adapter(objects, args.device)
     logging.info('using Bluetooth adapter %s, target %s', adapter, args.device)
     local_address = str(dbus.Interface(bus.get_object('org.bluez', adapter),
                             'org.freedesktop.DBus.Properties').Get('org.bluez.Adapter1', 'Address'))
@@ -316,12 +322,18 @@ def main():
                 logging.info('replacing previous RFCOMM channel for %s', device)
                 retire_worker(previous)
             stop = threading.Event()
+            certificate_directory = '/var/lib/sailplay/accessories'
+            os.makedirs(certificate_directory, mode=0o700, exist_ok=True)
+            certificate_path = os.path.join(certificate_directory, str(device).rsplit('/', 1)[1] + '.der')
+            device_props = dbus.Interface(bus.get_object('org.bluez', device),
+                                         'org.freedesktop.DBus.Properties').GetAll('org.bluez.Device1')
+            pin_path = certificate_path[:-4] + '.json' if device_props.get('Paired') else None
             adapter_props = dbus.Interface(bus.get_object('org.bluez', adapter),
                                           'org.freedesktop.DBus.Properties').GetAll('org.bluez.Adapter1')
             thread = threading.Thread(target=probe, args=(sock, stop, args.seconds,
-                                                         args.certificate_out, args.accessory_key,
+                                                         args.certificate_out or certificate_path, args.accessory_key,
                                                          args.announce_wireless, local_address, args.session_out, args.wifi_handover,args.sustained,
-                                                         adapter_name(adapter_props)))
+                                                         adapter_name(adapter_props), pin_path))
             workers[str(device)] = (stop, thread, sock)
             thread.start()
             logging.info('RFCOMM connected device=%s', device)
@@ -350,6 +362,13 @@ def main():
     if args.device:
         connecting = [False]
         def connect():
+            objects = dbus.Interface(bus.get_object('org.bluez', '/'),
+                                     'org.freedesktop.DBus.ObjectManager').GetManagedObjects()
+            selected = select_head_unit(objects, args.device, previous_head_unit())
+            if selected and selected.startswith(adapter + '/') and selected != args.device:
+                logging.info('switching active CarPlay target: %s', selected)
+                retire_worker(workers.pop(args.device, None))
+                args.device = selected
             worker = workers.get(args.device)
             if connecting[0] or (worker and worker[1].is_alive()) or media_active():
                 return False
@@ -378,6 +397,8 @@ def main():
                 logging.info('Bluetooth power changed; rebuilding phone advertisement and profiles')
                 loop.quit()
                 return
+            if interface == 'org.bluez.Device1' and 'Connected' in changed and changed['Connected']:
+                GLib.timeout_add(1000, connect)
             if path == args.device and interface == 'org.bluez.Device1' and 'Connected' in changed:
                 if changed['Connected']:
                     logging.info('HU Bluetooth connected; scheduling CarPlay profile handshake')

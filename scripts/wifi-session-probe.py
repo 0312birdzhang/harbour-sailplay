@@ -104,6 +104,15 @@ def main():
                             dbus.Dictionary({'key_mgmt': dbus.String('WPA-PSK'),
                                              'proto': dbus.String('RSN')}, signature='sv'))
                 print('HU network only: selected WPA2-PSK instead of SAE', flush=True)
+                # ConnMan selects the network before NetworkAdded reaches our
+                # GLib loop. Updating it alone leaves the first attempt on SAE.
+                # Re-select only this HU network to apply the new configuration.
+                interface_path = str(path).split('/Networks/')[0]
+                interface = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', interface_path),
+                                           'fi.w1.wpa_supplicant1.Interface')
+                interface.Disconnect()
+                interface.SelectNetwork(path)
+                print('HU network only: restarted association with WPA2 configuration', flush=True)
         bus.add_signal_receiver(network_added, signal_name='NetworkAdded',
                                 dbus_interface='fi.w1.wpa_supplicant1.Interface', bus_name='fi.w1.wpa_supplicant1')
     if args.trace_supplicant:

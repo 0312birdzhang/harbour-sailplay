@@ -4,7 +4,7 @@ Wireless CarPlay phone/source implementation for SailfishOS, tested on Xiaomi Pa
 
 ## Current status
 
-Version 0.1.0-27 includes Bluetooth RFCOMM/iAP2, accessory certificate pinning and challenge verification, ConnMan Wi-Fi handover, encrypted AirPlay control/video/audio, a virtual 1920x720 compositor and reverse touch input.
+Version 0.1.0-33 includes Bluetooth RFCOMM/iAP2, accessory certificate pinning and challenge verification, ConnMan Wi-Fi handover, encrypted AirPlay control/video/audio, a virtual 1920x720 compositor and reverse touch input.
 
 - Continuous projection, application launching and touch have been confirmed on the head unit.
 - A standalone Sailplay tablet app selects the applications shown on the car display; changes save automatically.
@@ -17,6 +17,18 @@ Version 0.1.0-27 includes Bluetooth RFCOMM/iAP2, accessory certificate pinning a
 - Return to the original head-unit UI closes only the screen stream, keeping audio and control connected. Native UI switching was confirmed on the head unit; its requestUI event also re-established video. The packaged return tile, head-unit CarPlay re-entry and restored touch were confirmed on the tested head unit.
 
 ## Source layout
+
+Version 33 uses Sailfish Silica SlideshowView for home-page drag and animated snapping. It removes the custom swipe handlers introduced in version 32; application tiles use normal MouseArea clicks and allow the slideshow to take over drag gestures. Page dots change the slideshow currentIndex. Version 33 was installed on JollaPhone2026; projection resumed, QML loaded without errors and capture remained about 29.5fps.
+
+Version 32 removes home-page drag, inertia and snap animations. Horizontal swipes switch one page immediately on release; tapping page indicators also jumps immediately. Swipe gestures over application tiles do not launch the application.
+
+Version 31 reads AirPlay display widthPixels, heightPixels and maxFPS. Resolution choices are native size, 5/6 and 2/3 encoder scaling, recalculated per head unit; they are hidden until display capabilities are known. Frame rate never exceeds the advertised maximum (HIGHLANDER reports 1920x720, 30fps). The software encoder and same-size RGBA-to-YUV conversion use AArch64 NEON, keep only the latest queued frame, avoid additional capture-interval delay after conversion and log measured encoding throughput. On-phone conversion checks matched the scalar implementation in 16 cases, including inverted frames, padded stride and I420/NV12 output.
+
+The shm reader retries a writer-busy sequence after 1ms instead of skipping a complete frame interval. On JollaPhone2026 with HIGHLANDER at native 1920x720, final capture throughput was 29.3–29.5fps and transmitted video about 30fps, up from about 10fps before these changes. Management QML loaded on-device without QML errors. The user confirmed clearly smoother swiping on the head unit.
+
+Version 30 re-selects the head-unit Wi-Fi network after applying WPA2-PSK. ConnMan had already started SAE association before the NetworkAdded callback could change its configuration, causing invalid-key on HIGHLANDER. The scoped re-selection connected JollaPhone2026 and sustained projection for more than six minutes; full cold-boot recovery remains to be verified.
+
+Version 28 prefers a currently connected paired CarPlay accessory for automatic and manual reconnect. Accessory keys are pinned per Bluetooth device after a successful first challenge; a changed certificate is rejected. First-use pinning proves key possession, not Apple CA trust. Startup also restores Bluetooth connectability where supported.
 
 Version 27 fixes management-app startup on Sailfish Silica by handling resolution/fps selection on MenuItem clicks instead of the unsupported ComboBox activated signal. QML loading was verified on JollaPhone2026.
 
@@ -40,7 +52,7 @@ python3 -m pytest
 python3 -m unittest discover -s tests -p '*unittest.py'
 ```
 
-The device uses system OpenSSL and PulseAudio; development tests use Python cryptography. The latest focused unittest run passed 53 tests. Version 22 adds bounded discovery and a single Wi-Fi power refresh when the HU is visible to supplicant but absent from ConnMan; this recovery still requires device validation.
+The device uses system OpenSSL and PulseAudio; development tests use Python cryptography. The latest focused unittest run passed 61 tests. Version 22 adds bounded discovery and a single Wi-Fi power refresh when the HU is visible to supplicant but absent from ConnMan; this recovery still requires device validation.
 
 ## Build and device configuration
 

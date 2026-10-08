@@ -9,6 +9,9 @@
 
 #include <cstdlib>
 #include <cstring>
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 
 namespace imira {
 
@@ -62,6 +65,49 @@ uint8_t *FrameConverter::convert(const uint8_t *src, int srcW, int srcH,
     uint8_t *dstC = dst + ySize;                 // NV12: interleaved UV
     uint8_t *dstU = dst + ySize;                 // I420: U then V
     uint8_t *dstV = dst + ySize + ySize / 4;
+
+#if defined(__aarch64__)
+    // Projection shm already has the encoder's dimensions. Avoid the general
+    // scaler's coordinate divisions and process eight RGBA pixels at a time.
+    // Keep the same BT.601 coefficients and point-sampled chroma as below.
+    if (rotation == 0 && srcW == m_dw && srcH == m_dh && (m_dw % 8) == 0) {
+        for (int y = 0; y < m_dh; ++y) {
+            const uint8_t *row = src + (size_t)(yInverted ? srcH - 1 - y : y) * srcStride;
+            for (int x = 0; x < m_dw; x += 8) {
+                const uint8x8x4_t rgba = vld4_u8(row + x * 4);
+                uint16x8_t luma = vmull_u8(rgba.val[0], vdup_n_u8(66));
+                luma = vmlal_u8(luma, rgba.val[1], vdup_n_u8(129));
+                luma = vmlal_u8(luma, rgba.val[2], vdup_n_u8(25));
+                luma = vaddq_u16(luma, vdupq_n_u16(128));
+                vst1_u8(dstY + (size_t)y * m_dw + x,
+                         vadd_u8(vshrn_n_u16(luma, 8), vdup_n_u8(16)));
+                if ((y & 1) == 0) {
+                    const int16x8_t r = vreinterpretq_s16_u16(vmovl_u8(rgba.val[0]));
+                    const int16x8_t g = vreinterpretq_s16_u16(vmovl_u8(rgba.val[1]));
+                    const int16x8_t b = vreinterpretq_s16_u16(vmovl_u8(rgba.val[2]));
+                    int16x8_t u = vmulq_n_s16(b, 112);
+                    u = vmlsq_n_s16(u, r, 38); u = vmlsq_n_s16(u, g, 74);
+                    int16x8_t v = vmulq_n_s16(r, 112);
+                    v = vmlsq_n_s16(v, g, 94); v = vmlsq_n_s16(v, b, 18);
+                    const uint8x8_t us = vadd_u8(vreinterpret_u8_s8(vshrn_n_s16(vaddq_s16(u, vdupq_n_s16(128)), 8)), vdup_n_u8(128));
+                    const uint8x8_t vs = vadd_u8(vreinterpret_u8_s8(vshrn_n_s16(vaddq_s16(v, vdupq_n_s16(128)), 8)), vdup_n_u8(128));
+                    const uint8x8_t ue = vuzp_u8(us, vdup_n_u8(0)).val[0];
+                    const uint8x8_t ve = vuzp_u8(vs, vdup_n_u8(0)).val[0];
+                    const size_t offset = (size_t)(y / 2) * (m_dw / 2) + x / 2;
+                    if (m_nv12) {
+                        vst1_u8(dstC + offset * 2, vzip_u8(ue, ve).val[0]);
+                    } else {
+                        const uint32_t up = vget_lane_u32(vreinterpret_u32_u8(ue), 0);
+                        const uint32_t vp = vget_lane_u32(vreinterpret_u32_u8(ve), 0);
+                        memcpy(dstU + offset, &up, 4); memcpy(dstV + offset, &vp, 4);
+                    }
+                }
+            }
+        }
+        if (outSize) *outSize = size;
+        return dst;
+    }
+#endif
 
     const int cw = (rotation == 90 || rotation == 270) ? srcH : srcW;
     const int ch = (rotation == 90 || rotation == 270) ? srcW : srcH;

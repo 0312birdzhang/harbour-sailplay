@@ -1,12 +1,13 @@
 import QtQuick 2.0
 import QtQuick.Window 2.0
+import Sailfish.Silica 1.0 as Silica
 Window {
     id: projectionWindow
     visible: true; width: Number(Qt.application.arguments[2] || 1920); height: Number(Qt.application.arguments[3] || 720); color: "#17203a"
     title: "Sailife UI" // Compositor fullscreen-shell identifier.
     Item {
     id: root
-    width: 1920; height: 720
+    width: 1920; height: projectionWindow.height / scale
     scale: projectionWindow.width / 1920
     transformOrigin: Item.TopLeft
     property string clockText: Qt.formatDateTime(new Date(), "hh:mm")
@@ -82,13 +83,15 @@ Window {
             MouseArea { id: homeTouch; anchors.fill: parent; onClicked: carController.homeClicked() }
         }
     }
-    ListView {
+    Silica.SlideshowView {
         id: pages
         visible: carController.currentApp === ""
         x: dock.width; width: root.width - x; height: root.height - 66
-        orientation: ListView.Horizontal; snapMode: ListView.SnapOneItem
-        boundsBehavior: Flickable.StopAtBounds; highlightRangeMode: ListView.StrictlyEnforceRange
-        preferredHighlightBegin: 0; preferredHighlightEnd: 0; highlightMoveDuration: 230
+        itemWidth: width; itemHeight: height
+        orientation: Qt.Horizontal
+        function goToPage(page) {
+            currentIndex = Math.max(0, Math.min(root.pageCount - 1, page))
+        }
         clip: true; model: root.pageCount
         delegate: Item {
             width: pages.width; height: pages.height
@@ -139,7 +142,7 @@ Window {
             model: root.pageCount
             Rectangle {
                 width: 12; height: 12; radius: 6; color: index === pages.currentIndex ? "white" : "#788193"
-                MouseArea { anchors.fill: parent; anchors.margins: -12; onClicked: pages.currentIndex = index }
+                MouseArea { anchors.fill: parent; anchors.margins: -12; onClicked: pages.goToPage(index) }
             }
         }
     }

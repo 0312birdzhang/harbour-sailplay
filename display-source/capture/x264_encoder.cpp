@@ -95,7 +95,6 @@ bool X264Encoder::encode(const uint8_t *i420, size_t size)
     if (sz > 0 && m_cb && nals) {
         for (int i = 0; i < i_nals; i++) {
             bool idr = (nals[i].i_type == NAL_SLICE_IDR);
-            fprintf(stderr, "cap NAL type=%d size=%d\n", nals[i].i_type, nals[i].i_payload);
             m_cb(nals[i].p_payload, nals[i].i_payload, idr);
         }
     }

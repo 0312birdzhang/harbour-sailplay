@@ -78,18 +78,31 @@ int main(int argc, char **argv)
     conv.configure(width, height, false /* I420 */);
 
     std::thread encThread([&]() {
+        auto report = std::chrono::steady_clock::now();
+        double encodeMs = 0;
+        unsigned count = 0;
         while (!g_quit) {
             std::vector<uint8_t> f;
             {
                 std::unique_lock<std::mutex> lk(g_mtx);
                 g_cv.wait(lk, [] { return !g_frames.empty() || g_quit; });
                 if (g_quit && g_frames.empty()) break;
-                f = std::move(g_frames.front());
+                f = std::move(g_frames.back());
+                while (g_frames.size() > 1) g_frames.pop();
                 g_frames.pop();
             }
+            const auto before = std::chrono::steady_clock::now();
             if (!enc.encode(f.data(), f.size()))
                 fprintf(stderr, "carlife-capture: encode failed: %s\n",
                         enc.lastError().c_str());
+            const auto now = std::chrono::steady_clock::now();
+            encodeMs += std::chrono::duration<double, std::milli>(now - before).count();
+            ++count;
+            const double elapsed = std::chrono::duration<double>(now - report).count();
+            if (elapsed >= 5) {
+                fprintf(stderr, "capture stats: fps=%.1f encode_ms=%.1f\n", count / elapsed, encodeMs / count);
+                report = now; count = 0; encodeMs = 0;
+            }
         }
     });
 
@@ -101,8 +114,8 @@ int main(int argc, char **argv)
         if (frame) {
             {
                 std::lock_guard<std::mutex> lk(g_mtx);
-                if (g_frames.size() < 8)
-                    g_frames.emplace(frame, frame + sz);
+                while (!g_frames.empty()) g_frames.pop();
+                g_frames.emplace(frame, frame + sz);
             }
             free(frame);
             g_cv.notify_one();

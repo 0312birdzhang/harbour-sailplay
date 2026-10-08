@@ -397,6 +397,8 @@ class CarUiController : public QObject
     Q_PROPERTY(QVariantMap status READ status NOTIFY statusChanged)
     Q_PROPERTY(int resolutionIndex READ resolutionIndex NOTIFY projectionSettingsChanged)
     Q_PROPERTY(int projectionFps READ projectionFps NOTIFY projectionSettingsChanged)
+    Q_PROPERTY(QStringList projectionResolutions READ projectionResolutions NOTIFY projectionSettingsChanged)
+    Q_PROPERTY(int maximumFps READ maximumFps NOTIFY projectionSettingsChanged)
 
 public:
     explicit CarUiController(QObject *parent = nullptr) : QObject(parent)
@@ -408,6 +410,11 @@ public:
                 reloadConfig();
             updateServiceState();
             updateReconnectState();
+            const QDateTime displayStamp = QFileInfo(QStringLiteral("/run/sailplay-display.ini")).lastModified();
+            if (displayStamp != m_displayStamp) {
+                m_displayStamp = displayStamp;
+                emit projectionSettingsChanged();
+            }
         });
         timer->start(1000);
         updateServiceState();
@@ -470,22 +477,32 @@ public:
     QVariantMap status() const { return m_status; }
     int resolutionIndex() const {
         QSettings settings(QDir::homePath() + QStringLiteral("/.config/sailplay/display.ini"), QSettings::IniFormat);
-        const int width = settings.value(QStringLiteral("Display/width"), 1920).toInt();
-        return width == 1600 ? 1 : width == 1280 ? 2 : 0;
+        return qBound(0, settings.value(QStringLiteral("Display/resolutionIndex"), 0).toInt(), 2);
+    }
+    QStringList projectionResolutions() const {
+        QSettings caps(QStringLiteral("/run/sailplay-display.ini"), QSettings::IniFormat);
+        const int width = caps.value(QStringLiteral("Display/width"), 0).toInt();
+        const int height = caps.value(QStringLiteral("Display/height"), 0).toInt();
+        QStringList choices;
+        if (width < 320 || height < 240) return choices;
+        for (int n : {6, 5, 4})
+            choices << QStringLiteral("%1 × %2").arg(width * n / 6 / 2 * 2).arg(height * n / 6 / 2 * 2);
+        return choices;
+    }
+    int maximumFps() const {
+        QSettings caps(QStringLiteral("/run/sailplay-display.ini"), QSettings::IniFormat);
+        return qBound(1, caps.value(QStringLiteral("Display/maxFPS"), 30).toInt(), 60);
     }
     int projectionFps() const {
         QSettings settings(QDir::homePath() + QStringLiteral("/.config/sailplay/display.ini"), QSettings::IniFormat);
-        return settings.value(QStringLiteral("Display/fps"), 30).toInt() == 60 ? 60 : 30;
+        return qMin(settings.value(QStringLiteral("Display/fps"), 30).toInt() == 60 ? 60 : 30, maximumFps());
     }
     Q_INVOKABLE void setProjectionSettings(int index, int fps) {
-        if (index < 0 || index > 2 || (fps != 30 && fps != 60)) return;
-        const int widths[] = {1920, 1600, 1280};
-        const int heights[] = {720, 600, 480};
+        if (index < 0 || index > 2 || fps < 1 || fps > 60) return;
         QDir().mkpath(QDir::homePath() + QStringLiteral("/.config/sailplay"));
         QSettings settings(QDir::homePath() + QStringLiteral("/.config/sailplay/display.ini"), QSettings::IniFormat);
-        settings.setValue(QStringLiteral("Display/width"), widths[index]);
-        settings.setValue(QStringLiteral("Display/height"), heights[index]);
-        settings.setValue(QStringLiteral("Display/fps"), fps);
+        settings.setValue(QStringLiteral("Display/resolutionIndex"), index);
+        settings.setValue(QStringLiteral("Display/fps"), qMin(fps, maximumFps()));
         settings.sync();
         if (settings.status() != QSettings::NoError) {
             m_serviceError = QStringLiteral("Could not save projection settings");
@@ -833,6 +850,7 @@ private:
     QSet<QString> m_hiddenApps;
     QString m_lastHiddenApp;
     QDateTime m_configStamp;
+    QDateTime m_displayStamp;
     bool m_serviceRunning = false;
     bool m_serviceBusy = false;
     QString m_serviceState = QStringLiteral("unknown");
