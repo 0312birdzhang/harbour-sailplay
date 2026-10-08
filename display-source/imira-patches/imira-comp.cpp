@@ -639,6 +639,7 @@ public:
         // Hard-clipped app viewport: even a stale/ignored 1920-wide buffer
         // cannot draw outside the 1780px content area.
         m_contentRoot = new QQuickItem(m_window->contentItem());
+        kDockW = qRound(140.0 * width / 1920.0);
         m_contentRoot->setPosition(QPointF(kDockW, 0));
         m_contentRoot->setSize(QSizeF(m_width - kDockW, m_height));
         m_contentRoot->setClip(true);
@@ -1070,7 +1071,7 @@ private:
     DockItem *m_dock = nullptr;
 
     // CarLife shell/content state (see contentItemAt / pollCarlifeCmd)
-    static const int kDockW = 140;   // carui's own dock width on the left
+    int kDockW = 140;   // scaled to the selected projection resolution
     static const int kContentCropLeft = 28;
     QWaylandSurfaceItem *m_shellItem = nullptr;
     QQuickItem *m_contentRoot = nullptr;

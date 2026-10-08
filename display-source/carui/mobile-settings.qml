@@ -5,6 +5,15 @@ ApplicationWindow {
     id: app
     readonly property bool useChinese: Qt.locale().name.indexOf("zh") === 0
     function textFor(english, chinese) { return useChinese ? chinese : english }
+    function serviceStateText(state) {
+        var labels = { active: textFor("Running", "运行中"),
+                       inactive: textFor("Stopped", "已停止"),
+                       activating: textFor("Starting", "正在启动"),
+                       deactivating: textFor("Stopping", "正在停止"),
+                       failed: textFor("Failed", "启动失败"),
+                       unknown: textFor("Unavailable", "无法读取") }
+        return labels[state] || state
+    }
     allowedOrientations: Orientation.All
     cover: Component {
         CoverBackground {
@@ -48,7 +57,56 @@ ApplicationWindow {
                     id: content
                     width: page.width
                     PageHeader { title: "Sailplay" }
+                    SectionHeader { text: app.textFor("Projection service", "投屏服务") }
+                    TextSwitch {
+                        text: app.textFor("Enable Sailplay", "开启 Sailplay")
+                        description: app.textFor("Service status: ", "服务状态：") + app.serviceStateText(carController.serviceState)
+                        automaticCheck: false
+                        checked: carController.serviceRunning
+                        enabled: !carController.serviceBusy
+                        onClicked: carController.setServiceRunning(!checked)
+                    }
+                    Button {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: carController.serviceBusy ? app.textFor("Processing…", "正在处理…")
+                              : app.textFor("Connect / reconnect to car", "连接车机／重新连接")
+                        enabled: !carController.serviceBusy
+                        onClicked: carController.connectCar()
+                    }
+                    Label {
+                        x: Theme.horizontalPageMargin
+                        width: parent.width - 2 * Theme.horizontalPageMargin
+                        visible: text.length > 0
+                        wrapMode: Text.WordWrap
+                        color: Theme.highlightColor
+                        text: carController.serviceError
+                    }
                     SectionHeader { text: app.textFor("Car display home apps", "车机主页应用") }
+                    ComboBox {
+                        label: app.textFor("Resolution", "分辨率")
+                        currentIndex: carController.resolutionIndex
+                        menu: ContextMenu {
+                            MenuItem { text: "1920 × 720"; onClicked: carController.setProjectionSettings(0, carController.projectionFps) }
+                            MenuItem { text: "1600 × 600"; onClicked: carController.setProjectionSettings(1, carController.projectionFps) }
+                            MenuItem { text: "1280 × 480"; onClicked: carController.setProjectionSettings(2, carController.projectionFps) }
+                        }
+                    }
+                    ComboBox {
+                        label: app.textFor("Frame rate", "帧率")
+                        currentIndex: carController.projectionFps === 60 ? 1 : 0
+                        menu: ContextMenu {
+                            MenuItem { text: "30 fps"; onClicked: carController.setProjectionSettings(carController.resolutionIndex, 30) }
+                            MenuItem { text: "60 fps"; onClicked: carController.setProjectionSettings(carController.resolutionIndex, 60) }
+                        }
+                    }
+                    Label {
+                        x: Theme.horizontalPageMargin
+                        width: parent.width - 2 * Theme.horizontalPageMargin
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: Theme.fontSizeSmall
+                        color: Theme.secondaryColor
+                        text: app.textFor("Saved automatically. Tap Connect / reconnect to car to apply. Compatibility and performance depend on the car and device.", "自动保存，点击“连接车机／重新连接”后生效。实际效果取决于车机兼容性和设备性能。")
+                    }
                     Label {
                         id: saveNotice
                         x: Theme.horizontalPageMargin

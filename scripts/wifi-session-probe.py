@@ -88,6 +88,13 @@ def main():
         return
     with open(args.session) as stream:
         session = json.load(stream)
+    phone_name = session.get('device_name')
+    if not phone_name:
+        from carplay_proto.bluezadapter import select_adapter, adapter_name
+        objects = dbus.Interface(bus.get_object('org.bluez', '/'),
+                                 'org.freedesktop.DBus.ObjectManager').GetManagedObjects()
+        adapter, _ = select_adapter(objects)
+        phone_name = adapter_name(objects[adapter]['org.bluez.Adapter1'])
     if args.force_wpa2:
         def network_added(path, properties):
             network = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', path), 'org.freedesktop.DBus.Properties')
@@ -135,17 +142,30 @@ def main():
     if args.connect and not target:
         # StartSession can precede ConnMan discovering the newly enabled HU AP.
         wifi_path = next((path for path,props in manager.GetTechnologies() if props.get('Type')=='wifi'),None)
-        for attempt in range(6):
-            if wifi_path:
-                try:
-                    dbus.Interface(bus.get_object('net.connman',wifi_path),'net.connman.Technology').Scan(timeout=8)
-                except dbus.DBusException:
-                    pass
-            services=manager.GetServices()
-            target=next((str(path) for path,props in services if props.get('Type')=='wifi' and props.get('Name')==session['ssid']),None)
-            if target:
-                break
-            time.sleep(1)
+        from carplay_proto.wifidiscovery import discover
+        def cached_bss_visible(ssid):
+            try:
+                props = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', '/fi/w1/wpa_supplicant1'),
+                                       'org.freedesktop.DBus.Properties')
+                for interface in props.Get('fi.w1.wpa_supplicant1', 'Interfaces'):
+                    interface_props = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', interface),
+                                                     'org.freedesktop.DBus.Properties')
+                    for bss in interface_props.Get('fi.w1.wpa_supplicant1.Interface', 'BSSs'):
+                        bss_props = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', bss),
+                                                  'org.freedesktop.DBus.Properties')
+                        if bytes(bss_props.Get('fi.w1.wpa_supplicant1.BSS', 'SSID')) == ssid.encode('utf-8'):
+                            return True
+            except dbus.DBusException:
+                pass
+            return False
+        if wifi_path:
+            target, services = discover(manager, wifi_path, session['ssid'],
+                scan=lambda path: dbus.Interface(bus.get_object('net.connman', path),
+                    'net.connman.Technology').Scan(timeout=8),
+                cached_bss_visible=cached_bss_visible,
+                set_powered=lambda path, powered: dbus.Interface(bus.get_object('net.connman', path),
+                    'net.connman.Technology').SetProperty('Powered', dbus.Boolean(powered, variant_level=1)),
+                log=lambda message: print(message, flush=True))
     old = next((str(path) for path, props in services if props.get('Type') == 'wifi' and props.get('State') in ('ready', 'online')), None)
     if not old:
         old=next((str(path) for path,props in services if props.get('Type')=='wifi'
@@ -153,8 +173,10 @@ def main():
     print('HU AP visible={}, existing Wi-Fi connected={}'.format(bool(target), bool(old)), flush=True)
     if not args.connect:
         return
-    if not target or not old:
-        raise RuntimeError('cannot establish a reversible Wi-Fi test')
+    if not target:
+        raise RuntimeError('HU Wi-Fi service unavailable after discovery and recovery')
+    if not old:
+        raise RuntimeError('no previous Wi-Fi service available for restoration')
     already_connected = target == old
     target_props = service(target).GetProperties()
     print('HU pre-connect configuration: {}'.format({k:str(target_props.get(k)) for k in
@@ -254,7 +276,7 @@ def main():
                         timing = TimingServer(client.sock.sock)
                         import uuid
                         setup = {'deviceID':'D8:B0:53:22:CE:CF','macAddress':'D8:B0:53:22:CE:CF',
-                                 'model':'Sailplay1,1','name':'SailfishOS Sailplay','osName':'SailfishOS',
+                                 'model':'Sailplay1,1','name':phone_name,'osName':'SailfishOS',
                                  'osBuildVersion':'5.2','sourceVersion':'566.25.21',
                                  'sessionUUID':str(uuid.uuid4()),'timingPort':timing.port,
                                  'features':[],'statsCollectionEnabled':False}

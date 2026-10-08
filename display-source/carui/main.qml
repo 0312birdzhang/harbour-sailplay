@@ -1,9 +1,14 @@
 import QtQuick 2.0
 import QtQuick.Window 2.0
 Window {
-    id: root
-    visible: true; width: 1920; height: 720; color: "#17203a"
+    id: projectionWindow
+    visible: true; width: Number(Qt.application.arguments[2] || 1920); height: Number(Qt.application.arguments[3] || 720); color: "#17203a"
     title: "Sailife UI" // Compositor fullscreen-shell identifier.
+    Item {
+    id: root
+    width: 1920; height: 720
+    scale: projectionWindow.width / 1920
+    transformOrigin: Item.TopLeft
     property string clockText: Qt.formatDateTime(new Date(), "hh:mm")
     property var status: carController.status
     property var apps: carController.tiles
@@ -143,5 +148,6 @@ Window {
         x: dock.width + 180; y: root.height - 132
         width: root.width - x - 180; height: 66; radius: 16; color: "#ed111a2c"
         Text { anchors.centerIn: parent; text: root.notice; color: "white"; font.pixelSize: 28 }
+    }
     }
 }

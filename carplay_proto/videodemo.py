@@ -223,10 +223,15 @@ class ScreenFeedback:
 def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=15,live=False,on_activity=None):
     display = info['displays'][0]
     pipeline = None
+    width,height,fps=1920,720,30
+    if live:
+        from .displaysettings import load_settings
+        width,height,fps=load_settings()
+        print('Projection settings: {}x{} {}fps'.format(width,height,fps),flush=True)
     if not live:
         with open(path,'rb') as demo_file:
             config,frames = demo_frames(demo_file.read())
-    if (int(display['widthPixels']),int(display['heightPixels'])) != (1920,720):
+    if not live and (int(display['widthPixels']),int(display['heightPixels'])) != (1920,720):
         raise ValueError('demo requires 1920x720 display')
     stream_id = int.from_bytes(__import__('os').urandom(7),'big') or 1
     touch = audio = None
@@ -259,7 +264,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             audio.gain=10**(volume/20) if value['type']=='duckAudio' else 1.0
     if live:
         from .touch import TouchInput
-        touch=TouchInput(info.get('hidDevices',[]),display['uuid'])
+        touch=TouchInput(info.get('hidDevices',[]),display['uuid'],width,height)
     events = None
     video = None
     feedback = None
@@ -272,7 +277,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         if live:
             commands = UiCommands()
             from .display import DisplayPipeline
-            pipeline = DisplayPipeline()
+            pipeline = DisplayPipeline(width,height,fps)
             pipeline.start()
             source = pipeline.frames(seconds)
             first_live_frame = next(source)
@@ -309,7 +314,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         encoder = ScreenEncoder(shared,stream_id)
         if live:
             from .screenstream import ScreenStream
-            screen=ScreenStream(client,address,interface,shared,display,video,stream_id)
+            screen=ScreenStream(client,address,interface,shared,display,video,stream_id,width,height)
             feedback=ScreenFeedback(client,commands,modes,resume,screen)
         if live:
             import itertools
@@ -337,7 +342,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                     sample.write(b'\x00\x00\x00\x01'+sps+b'\x00\x00\x00\x01'+config[pps_pos+2:pps_pos+2+pps_size])
                     sample.flush()
                 if not live:
-                    video.sendall(encoder.config(config,1920,720))
+                    video.sendall(encoder.config(config,width,height))
                 previous_config=config
                 print('Screen configuration sent: {} bytes'.format(len(config)),flush=True)
             delay = 0 if live else start+count/30-time.monotonic()

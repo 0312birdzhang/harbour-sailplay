@@ -53,7 +53,8 @@ class AnnexBFrames:
 
 
 class DisplayPipeline:
-    def __init__(self):
+    def __init__(self,width=1920,height=720,fps=30):
+        self.width,self.height,self.fps=width,height,fps
         self.processes=[]
         self.logs=[]
         self.fd=None
@@ -76,16 +77,17 @@ class DisplayPipeline:
         os.chmod(self.fifo,0o666)
         self.fd=os.open(self.fifo,os.O_RDONLY|os.O_NONBLOCK|os.O_NOFOLLOW)
         comp=self.launch('comp','env XDG_RUNTIME_DIR=/run/user/100000 WAYLAND_DISPLAY=../../display/wayland-0 '
-                         '/opt/sailplay/imira-comp --width 1920 --height 720')
+                         '/opt/sailplay/imira-comp --width {} --height {} --fps {}'.format(self.width,self.height,self.fps))
         deadline=time.monotonic()+8
         while not os.path.exists('/run/user/100000/imira-comp-0'):
             if comp.poll() is not None or time.monotonic()>deadline:
                 raise RuntimeError('virtual compositor failed to start')
             time.sleep(.1)
         self.launch('carui','env XDG_RUNTIME_DIR=/run/user/100000 QT_QPA_PLATFORM=wayland '
-                    'WAYLAND_DISPLAY=imira-comp-0 /opt/sailplay/carui/carui /opt/sailplay/carui/main.qml')
+                    'WAYLAND_DISPLAY=imira-comp-0 /opt/sailplay/carui/carui /opt/sailplay/carui/main.qml {} {}'.format(self.width,self.height))
         self.capture=self.launch('capture','env XDG_RUNTIME_DIR=/run/user/100000 /opt/sailplay/carlife-capture '
-                    '--input shm --out '+self.fifo+' --width 1920 --height 720 --fps 30 --bitrate 4000000')
+                    '--input shm --out '+self.fifo+' --width {} --height {} --fps {} --bitrate {}'.format(
+                        self.width,self.height,self.fps,4000000*self.fps//30))
         print('Sailife virtual UI/capture started; dedicated CarPlay FIFO',flush=True)
         return self
 

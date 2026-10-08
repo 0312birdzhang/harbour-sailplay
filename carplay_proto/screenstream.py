@@ -10,7 +10,8 @@ from .videodemo import ScreenEncoder
 
 
 class ScreenStream:
-    def __init__(self, client, address, interface, shared, display, video, stream_id):
+    def __init__(self, client, address, interface, shared, display, video, stream_id, width=1920, height=720):
+        self.width,self.height=width,height
         self.client, self.address, self.interface = client, address, interface
         self.shared, self.display = shared, display
         self.video = video
@@ -72,7 +73,7 @@ class ScreenStream:
             if self.need_idr and not any(n and n[0] & 31 == 5 for n in nals):
                 return False
             if config != self.config:
-                self.video.sendall(self.encoder.config(config, 1920, 720))
+                self.video.sendall(self.encoder.config(config, self.width, self.height))
                 self.config = config
             self.video.sendall(self.encoder.frame(nals, timestamp))
             if self.need_idr:

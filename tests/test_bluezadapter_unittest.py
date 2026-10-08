@@ -1,8 +1,15 @@
 import unittest
-from carplay_proto.bluezadapter import select_adapter
+from carplay_proto.bluezadapter import select_adapter, adapter_name
 
 
 class AdapterTests(unittest.TestCase):
+    def test_name_prefers_user_alias_and_preserves_chinese(self):
+        self.assertEqual(adapter_name({'Alias': '我的手机', 'Name': 'hardware'}), '我的手机')
+
+    def test_name_falls_back_when_alias_is_empty(self):
+        self.assertEqual(adapter_name({'Alias': '', 'Name': 'Jolla Phone'}), 'Jolla Phone')
+        self.assertEqual(adapter_name({}), 'SailfishOS')
+
     def test_remap_target_when_hci0_is_not_exported(self):
         objects = {'/org/bluez/hci1': {'org.bluez.Adapter1': {'Powered': True}}}
         self.assertEqual(select_adapter(objects, '/org/bluez/hci0/dev_AB_CD'),

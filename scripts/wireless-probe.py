@@ -19,7 +19,7 @@ import subprocess
 import fcntl
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from carplay_proto.bluezadapter import select_adapter
+from carplay_proto.bluezadapter import select_adapter, adapter_name
 from carplay_proto.iap2link import (ACK, DETECT, EAK, RST, SYN, Decoder,
                                    Packet, encode, parse_synchronization,
                                    synchronization)
@@ -82,7 +82,8 @@ def media_active(path='/run/sailplay-media.lock'):
 
 
 def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
-          announce_wireless=False, local_address=None, session_out=None, wifi_handover=False,sustained=False):
+          announce_wireless=False, local_address=None, session_out=None, wifi_handover=False,sustained=False,
+          local_name='SailfishOS'):
     handover_started = False
     decoder, csm = Decoder(), Framer()
     deadline = time.monotonic() + duration if duration else float('inf')
@@ -97,6 +98,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
     sequence = 0
     retry_at = 0
     retries = 0
+    detection_deadline = time.monotonic() + 15
     authenticator = None
     authenticated = False
     peer_received_messages = set()
@@ -106,6 +108,8 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
         authenticator = PinnedAccessory(accessory_key) if accessory_key else None
         while not stop.is_set() and time.monotonic() < deadline:
             now = time.monotonic()
+            if not negotiated and now >= detection_deadline:
+                raise ValueError('iAP2 handshake timeout; release RFCOMM for retry')
             if sync_at and not local_syn_acked and now >= sync_at:
                 sock.sendall(encode(Packet(SYN | ACK, 0, last_rx, 0, sync_payload)))
                 sync_at = now + 1
@@ -213,7 +217,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                         device_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, 'org.sailplay:' + local_address)).upper()
                                         outgoing.extend([
                                             Frame(0x4e0c, encode_param(0, device_id.encode('ascii') + b'\x00')),
-                                            Frame(0x4e09, encode_param(0, b'SailfishOS Sailplay\x00')),
+                                            Frame(0x4e09, encode_param(0, local_name.encode('utf-8') + b'\x00')),
                                             Frame(0x4e0e, encode_param(0, local_address.encode('ascii') + b'\x00')),
                                             Frame(0x4e0d, encode_param(0, b'\x01')),
                                         ])
@@ -244,7 +248,9 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                                              os.O_TRUNC | os.O_NOFOLLOW, 0o600)
                                         os.fchmod(descriptor, 0o600)
                                         with os.fdopen(descriptor, 'w') as output:
-                                            json.dump(start.as_dict(), output)
+                                            session_data = start.as_dict()
+                                            session_data['device_name'] = local_name
+                                            json.dump(session_data, output)
                                         if wifi_handover and not handover_started:
                                             handover_command=['systemd-run', '--unit=sailplay-handover-{}-{}'.format(os.getpid(),time.monotonic_ns()),
                                                 sys.executable, os.path.join(os.path.dirname(__file__), 'wifi-session-probe.py'),
@@ -310,9 +316,12 @@ def main():
                 logging.info('replacing previous RFCOMM channel for %s', device)
                 retire_worker(previous)
             stop = threading.Event()
+            adapter_props = dbus.Interface(bus.get_object('org.bluez', adapter),
+                                          'org.freedesktop.DBus.Properties').GetAll('org.bluez.Adapter1')
             thread = threading.Thread(target=probe, args=(sock, stop, args.seconds,
                                                          args.certificate_out, args.accessory_key,
-                                                         args.announce_wireless, local_address, args.session_out, args.wifi_handover,args.sustained))
+                                                         args.announce_wireless, local_address, args.session_out, args.wifi_handover,args.sustained,
+                                                         adapter_name(adapter_props)))
             workers[str(device)] = (stop, thread, sock)
             thread.start()
             logging.info('RFCOMM connected device=%s', device)
@@ -363,6 +372,12 @@ def main():
                 done(error)
             return False
         def device_changed(interface, changed, invalidated, path=None):
+            if path == adapter and interface == 'org.bluez.Adapter1' and 'Powered' in changed:
+                # Re-register SDP and reapply the EIR through our systemd restart.
+                # Existing sockets/profiles cannot represent a new controller lifetime.
+                logging.info('Bluetooth power changed; rebuilding phone advertisement and profiles')
+                loop.quit()
+                return
             if path == args.device and interface == 'org.bluez.Device1' and 'Connected' in changed:
                 if changed['Connected']:
                     logging.info('HU Bluetooth connected; scheduling CarPlay profile handshake')

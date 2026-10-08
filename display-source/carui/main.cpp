@@ -12,6 +12,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSettings>
+#include <QMap>
+#include <QRegExp>
 #include <QDir>
 #include <QDateTime>
 #include <QDBusConnection>
@@ -110,8 +112,18 @@ static bool parseDesktopFile(const QString &path, QString *name, QString *exec,
     *hidden = false;
     QString logicalId;
     QString translationCatalog;
+    QMap<QString, QString> localizedNames;
+    bool desktopEntry = false;
     while (!f.atEnd()) {
         QString line = QString::fromUtf8(f.readLine()).trimmed();
+        if (line.startsWith(QLatin1Char('#')))
+            continue;
+        if (line.startsWith(QLatin1Char('['))) {
+            desktopEntry = line == QStringLiteral("[Desktop Entry]");
+            continue;
+        }
+        if (!desktopEntry)
+            continue;
         int eq = line.indexOf(QLatin1Char('='));
         if (eq < 0)
             continue;
@@ -120,6 +132,8 @@ static bool parseDesktopFile(const QString &path, QString *name, QString *exec,
         QString val = line.mid(eq + 1).trimmed();
         if (key == QStringLiteral("Name"))
             *name = val;
+        else if (key.startsWith(QStringLiteral("Name[")) && key.endsWith(QLatin1Char(']')))
+            localizedNames.insert(key.mid(5, key.size() - 6), val);
         else if (key == QStringLiteral("X-MeeGo-Logical-Id"))
             logicalId = val;
         else if (key == QStringLiteral("X-MeeGo-Translation-Catalog"))
@@ -132,11 +146,32 @@ static bool parseDesktopFile(const QString &path, QString *name, QString *exec,
                   || key == QStringLiteral("Hidden")) && val == QStringLiteral("true"))
             *hidden = true;
     }
-    if (!logicalId.isEmpty() && !translationCatalog.isEmpty()) {
+    // Desktop-entry names are localized independently of the application's
+    // QML translation catalog. Prefer the current locale, then its language.
+    QString locale = QString::fromUtf8(qgetenv("LC_MESSAGES"));
+    if (locale.isEmpty()) locale = QLocale::system().name();
+    locale.remove(QRegExp(QStringLiteral("\\.[^@]*")));
+    const int modifierAt = locale.indexOf(QLatin1Char('@'));
+    const QString baseLocale = locale.section(QLatin1Char('@'), 0, 0);
+    const QString language = baseLocale.section(QLatin1Char('_'), 0, 0);
+    QStringList nameLocales;
+    nameLocales << locale << baseLocale;
+    if (modifierAt >= 0)
+        nameLocales << language + locale.mid(modifierAt);
+    nameLocales << language;
+    bool hasLocalizedName = false;
+    for (const QString &candidate : nameLocales) {
+        const QString localized = localizedNames.value(candidate);
+        if (!localized.isEmpty()) {
+            *name = localized;
+            hasLocalizedName = true;
+            break;
+        }
+    }
+    if (!hasLocalizedName && !logicalId.isEmpty() && !translationCatalog.isEmpty()) {
         QTranslator translator;
-        const QString locale = QLocale::system().name();
         const QString file = QStringLiteral("/usr/share/translations/")
-                           + translationCatalog + QLatin1Char('-') + locale
+                           + translationCatalog + QLatin1Char('-') + baseLocale
                            + QStringLiteral(".qm");
         if (translator.load(file)) {
             const QByteArray id = logicalId.toUtf8();
@@ -356,7 +391,12 @@ class CarUiController : public QObject
     Q_PROPERTY(QVariantList dockApps READ dockApps NOTIFY dockChanged)
     Q_PROPERTY(QString currentApp READ currentApp NOTIFY currentAppChanged)
     Q_PROPERTY(bool serviceRunning READ serviceRunning NOTIFY serviceRunningChanged)
+    Q_PROPERTY(QString serviceState READ serviceState NOTIFY serviceRunningChanged)
+    Q_PROPERTY(QString serviceError READ serviceError NOTIFY serviceRunningChanged)
+    Q_PROPERTY(bool serviceBusy READ serviceBusy NOTIFY serviceRunningChanged)
     Q_PROPERTY(QVariantMap status READ status NOTIFY statusChanged)
+    Q_PROPERTY(int resolutionIndex READ resolutionIndex NOTIFY projectionSettingsChanged)
+    Q_PROPERTY(int projectionFps READ projectionFps NOTIFY projectionSettingsChanged)
 
 public:
     explicit CarUiController(QObject *parent = nullptr) : QObject(parent)
@@ -367,6 +407,7 @@ public:
             if (stamp != m_configStamp)
                 reloadConfig();
             updateServiceState();
+            updateReconnectState();
         });
         timer->start(1000);
         updateServiceState();
@@ -423,7 +464,35 @@ public:
     // appId of the app currently on screen ("" = home grid visible)
     QString currentApp() const { return m_currentApp; }
     bool serviceRunning() const { return m_serviceRunning; }
+    QString serviceState() const { return m_serviceState; }
+    QString serviceError() const { return m_serviceError; }
+    bool serviceBusy() const { return m_serviceBusy; }
     QVariantMap status() const { return m_status; }
+    int resolutionIndex() const {
+        QSettings settings(QDir::homePath() + QStringLiteral("/.config/sailplay/display.ini"), QSettings::IniFormat);
+        const int width = settings.value(QStringLiteral("Display/width"), 1920).toInt();
+        return width == 1600 ? 1 : width == 1280 ? 2 : 0;
+    }
+    int projectionFps() const {
+        QSettings settings(QDir::homePath() + QStringLiteral("/.config/sailplay/display.ini"), QSettings::IniFormat);
+        return settings.value(QStringLiteral("Display/fps"), 30).toInt() == 60 ? 60 : 30;
+    }
+    Q_INVOKABLE void setProjectionSettings(int index, int fps) {
+        if (index < 0 || index > 2 || (fps != 30 && fps != 60)) return;
+        const int widths[] = {1920, 1600, 1280};
+        const int heights[] = {720, 600, 480};
+        QDir().mkpath(QDir::homePath() + QStringLiteral("/.config/sailplay"));
+        QSettings settings(QDir::homePath() + QStringLiteral("/.config/sailplay/display.ini"), QSettings::IniFormat);
+        settings.setValue(QStringLiteral("Display/width"), widths[index]);
+        settings.setValue(QStringLiteral("Display/height"), heights[index]);
+        settings.setValue(QStringLiteral("Display/fps"), fps);
+        settings.sync();
+        if (settings.status() != QSettings::NoError) {
+            m_serviceError = QStringLiteral("Could not save projection settings");
+            emit serviceRunningChanged();
+        }
+        emit projectionSettingsChanged();
+    }
 
     Q_INVOKABLE void returnToCar()
     {
@@ -444,14 +513,39 @@ public:
 
     Q_INVOKABLE void setServiceRunning(bool running)
     {
+        controlService(running ? QStringLiteral("StartUnit") : QStringLiteral("StopUnit"));
+    }
+
+    Q_INVOKABLE void connectCar() {
+        controlService(QStringLiteral("StartUnit"), QStringLiteral("sailplay-reconnect.service"));
+    }
+
+    void controlService(const QString &method, const QString &unit = QStringLiteral("sailplay.service"))
+    {
+        if (m_serviceBusy) return;
+        m_serviceBusy = true;
+        m_serviceError.clear();
+        emit serviceRunningChanged();
         QDBusMessage call = QDBusMessage::createMethodCall(
             QStringLiteral("org.freedesktop.systemd1"),
             QStringLiteral("/org/freedesktop/systemd1"),
             QStringLiteral("org.freedesktop.systemd1.Manager"),
-            running ? QStringLiteral("StartUnit") : QStringLiteral("StopUnit"));
-        call << QStringLiteral("sailplay.service") << QStringLiteral("replace");
-        QDBusConnection::systemBus().asyncCall(call);
-        QTimer::singleShot(500, this, [this]() { updateServiceState(); });
+            method);
+        call << unit << QStringLiteral("replace");
+        auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(call), this);
+        connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher, unit]() {
+            const QDBusMessage reply = watcher->reply();
+            m_serviceBusy = false;
+            if (reply.type() == QDBusMessage::ErrorMessage)
+                m_serviceError = reply.errorMessage();
+            else if (unit == QStringLiteral("sailplay-reconnect.service")) {
+                m_reconnectPending = true;
+                m_serviceBusy = true;
+            }
+            emit serviceRunningChanged();
+            watcher->deleteLater();
+            updateServiceState();
+        });
     }
 
     Q_INVOKABLE void reloadConfig()
@@ -599,6 +693,7 @@ public:
     }
 
 signals:
+    void projectionSettingsChanged();
     void tilesChanged();
     void rowsChanged();
     void dockChanged();
@@ -739,9 +834,46 @@ private:
     QString m_lastHiddenApp;
     QDateTime m_configStamp;
     bool m_serviceRunning = false;
+    bool m_serviceBusy = false;
+    QString m_serviceState = QStringLiteral("unknown");
+    QString m_serviceError;
+    bool m_serviceQueryPending = false;
+    bool m_reconnectPending = false;
+    bool m_reconnectQueryPending = false;
+
+    void updateReconnectState()
+    {
+        if (!m_reconnectPending || m_reconnectQueryPending) return;
+        m_reconnectQueryPending = true;
+        QDBusMessage call = QDBusMessage::createMethodCall(
+            QStringLiteral("org.freedesktop.systemd1"),
+            QStringLiteral("/org/freedesktop/systemd1/unit/sailplay_2dreconnect_2eservice"),
+            QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
+        call << QStringLiteral("org.freedesktop.systemd1.Unit") << QStringLiteral("ActiveState");
+        auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(call), this);
+        connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher]() {
+            m_reconnectQueryPending = false;
+            const QDBusMessage reply = watcher->reply();
+            QString state;
+            if (reply.type() != QDBusMessage::ErrorMessage && !reply.arguments().isEmpty())
+                state = qvariant_cast<QDBusVariant>(reply.arguments().first()).variant().toString();
+            if (state != QStringLiteral("activating")) {
+                m_reconnectPending = false;
+                m_serviceBusy = false;
+                if (state == QStringLiteral("failed"))
+                    m_serviceError = QStringLiteral("Car connection request failed; see sailplay-reconnect service log.");
+                else if (reply.type() == QDBusMessage::ErrorMessage)
+                    m_serviceError = reply.errorMessage();
+                emit serviceRunningChanged();
+            }
+            watcher->deleteLater();
+        });
+    }
 
     void updateServiceState()
     {
+        if (m_serviceQueryPending) return;
+        m_serviceQueryPending = true;
         QDBusMessage call = QDBusMessage::createMethodCall(
             QStringLiteral("org.freedesktop.systemd1"),
             QStringLiteral("/org/freedesktop/systemd1/unit/sailplay_2eservice"),
@@ -749,19 +881,26 @@ private:
             QStringLiteral("Get"));
         call << QStringLiteral("org.freedesktop.systemd1.Unit")
              << QStringLiteral("ActiveState");
-        const QDBusMessage reply = QDBusConnection::systemBus().call(call);
+        auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(call), this);
+        connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher]() {
+        m_serviceQueryPending = false;
+        const QDBusMessage reply = watcher->reply();
+        QString state = QStringLiteral("unknown");
         bool running = false;
-        if (!reply.arguments().isEmpty()) {
+        if (reply.type() != QDBusMessage::ErrorMessage && !reply.arguments().isEmpty()) {
             const QDBusVariant value = qvariant_cast<QDBusVariant>(
                 reply.arguments().first());
-            const QString state = value.variant().toString();
+            state = value.variant().toString();
             running = state == QLatin1String("active")
                    || state == QLatin1String("activating");
         }
-        if (running != m_serviceRunning) {
+        if (running != m_serviceRunning || state != m_serviceState) {
             m_serviceRunning = running;
+            m_serviceState = state;
             emit serviceRunningChanged();
         }
+        watcher->deleteLater();
+        });
     }
     // CarPlay semantics: the tapped app replaces whatever is on screen; a
     // hidden app comes back instead of being launched twice (native apps

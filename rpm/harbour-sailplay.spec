@@ -1,6 +1,6 @@
 Name: harbour-sailplay
 Version: 0.1.0
-Release: 20
+Release: 27
 Summary: SailfishOS wireless CarPlay phone and virtual vehicle display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
@@ -37,7 +37,9 @@ install -D -m 0644 display-source/carui/harbour-sailplay.png %{buildroot}/usr/sh
 install -m 0644 display-source/carui/carui-apps.conf %{buildroot}/opt/sailplay/carui-apps.conf
 touch %{buildroot}/opt/sailplay/diagnostics/display-ui
 install -D -m 0644 rpm/sailplay.service %{buildroot}/usr/lib/systemd/system/sailplay.service
+install -D -m 0644 rpm/sailplay-reconnect.service %{buildroot}/usr/lib/systemd/system/sailplay-reconnect.service
 install -D -m 0644 rpm/sailplay-xpolicy.conf %{buildroot}/etc/pulse/xpolicy.conf.d/sailplay.conf
+install -D -m 0644 rpm/50-sailplay.rules %{buildroot}/etc/polkit-1/rules.d/50-sailplay.rules
 
 %post
 systemctl daemon-reload || :
@@ -62,6 +64,8 @@ systemctl daemon-reload || :
 %attr(2755,root,privileged) /opt/sailplay/imira-comp
 %attr(2755,root,privileged) /opt/sailplay/carlife-capture
 /usr/lib/systemd/system/sailplay.service
+/usr/lib/systemd/system/sailplay-reconnect.service
 /etc/pulse/xpolicy.conf.d/sailplay.conf
+/etc/polkit-1/rules.d/50-sailplay.rules
 /usr/share/applications/harbour-sailplay.desktop
 /usr/share/icons/hicolor/172x172/apps/harbour-sailplay.png

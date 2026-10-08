@@ -64,13 +64,14 @@ def decode_touch(layouts, data, width=1920,height=720):
 
 
 class TouchInput:
-    def __init__(self,devices,display_uuid):
+    def __init__(self,devices,display_uuid,width=1920,height=720):
+        self.width,self.height=width,height
         self.layouts={str(d['uuid']):touch_layout(bytes(d['hidDescriptor'])) for d in devices
                       if d.get('displayUUID')==display_uuid and 'hidDescriptor' in d}
         self.layouts={k:v for k,v in self.layouts.items() if v}
         if not self.layouts: raise ValueError('no supported absolute touch HID descriptor')
         self.fd=os.open('/dev/uinput',os.O_WRONLY|os.O_NONBLOCK)
-        self.x,self.y=960,360; self.down=False
+        self.x,self.y=width//2,height//2; self.down=False
         try:
             for ev in (0,1,2): fcntl.ioctl(self.fd,0x40045564,ev)
             for axis in (0,1): fcntl.ioctl(self.fd,0x40045566,axis)
@@ -89,7 +90,7 @@ class TouchInput:
         if value.get('type')!='hidSendReport': return
         layout=self.layouts.get(str(value.get('uuid')))
         if layout is None: return
-        down,x,y=decode_touch(layout,bytes(value['hidReport']))
+        down,x,y=decode_touch(layout,bytes(value['hidReport']),self.width,self.height)
         self.event(2,0,x-self.x); self.event(2,1,y-self.y)
         if down!=self.down: self.event(1,0x110,int(down))
         self.event(0,0,0)

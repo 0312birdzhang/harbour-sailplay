@@ -1,0 +1,11 @@
+[Unit]
+Description=Reconnect Sailplay to the configured head unit
+After=bluetooth.service connman.service
+Wants=bluetooth.service connman.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/sailplay/scripts/reconnect-car.py
+TimeoutStartSec=60
+StandardOutput=journal
+StandardError=journal

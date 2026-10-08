@@ -1,6 +1,15 @@
 """Select the adapter BlueZ actually exports, rather than assuming hci0."""
 
 
+def adapter_name(properties):
+    """Use the user-visible Bluetooth name, never replace the adapter alias."""
+    for key in ('Alias', 'Name'):
+        value = str(properties.get(key, '')).strip().replace('\x00', '')
+        if value:
+            return value
+    return 'SailfishOS'
+
+
 def select_adapter(objects, device=None):
     adapters = {str(path): props['org.bluez.Adapter1']
                 for path, props in objects.items() if 'org.bluez.Adapter1' in props}
