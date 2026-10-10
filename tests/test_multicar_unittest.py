@@ -2,6 +2,7 @@ import datetime
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
@@ -12,6 +13,15 @@ from carplay_proto.accessoryauth import paired_accessory, certificate_key
 
 
 class MultipleCarTests(unittest.TestCase):
+    def test_verified_receiver_without_sdp_uuid_is_selected(self):
+        objects = {'/diplay': {'org.bluez.Device1': {'Paired': True, 'Connected': True, 'UUIDs': []}}}
+        with patch('carplay_proto.bluezadapter.authenticated_head_unit', side_effect=lambda p: p == '/diplay'):
+            self.assertEqual(select_head_unit(objects, '/levin'), '/diplay')
+            objects['/diplay']['org.bluez.Device1']['Connected'] = False
+            self.assertEqual(select_head_unit(objects, '/levin', '/diplay'), '/diplay')
+            objects['/diplay']['org.bluez.Device1']['Paired'] = False
+            self.assertEqual(select_head_unit(objects, '/levin', '/diplay'), '/levin')
+
     def test_connected_vehicle_overrides_previous_target(self):
         objects = {'/new': {'org.bluez.Device1': {'Paired': True, 'Connected': True,
                    'UUIDs': ['00000000-deca-fade-deca-deafdecacaff']}}}

@@ -45,6 +45,8 @@ def main():
         os.replace(temporary_link,original_log)
         sys.stdout = os.fdopen(descriptor, 'w', buffering=1)
         sys.stderr = sys.stdout
+    from carplay_proto.runtime_logging import persist_output
+    persist_output('wifi-restore' if args.restore else 'wifi-airplay')
     if not 10 <= args.restore_after <= 120:
         parser.error('restore-after must be 10..120 seconds')
     import dbus
@@ -55,6 +57,8 @@ def main():
     bus = dbus.SystemBus()
     manager = dbus.Interface(bus.get_object('net.connman', '/'), 'net.connman.Manager')
     loop = GLib.MainLoop()
+    from carplay_proto.wifiretry import ReassociationWindow
+    wpa2_retry = ReassociationWindow()
     def service(path):
         return dbus.Interface(bus.get_object('net.connman', path), 'net.connman.Service')
     if args.restore:
@@ -100,6 +104,9 @@ def main():
             network = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', path), 'org.freedesktop.DBus.Properties')
             configuration = network.Get('fi.w1.wpa_supplicant1.Network', 'Properties')
             if str(configuration.get('ssid', '')).strip('"') == session['ssid']:
+                wpa2_retry.arm()
+                print('HU supplicant security before fallback: {}'.format({
+                    key:str(configuration.get(key)) for key in ('key_mgmt','proto','ieee80211w')}),flush=True)
                 network.Set('fi.w1.wpa_supplicant1.Network', 'Properties',
                             dbus.Dictionary({'key_mgmt': dbus.String('WPA-PSK'),
                                              'proto': dbus.String('RSN')}, signature='sv'))
@@ -147,7 +154,8 @@ def main():
                                        "type='method_call',destination='{}'".format(owner),
                                        "type='method_call',sender='{}'".format(connman_owner)], signature='s'), dbus.UInt32(0))
     services = manager.GetServices()
-    target = next((str(path) for path, props in services if props.get('Type') == 'wifi' and props.get('Name') == session['ssid']), None)
+    from carplay_proto.wifidiscovery import find_service
+    target = find_service(services, session['ssid'], require_available=True)
     if args.connect and not target:
         # StartSession can precede ConnMan discovering the newly enabled HU AP.
         wifi_path = next((path for path,props in manager.GetTechnologies() if props.get('Type')=='wifi'),None)
@@ -174,7 +182,7 @@ def main():
                 cached_bss_visible=cached_bss_visible,
                 set_powered=lambda path, powered: dbus.Interface(bus.get_object('net.connman', path),
                     'net.connman.Technology').SetProperty('Powered', dbus.Boolean(powered, variant_level=1)),
-                log=lambda message: print(message, flush=True))
+                log=lambda message: print(message, flush=True), require_available=True)
     old = next((str(path) for path, props in services if props.get('Type') == 'wifi' and props.get('State') in ('ready', 'online')), None)
     if not old:
         old=next((str(path) for path,props in services if props.get('Type')=='wifi'
@@ -244,13 +252,14 @@ def main():
         service(target).SetProperty('Passphrase', dbus.String(session['passphrase'], variant_level=1))
         print('ConnMan accepted the HU passphrase property (value redacted)', flush=True)
     def connected():
+        if wpa2_retry.started:
+            return
+        wpa2_retry.started = True
         os.utime(restore_clock, None)
         from carplay_proto.rtspclient import connect
         props = service(target).GetProperties()
         interface = str(props['Ethernet']['Interface'])
         print('HU Wi-Fi connected; probing AirPlay', flush=True)
-        from carplay_proto.networktrace import NetworkTrace
-        network_trace = NetworkTrace(target)
         print('HU IP state: {}'.format({key:str(props.get(key)) for key in ('IPv4','IPv6','IPv6.Configuration')}), flush=True)
         addresses = list(session['addresses'])
         gateway = str(props.get('IPv4', {}).get('Gateway', ''))
@@ -264,7 +273,8 @@ def main():
                 status, headers, body = client.request('GET', '/info', plistlib.dumps({}, fmt=plistlib.FMT_BINARY),
                     {'Content-Type':'application/x-apple-binary-plist', 'User-Agent':'AirPlay/566.25.21'})
                 print('AirPlay /info status={}, bytes={}'.format(status, len(body)), flush=True)
-                if status == 455:
+                # Public /info does not establish encrypted media keys.
+                if status in (200, 455):
                     from carplay_proto.airplaypair import pair_setup, pair_verify
                     identity_path = '/tmp/sailplay-airplay-identity.json'
                     try:
@@ -294,12 +304,13 @@ def main():
                         print('Encrypted initial SETUP status={} bytes={}'.format(setup_status,len(setup_body)),flush=True)
                         if setup_status == 200:
                             setup_info = plistlib.loads(setup_body)
-                            print('Initial SETUP response={}'.format(setup_info),flush=True)
+                            print('Initial SETUP response keys={} eventPort={} timingPort={}'.format(
+                                sorted(setup_info), setup_info.get('eventPort'), setup_info.get('timingPort')),flush=True)
                         status, headers, body = client.request('GET', '/info', plistlib.dumps({}, fmt=plistlib.FMT_BINARY),
                             {'Content-Type':'application/x-apple-binary-plist','User-Agent':'AirPlay/566.25.21'})
                         print('Encrypted AirPlay /info status={} bytes={}'.format(status,len(body)), flush=True)
-                    except ValueError as error:
-                        print(str(error), flush=True)
+                    except ValueError:
+                        raise
                 if status == 200:
                     info = plistlib.loads(body)
                     with open('/tmp/sailplay-hu-info.plist','wb') as saved_info:
@@ -320,32 +331,56 @@ def main():
                         break
             except Exception as error:
                 print('AirPlay probe failed: {}, errno={}'.format(type(error).__name__, getattr(error, 'errno', None)), flush=True)
-                if isinstance(error,(RuntimeError,TimeoutError)):
-                    print('Failure detail: {}'.format(str(error).replace(session['passphrase'],'<password>')),flush=True)
+                print('Failure detail: {}'.format(str(error).replace(session['passphrase'],'<password>')),flush=True)
             finally:
                 if timing:
                     timing.close()
                 if client:
                     client.sock.close()
-        network_trace.close()
         loop.quit()
     def failed(error):
         print('ConnMan Connect failed: {}'.format(error.get_dbus_name()), flush=True)
+        if wpa2_retry.waiting():
+            print('Waiting for WPA2 reassociation after the retired connection failed', flush=True)
+            return
         if args.trace_supplicant:
             output = subprocess.run(['journalctl', '_COMM=wpa_supplicant', '--since', '-2 min', '--no-pager', '-o', 'cat'],
                                     stdout=subprocess.PIPE, universal_newlines=True).stdout
             for line in output.splitlines()[-160:]:
                 print(line.replace(session['passphrase'], '<password>').replace(session['ssid'], '<HU-SSID>'), flush=True)
         loop.quit()
-    if already_connected:
-        print('Reusing existing HU Wi-Fi; leaving network configuration unchanged', flush=True)
-        GLib.idle_add(connected)
-    else:
-        service(target).Connect(reply_handler=connected, error_handler=failed, timeout=25)
-    GLib.timeout_add_seconds(30, lambda: (loop.quit(), False)[1])
+    def check_wpa2_retry():
+        if wpa2_retry.started:
+            return False
+        if wpa2_retry.deadline:
+            try:
+                props = service(target).GetProperties()
+            except dbus.DBusException as error:
+                print('WPA2 retry status unavailable: '+error.get_dbus_name(),flush=True)
+                loop.quit()
+                return False
+            if props.get('State') in ('ready','online'):
+                connected()
+                return False
+            if not wpa2_retry.waiting():
+                print('WPA2 reassociation did not reach ready: state={} error={}'.format(
+                    props.get('State'),props.get('Error')),flush=True)
+                loop.quit()
+                return False
+        return True
+    GLib.timeout_add_seconds(1, check_wpa2_retry)
+    from carplay_proto.networktrace import NetworkTrace
+    network_trace = NetworkTrace(target)
     try:
+        if already_connected:
+            print('Reusing existing HU Wi-Fi; leaving network configuration unchanged', flush=True)
+            GLib.idle_add(connected)
+        else:
+            service(target).Connect(reply_handler=connected, error_handler=failed, timeout=25)
+        GLib.timeout_add_seconds(30, lambda: (loop.quit(), False)[1])
         loop.run()
     finally:
+        network_trace.close()
         manager.UnregisterAgent('/org/sailplay/WifiAgent')
         agent.remove_from_connection()
 

@@ -25,7 +25,7 @@ class NetworkTrace:
                     values=dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1',path),
                         'org.freedesktop.DBus.Properties').GetAll('fi.w1.wpa_supplicant1.Interface',timeout=2)
                     if str(values.get('Ifname'))==str(props.get('Ethernet',{}).get('Interface')):
-                        safe['supplicant']={k:str(values.get(k)) for k in ('State','DisconnectReason','CurrentBSS')}
+                        safe['supplicant']={k:str(values.get(k)) for k in ('State','DisconnectReason','CurrentBSS','AuthStatusCode','AssocStatusCode')}
                 if safe!=previous:
                     print('NETWORK t={:.3f} {}'.format(time.monotonic(),safe),flush=True)
                     previous=safe

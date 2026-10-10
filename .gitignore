@@ -25,6 +25,7 @@ moc_*.cpp
 rpm/payload/
 display-source/carui/carui
 diagnostics/*
+.private/
 !diagnostics/README.md
 scripts/*.sh
 !scripts/build-package-from-wsl.sh

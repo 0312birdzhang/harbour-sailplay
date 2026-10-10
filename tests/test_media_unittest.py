@@ -5,6 +5,16 @@ from carplay_proto.audio import AudioEncoder
 from carplay_proto import crypto
 
 class MediaTests(unittest.TestCase):
+    def test_diplay_two_contacts_selects_active_finger(self):
+        contact=bytes.fromhex('050d0922a102093875089501810215002501093375019501810295078103050126a005093075109501810226d20b09318102c0')
+        descriptor=bytes.fromhex('050d0904a101')+contact+contact+bytes.fromhex('c0')
+        fields=touch_layout(descriptor)
+        first=struct.pack('<BBHH',1,1,720,1513)
+        inactive=bytes(6)
+        self.assertEqual(decode_touch(fields,first+inactive,1440,3026),(True,719,1512))
+        self.assertEqual(decode_touch(fields,inactive+first,1440,3026),(True,719,1512))
+        self.assertEqual(decode_touch(fields,inactive*2,1440,3026),(False,0,0))
+
     def test_touch_bitpacked_and_report_id(self):
         # Report 7: tip bit + padding + absolute 16-bit X and Y.
         descriptor=bytes.fromhex('8507050d09421500250175019501810275079501810105010930150026ff7f7510950181020931150026ff7f751095018102')

@@ -7,7 +7,7 @@ mkdir -p "$STAGE/rpm/payload" "$STAGE/display-source/carui"
 cp -r "$REPO/carplay_proto" "$STAGE/"
 find "$STAGE/carplay_proto" -type d -name __pycache__ -exec rm -rf {} +
 mkdir -p "$STAGE/scripts" "$STAGE/diagnostics"
-for name in wireless-probe.py wireless-phone-advertise.py bluetooth-monitor.py wifi-session-probe.py pulse-capture.py reload-audio-policy.py reconnect-car.py; do
+for name in wireless-probe.py wireless-phone-advertise.py bluetooth-monitor.py wifi-session-probe.py pulse-capture.py reload-audio-policy.py reconnect-car.py prepare-media-compat.py extract-artwork.py; do
     cp "$REPO/scripts/$name" "$STAGE/scripts/"
 done
 cp "$REPO/diagnostics/corolla-accessory-key.json" "$STAGE/diagnostics/"
@@ -22,4 +22,4 @@ cp "$REPO/rpm/sailplay-reconnect.service" "$STAGE/rpm/"
 cd "$WORK"
 tar cjf harbour-sailplay-0.1.0.tar.bz2 harbour-sailplay-0.1.0
 rpmbuild -ta --target aarch64 --define 'debug_package %{nil}' --define '__os_install_post %{nil}' harbour-sailplay-0.1.0.tar.bz2
-test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.0-33.aarch64.rpm"
+test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.0-53.aarch64.rpm"

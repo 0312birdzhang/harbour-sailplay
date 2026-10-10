@@ -1,5 +1,6 @@
 """Own a temporary Sailife compositor/UI/capture pipeline for CarPlay."""
 import os
+import fcntl
 import select
 import signal
 import subprocess
@@ -58,6 +59,7 @@ class DisplayPipeline:
         self.processes=[]
         self.logs=[]
         self.fd=None
+        self.lock_fd=None
         self.fifo='/tmp/sailplay-display-{}.h264'.format(os.getpid())
 
     def launch(self,name,command):
@@ -69,7 +71,19 @@ class DisplayPipeline:
         return process
 
     def start(self):
-        if subprocess.run(['pgrep','-x','imira-comp'],stdout=subprocess.DEVNULL).returncode==0:
+        # BusyBox pgrep -x matches argv, not the short executable name.
+        # Serialize startup too: the compositor socket can appear before the
+        # process check and a second compositor truncates the shared framebuffer.
+        self.lock_fd=os.open('/run/sailplay-display.lock',os.O_CREAT|os.O_RDWR,0o600)
+        try:
+            fcntl.flock(self.lock_fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(self.lock_fd)
+            self.lock_fd=None
+            raise RuntimeError('existing display pipeline active')
+        if subprocess.run(['pgrep','-f',r'(^|/)imira-comp( |$)'],stdout=subprocess.DEVNULL).returncode==0:
+            os.close(self.lock_fd)
+            self.lock_fd=None
             raise RuntimeError('existing compositor active; refusing conflicting display pipeline')
         if not os.path.exists('/run/display/wayland-0'):
             raise RuntimeError('lipstick display unavailable')
@@ -83,7 +97,9 @@ class DisplayPipeline:
             if comp.poll() is not None or time.monotonic()>deadline:
                 raise RuntimeError('virtual compositor failed to start')
             time.sleep(.1)
-        self.launch('carui','env XDG_RUNTIME_DIR=/run/user/100000 QT_QPA_PLATFORM=wayland '
+        self.launch('carui','env XDG_RUNTIME_DIR=/run/user/100000 '
+                    'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100000/dbus/user_bus_socket '
+                    'QT_QPA_PLATFORM=wayland '
                     'WAYLAND_DISPLAY=imira-comp-0 /opt/sailplay/carui/carui /opt/sailplay/carui/main.qml {} {}'.format(self.width,self.height))
         self.capture=self.launch('capture','env XDG_RUNTIME_DIR=/run/user/100000 /opt/sailplay/carlife-capture '
                     '--input shm --out '+self.fifo+' --width {} --height {} --fps {} --bitrate {}'.format(
@@ -129,3 +145,6 @@ class DisplayPipeline:
             log.close()
         if os.path.exists(self.fifo):
             os.unlink(self.fifo)
+        if self.lock_fd is not None:
+            os.close(self.lock_fd)
+            self.lock_fd=None

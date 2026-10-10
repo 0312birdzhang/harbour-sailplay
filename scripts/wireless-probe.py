@@ -83,7 +83,7 @@ def media_active(path='/run/sailplay-media.lock'):
 
 def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
           announce_wireless=False, local_address=None, session_out=None, wifi_handover=False,sustained=False,
-          local_name='SailfishOS', paired_pin_path=None):
+          local_name='SailfishOS', paired_pin_path=None, on_authenticated=None):
     handover_started = False
     decoder, csm = Decoder(), Framer()
     deadline = time.monotonic() + duration if duration else float('inf')
@@ -212,6 +212,8 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                         raise ValueError('invalid authentication response')
                                     authenticator.verify(signatures[0])
                                     authenticated = True
+                                    if on_authenticated:
+                                        on_authenticated()
                                     outgoing.append(Frame(0xaa05, b''))
                                     if announce_wireless:
                                         if not local_address:
@@ -304,6 +306,17 @@ def main():
         remember_head_unit(args.device)
     adapter, args.device = select_adapter(objects, args.device)
     logging.info('using Bluetooth adapter %s, target %s', adapter, args.device)
+    def snapshot(objects):
+        for path, interfaces in objects.items():
+            if 'org.bluez.Adapter1' in interfaces:
+                props = interfaces['org.bluez.Adapter1']
+                logging.info('adapter snapshot path=%s state=%s', path,
+                             {k: str(props.get(k)) for k in ('Alias', 'Powered', 'Connectable', 'Discoverable', 'Pairable', 'Class', 'UUIDs')})
+            elif 'org.bluez.Device1' in interfaces:
+                props = interfaces['org.bluez.Device1']
+                logging.info('device snapshot path=%s state=%s', path,
+                             {k: str(props.get(k)) for k in ('Alias', 'Paired', 'Connected', 'ServicesResolved', 'UUIDs')})
+    snapshot(objects)
     local_address = str(dbus.Interface(bus.get_object('org.bluez', adapter),
                             'org.freedesktop.DBus.Properties').Get('org.bluez.Adapter1', 'Address'))
     loop = GLib.MainLoop()
@@ -312,6 +325,7 @@ def main():
     class Profile(dbus.service.Object):
         @dbus.service.method('org.bluez.Profile1', in_signature='', out_signature='')
         def Release(self):
+            logging.warning('BlueZ released CarPlay profile')
             loop.quit()
 
         @dbus.service.method('org.bluez.Profile1', in_signature='oha{sv}', out_signature='')
@@ -333,13 +347,15 @@ def main():
             thread = threading.Thread(target=probe, args=(sock, stop, args.seconds,
                                                          args.certificate_out or certificate_path, args.accessory_key,
                                                          args.announce_wireless, local_address, args.session_out, args.wifi_handover,args.sustained,
-                                                         adapter_name(adapter_props), pin_path))
+                                                         adapter_name(adapter_props), pin_path,
+                                                         (lambda: remember_head_unit(str(device))) if pin_path else None))
             workers[str(device)] = (stop, thread, sock)
             thread.start()
             logging.info('RFCOMM connected device=%s', device)
 
         @dbus.service.method('org.bluez.Profile1', in_signature='o', out_signature='')
         def RequestDisconnection(self, device):
+            logging.info('BlueZ requested RFCOMM disconnection device=%s', device)
             worker = workers.pop(str(device), None)
             retire_worker(worker)
 
@@ -361,6 +377,7 @@ def main():
         raise
     if args.device:
         connecting = [False]
+        last_state = [None, 0]
         def connect():
             objects = dbus.Interface(bus.get_object('org.bluez', '/'),
                                      'org.freedesktop.DBus.ObjectManager').GetManagedObjects()
@@ -370,12 +387,18 @@ def main():
                 retire_worker(workers.pop(args.device, None))
                 args.device = selected
             worker = workers.get(args.device)
-            if connecting[0] or (worker and worker[1].is_alive()) or media_active():
+            active = media_active()
+            state = (args.device, bool(objects.get(args.device, {}).get('org.bluez.Device1', {}).get('Connected')),
+                     connecting[0], bool(worker and worker[1].is_alive()), active)
+            if state != last_state[0] or time.monotonic() - last_state[1] >= 60:
+                logging.info('connection checkpoint target=%s bluetooth=%s pending=%s worker=%s media=%s', *state)
+                last_state[:] = [state, time.monotonic()]
+            if connecting[0] or (worker and worker[1].is_alive()) or active:
                 return False
             def done(error=None):
                 connecting[0] = False
                 if error:
-                    logging.warning('CarPlay profile connection failed: %s', error.get_dbus_name())
+                    logging.warning('CarPlay profile connection failed target=%s: %s %s', args.device, error.get_dbus_name(), str(error))
                 else:
                     logging.info('CarPlay profile connection requested')
             try:
@@ -386,11 +409,16 @@ def main():
                 if not connected:
                     connecting[0] = False
                     return False
+                logging.info('requesting CarPlay RFCOMM profile target=%s', args.device)
                 device.ConnectProfile(ACCESSORY_UUID, reply_handler=done, error_handler=done, timeout=12)
             except dbus.DBusException as error:
                 done(error)
             return False
         def device_changed(interface, changed, invalidated, path=None):
+            safe = {str(k): str(v) for k, v in changed.items() if k in
+                    ('Powered', 'Connectable', 'Discoverable', 'Pairable', 'Alias', 'Class', 'UUIDs', 'Paired', 'Connected', 'ServicesResolved')}
+            if safe:
+                logging.info('BlueZ state change path=%s interface=%s values=%s', path, interface, safe)
             if path == adapter and interface == 'org.bluez.Adapter1' and 'Powered' in changed:
                 # Re-register SDP and reapply the EIR through our systemd restart.
                 # Existing sockets/profiles cannot represent a new controller lifetime.
@@ -432,5 +460,6 @@ def main():
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+    from carplay_proto.runtime_logging import configure
+    configure('bluetooth-session')
     main()

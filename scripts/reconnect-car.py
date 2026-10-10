@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Reset Sailplay sessions and connect Bluetooth to the configured head unit."""
 import os
+import logging
 import re
 import subprocess
 import sys
@@ -27,7 +28,7 @@ def main():
     adapter, target = select_adapter(objects, target)
     target = select_head_unit(objects, target, previous_head_unit())
     adapter, target = select_adapter(objects, target)
-    print('Reconnect target: {}'.format(target), flush=True)
+    logging.info('Reconnect target: %s', target)
     props = dbus.Interface(bus.get_object('org.bluez', adapter), 'org.freedesktop.DBus.Properties')
     props.Set('org.bluez.Adapter1', 'Powered', dbus.Boolean(True))
     # The service owns RFCOMM and all handover units. Restarting it retires
@@ -40,8 +41,14 @@ def main():
         if error.get_dbus_name() != 'org.bluez.Error.AlreadyConnected':
             raise
     remember_head_unit(target)
-    print('Head-unit Bluetooth connected; Sailplay will negotiate iAP2, Wi-Fi and AirPlay', flush=True)
+    logging.info('Head-unit Bluetooth connected; Sailplay will negotiate iAP2, Wi-Fi and AirPlay')
 
 
 if __name__ == '__main__':
-    main()
+    from carplay_proto.runtime_logging import configure
+    configure('reconnect')
+    try:
+        main()
+    except Exception:
+        logging.exception('head-unit reconnect failed')
+        sys.exit(1)

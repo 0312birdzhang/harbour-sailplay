@@ -5,6 +5,11 @@ ApplicationWindow {
     id: app
     readonly property bool useChinese: Qt.locale().name.indexOf("zh") === 0
     function textFor(english, chinese) { return useChinese ? chinese : english }
+    function dashboardIndex(id) {
+        var apps = carController.availableApps()
+        for (var i = 0; i < apps.length; ++i) if (apps[i].id === id) return i + 1
+        return 0
+    }
     function serviceStateText(state) {
         var labels = { active: textFor("Running", "运行中"),
                        inactive: textFor("Stopped", "已停止"),
@@ -80,6 +85,34 @@ ApplicationWindow {
                         wrapMode: Text.WordWrap
                         color: Theme.highlightColor
                         text: carController.serviceError
+                    }
+                    SectionHeader { text: app.textFor("Dashboard", "仪表盘") }
+                    ComboBox {
+                        label: app.textFor("Map app", "地图应用")
+                        currentIndex: app.dashboardIndex(carController.dashboardMapApp)
+                        menu: ContextMenu {
+                            MenuItem { text: app.textFor("Not selected", "未选择"); onClicked: carController.setDashboardApp("map", "") }
+                            Repeater {
+                                model: carController.availableApps()
+                                delegate: MenuItem { text: modelData.name; onClicked: carController.setDashboardApp("map", modelData.id) }
+                            }
+                        }
+                    }
+                    ComboBox {
+                        label: app.textFor("Music app", "音乐应用")
+                        currentIndex: app.dashboardIndex(carController.dashboardMusicApp)
+                        menu: ContextMenu {
+                            MenuItem { text: app.textFor("Not selected", "未选择"); onClicked: carController.setDashboardApp("music", "") }
+                            Repeater {
+                                model: carController.availableApps()
+                                delegate: MenuItem { text: modelData.name; onClicked: carController.setDashboardApp("music", modelData.id) }
+                            }
+                        }
+                    }
+                    Label {
+                        x: Theme.horizontalPageMargin; width: parent.width - 2 * Theme.horizontalPageMargin
+                        wrapMode: Text.WordWrap; font.pixelSize: Theme.fontSizeSmall; color: Theme.secondaryColor
+                        text: app.textFor("The split panel shows the map and Sailfish lock-screen music controls for the current player. The music app is its launch shortcut.", "分屏左侧显示地图，右侧显示当前播放器的 Sailfish 锁屏音乐控件。音乐应用作为启动入口。")
                     }
                     SectionHeader { text: app.textFor("Car display home apps", "车机主页应用") }
                     ComboBox {

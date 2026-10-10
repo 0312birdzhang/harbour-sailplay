@@ -16,7 +16,8 @@ def select_head_unit(objects, configured=None, previous=None):
     candidates = [str(path) for path, interfaces in objects.items()
                   for props in [interfaces.get('org.bluez.Device1', {})]
                   if props.get('Paired') and props.get('Connected')
-                  and uuid in [str(value).lower() for value in props.get('UUIDs', [])]]
+                  and (uuid in [str(value).lower() for value in props.get('UUIDs', [])]
+                       or authenticated_head_unit(path))]
     if len(candidates) == 1:
         return candidates[0]
     if configured in candidates:
@@ -24,9 +25,24 @@ def select_head_unit(objects, configured=None, previous=None):
     if len(candidates) > 1:
         raise RuntimeError('Multiple connected CarPlay head units; cannot choose safely')
     previous_props = objects.get(previous, {}).get('org.bluez.Device1', {})
-    if previous_props.get('Paired') and uuid in list(map(str, previous_props.get('UUIDs', []))):
+    if previous_props.get('Paired') and (uuid in list(map(str, previous_props.get('UUIDs', [])))
+                                       or authenticated_head_unit(previous)):
         return previous
     return configured
+
+
+def authenticated_head_unit(device):
+    """Accept receivers without an SDP UUID only after verified key possession."""
+    import os
+    if not device:
+        return False
+    from .accessoryauth import PinnedAccessory
+    path = os.path.join('/var/lib/sailplay/accessories', str(device).rsplit('/', 1)[1] + '.json')
+    try:
+        PinnedAccessory(path)
+        return True
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
 
 
 def previous_head_unit(path='/var/lib/sailplay/last-head-unit'):

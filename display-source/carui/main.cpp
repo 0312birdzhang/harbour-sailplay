@@ -32,6 +32,12 @@
 #include <QVariantMap>
 #include <QStringList>
 #include <QSet>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QCryptographicHash>
+#include <QSaveFile>
+#include <QImage>
 #include <QTimer>
 #include <algorithm>
 #include <cstdio>
@@ -330,10 +336,29 @@ static qint64 launchApp(const QString &appId, const QString &exec)
         "user_bus_socket ");
     cmd += QStringLiteral("CARLIFE_APP_KEY=") + appKey(appId)
            + QStringLiteral(" exec ") + exec;
+    if (appId == QLatin1String("jolla-mediaplayer")) {
+        cmd = QStringLiteral("if python3 /opt/sailplay/scripts/prepare-media-compat.py; then ")
+            + QStringLiteral("export QML2_IMPORT_PATH=\"$HOME/.cache/sailplay/qml\"; fi; ") + cmd;
+    }
     qint64 pid = 0;
     QProcess::startDetached(QStringLiteral("/bin/sh"),
                             QStringList() << QStringLiteral("-c") << cmd,
                             QString(), &pid);
+    // /proc/PID/environ can be inaccessible to a setgid compositor. Publish
+    // a per-launch key tied to the process start time, so reused PIDs cannot
+    // inherit a stale application identity.
+    if (pid > 0) {
+        QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
+        if (stat.open(QIODevice::ReadOnly)) {
+            const QByteArray data = stat.readAll();
+            const QList<QByteArray> fields = data.mid(data.lastIndexOf(')') + 2).simplified().split(' ');
+            QFile record(QStringLiteral("/run/user/100000/sailplay-app-%1").arg(pid));
+            if (fields.size() > 19 && record.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                record.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
+                record.write(appKey(appId).toLatin1() + '\n' + fields[19] + '\n');
+            }
+        }
+    }
     return pid;
 }
 
@@ -399,6 +424,9 @@ class CarUiController : public QObject
     Q_PROPERTY(int projectionFps READ projectionFps NOTIFY projectionSettingsChanged)
     Q_PROPERTY(QStringList projectionResolutions READ projectionResolutions NOTIFY projectionSettingsChanged)
     Q_PROPERTY(int maximumFps READ maximumFps NOTIFY projectionSettingsChanged)
+    Q_PROPERTY(bool dashboardActive READ dashboardActive NOTIFY currentAppChanged)
+    Q_PROPERTY(QString dashboardMapApp READ dashboardMapApp NOTIFY dashboardSettingsChanged)
+    Q_PROPERTY(QString dashboardMusicApp READ dashboardMusicApp NOTIFY dashboardSettingsChanged)
 
 public:
     explicit CarUiController(QObject *parent = nullptr) : QObject(parent)
@@ -410,6 +438,12 @@ public:
                 reloadConfig();
             updateServiceState();
             updateReconnectState();
+            const QDateTime dashStamp = QFileInfo(dashboardConfigPath()).lastModified();
+            if (dashStamp != m_dashboardStamp) {
+                m_dashboardStamp = dashStamp;
+                emit dashboardSettingsChanged();
+                if (m_dashboardActive) openDashboard();
+            }
             const QDateTime displayStamp = QFileInfo(QStringLiteral("/run/sailplay-display.ini")).lastModified();
             if (displayStamp != m_displayStamp) {
                 m_displayStamp = displayStamp;
@@ -470,6 +504,118 @@ public:
 
     // appId of the app currently on screen ("" = home grid visible)
     QString currentApp() const { return m_currentApp; }
+    bool dashboardActive() const { return m_dashboardActive; }
+    static QString dashboardConfigPath() {
+        return QDir::homePath() + QStringLiteral("/.config/sailplay/dashboard.ini");
+    }
+    QString dashboardMapApp() const {
+        QSettings s(dashboardConfigPath(), QSettings::IniFormat);
+        return s.value(QStringLiteral("Dashboard/map")).toString();
+    }
+    QString dashboardMusicApp() const {
+        QSettings s(dashboardConfigPath(), QSettings::IniFormat);
+        return s.value(QStringLiteral("Dashboard/music")).toString();
+    }
+    Q_INVOKABLE void setDashboardApp(const QString &role, const QString &id) {
+        if ((role != QLatin1String("map") && role != QLatin1String("music"))
+                || (!id.isEmpty() && !findAvailable(id))) return;
+        const QString other = role == QLatin1String("map") ? dashboardMusicApp() : dashboardMapApp();
+        if (!id.isEmpty() && id == other) {
+            m_serviceError = QStringLiteral("Choose different apps for map and music");
+            emit serviceRunningChanged(); return;
+        }
+        QDir().mkpath(QFileInfo(dashboardConfigPath()).absolutePath());
+        QSettings s(dashboardConfigPath(), QSettings::IniFormat);
+        s.setValue(QStringLiteral("Dashboard/") + role, id); s.sync();
+        emit dashboardSettingsChanged();
+    }
+    Q_INVOKABLE void openDashboard() {
+        if (!m_currentApp.isEmpty()) hideCurrent();
+        writeCmd(QStringLiteral("H"));
+        m_dashboardActive = true;
+        const QString map = dashboardMapApp();
+        writeCmd(QStringLiteral("D %1 %2").arg(map.isEmpty() ? QStringLiteral("-") : appKey(map),
+                                             QStringLiteral("-")));
+        for (const QString &id : {map}) {
+            const AvailableApp *a = findAvailable(id);
+            if (!a) continue;
+            if (m_hiddenApps.contains(id) && (!m_appPids.contains(id)
+                    || kill(m_appPids.value(id), 0) == 0)) continue;
+            m_appPids[id] = launchApp(id, a->exec);
+            m_hiddenApps.insert(id);
+        }
+        emit currentAppChanged();
+    }
+    Q_INVOKABLE QUrl artworkSource(const QUrl &remote, const QUrl &track) {
+        if (remote.isLocalFile()) return remote;
+        if (!remote.isEmpty() && remote.scheme() != QLatin1String("http")
+                && remote.scheme() != QLatin1String("https")) return remote;
+        const QString key = (remote.isEmpty() ? track : remote).toString();
+        if (key.isEmpty()) return QUrl();
+        const QString dir = QDir::homePath() + QStringLiteral("/.cache/sailplay/artwork");
+        QDir().mkpath(dir);
+        const QString path = dir + QLatin1Char('/') + QString::fromLatin1(
+            QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex()) + QStringLiteral(".img");
+        if (QFileInfo(path).size() > 0) return QUrl::fromLocalFile(path);
+        if (m_artworkPending.contains(key)) return QUrl();
+        m_artworkPending.insert(key);
+        if (remote.isEmpty()) {
+            if (!track.isLocalFile()) { m_artworkPending.remove(key); return QUrl(); }
+            auto *process = new QProcess(this);
+            connect(process, static_cast<void(QProcess::*)(int,QProcess::ExitStatus)>(&QProcess::finished),
+                this, [this,process,key,path](int code,QProcess::ExitStatus) {
+                    m_artworkPending.remove(key);
+                    if (code == 0 && QFileInfo(path).size() > 0)
+                        emit artworkAvailable(key,QUrl::fromLocalFile(path));
+                    process->deleteLater();
+                });
+            process->start(QStringLiteral("python3"), {QStringLiteral("/opt/sailplay/scripts/extract-artwork.py"), track.toLocalFile(),path});
+            QTimer::singleShot(5000,process,[process]() { if (process->state()!=QProcess::NotRunning) process->kill(); });
+        } else {
+            if (!m_artworkNetwork) m_artworkNetwork = new QNetworkAccessManager(this);
+            auto *reply = m_artworkNetwork->get(QNetworkRequest(remote));
+            connect(reply,&QNetworkReply::downloadProgress,reply,[reply](qint64 bytes,qint64) {
+                if (bytes > 8*1024*1024) reply->abort();
+            });
+            QTimer::singleShot(15000,reply,[reply]() { if (!reply->isFinished()) reply->abort(); });
+            connect(reply,&QNetworkReply::finished,this,[this,reply,key,path]() {
+                m_artworkPending.remove(key);
+                const QByteArray bytes=reply->readAll();
+                if (reply->error()==QNetworkReply::NoError && bytes.size()<=8*1024*1024
+                        && !QImage::fromData(bytes).isNull()) {
+                    QSaveFile file(path);
+                    if (file.open(QIODevice::WriteOnly) && file.write(bytes)==bytes.size() && file.commit())
+                        emit artworkAvailable(key,QUrl::fromLocalFile(path));
+                }
+                reply->deleteLater();
+            });
+        }
+        // Bound persistent artwork storage; oldest entries are disposable.
+        QDir cache(dir);
+        const QFileInfoList files=cache.entryInfoList({QStringLiteral("*.img")},QDir::Files,QDir::Time);
+        for (int i=64;i<files.size();++i) QFile::remove(files.at(i).absoluteFilePath());
+        return QUrl();
+    }
+    Q_INVOKABLE void seekPlayer(const QString &service, const QVariant &track, double seconds) {
+        if (!service.startsWith(QLatin1String("org.mpris.MediaPlayer2."))
+                || !(seconds >= 0 && seconds < 86400000)) return;
+        const QDBusObjectPath trackId = track.value<QDBusObjectPath>();
+        if (trackId.path().isEmpty()) return;
+        // Older Amber clients compare millisecond positions with durations in
+        // seconds and reject valid seeks. Send the standard microsecond request
+        // directly, retaining the drag's track id so a track change is safe.
+        QDBusMessage call = QDBusMessage::createMethodCall(service,
+            QStringLiteral("/org/mpris/MediaPlayer2"),
+            QStringLiteral("org.mpris.MediaPlayer2.Player"), QStringLiteral("SetPosition"));
+        call.setArguments({QVariant::fromValue(trackId), QVariant::fromValue(qint64(seconds * 1000000))});
+        auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(call), this);
+        connect(watcher, &QDBusPendingCallWatcher::finished, this, [watcher]() {
+            const QDBusMessage reply = watcher->reply();
+            fprintf(stderr, "carui: MPRIS seek %s\n", reply.type() == QDBusMessage::ErrorMessage
+                ? reply.errorMessage().toUtf8().constData() : "accepted");
+            watcher->deleteLater();
+        });
+    }
     bool serviceRunning() const { return m_serviceRunning; }
     QString serviceState() const { return m_serviceState; }
     QString serviceError() const { return m_serviceError; }
@@ -700,6 +846,11 @@ public:
 
     Q_INVOKABLE void homeClicked()
     {
+        if (m_dashboardActive) {
+            writeCmd(QStringLiteral("H"));
+            m_dashboardActive = false;
+            emit currentAppChanged();
+        }
         if (m_currentApp.isEmpty())
             return;
         const QString appId = m_currentApp;
@@ -710,6 +861,8 @@ public:
     }
 
 signals:
+    void dashboardSettingsChanged();
+    void artworkAvailable(const QString &key, const QUrl &localUrl);
     void projectionSettingsChanged();
     void tilesChanged();
     void rowsChanged();
@@ -847,6 +1000,11 @@ private:
     }
     QVariantList m_rows;
     QString m_currentApp;
+    bool m_dashboardActive = false;
+    QNetworkAccessManager *m_artworkNetwork = nullptr;
+    QSet<QString> m_artworkPending;
+    QMap<QString, qint64> m_appPids;
+    QDateTime m_dashboardStamp;
     QSet<QString> m_hiddenApps;
     QString m_lastHiddenApp;
     QDateTime m_configStamp;
@@ -926,6 +1084,7 @@ private:
     void activate(const QString &appId, const QString &exec,
                   const QString &name)
     {
+        if (m_dashboardActive) homeClicked();
         if (appId == m_currentApp)
             return;   // already on screen
         if (m_hiddenApps.contains(appId)) {
@@ -946,7 +1105,7 @@ private:
             return;
         }
         fprintf(stderr, "carui: launching %s\n", name.toUtf8().constData());
-        launchApp(appId, exec);
+        m_appPids[appId] = launchApp(appId, exec);
         moveToFront(appId);
         if (!m_currentApp.isEmpty())
             hideCurrent();   // the new app replaces the one on screen
@@ -1003,7 +1162,10 @@ Q_DECL_EXPORT int main(int argc, char **argv)
             QStringLiteral("mobile-settings.qml"));
     app.setApplicationName(mobileSettings ? QStringLiteral("harbour-sailplay")
                                           : QStringLiteral("carlife-ui"));
-    QQmlApplicationEngine engine;
+    // Use the same engine setup as native Sailfish applications, including
+    // image://theme providers required by the lock-screen media buttons.
+    QQuickView *themeView = SailfishApp::createView();
+    QQmlEngine &engine = *themeView->engine();
 
     CarUiController controller;
     engine.rootContext()->setContextProperty("carController", &controller);

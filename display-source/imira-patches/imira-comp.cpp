@@ -694,14 +694,17 @@ public:
             // keep a full 1920x720 app canvas; it is scaled as one image into the
             // 1780px area beside the dock, so fixed-layout apps cannot lose
             // their right edge.
-            item->setParentItem(m_contentRoot);
+            QQuickItem *viewport = new QQuickItem(m_contentRoot);
+            viewport->setSize(QSizeF(m_contentRoot->width(), m_contentRoot->height()));
+            viewport->setClip(true);
+            item->setParentItem(viewport);
             item->setZ(m_nextContentZ++);
             surface->requestSize(QSize(m_width, m_height));
             syncContent(item);
             QObject::connect(surface, &QWaylandSurface::sizeChanged,
                              [this, item]() { syncContent(item); });
             for (int i = 0; i < m_content.count(); ++i) {
-                if (m_content.at(i).visible) {
+                if (!m_dashboard && m_content.at(i).visible) {
                     m_content[i].visible = false;
                     m_content[i].item->setVisible(false);
                 }
@@ -713,6 +716,7 @@ public:
                     m_content.removeAt(i);   // stale hidden entry, same app
             }
             m_content.append(ContentWin{item, title, appKey, true, 0});
+            if (m_dashboard) layoutDashboard();
             QObject::connect(surface, &QWaylandSurface::unmapped,
                              [this, item]() { removeContent(item); });
             QObject::connect(surface, &QWaylandSurface::surfaceDestroyed,
@@ -762,24 +766,36 @@ public:
     {
         const qint64 pid = surface->client()->processId();
         QFile f(QStringLiteral("/proc/%1/environ").arg(pid));
-        if (!f.open(QIODevice::ReadOnly))
-            return QString();
         const QByteArray prefix("CARLIFE_APP_KEY=");
-        const QList<QByteArray> vars = f.readAll().split(char(0));
+        const QList<QByteArray> vars = f.open(QIODevice::ReadOnly) ? f.readAll().split(char(0)) : QList<QByteArray>();
         for (const QByteArray &v : vars) {
             if (v.startsWith(prefix))
                 return QString::fromLatin1(v.mid(prefix.size()));
+        }
+        QFile record(QStringLiteral("/run/user/100000/sailplay-app-%1").arg(pid));
+        QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
+        if (record.open(QIODevice::ReadOnly) && stat.open(QIODevice::ReadOnly)) {
+            const QList<QByteArray> identity = record.readAll().split('\n');
+            const QByteArray data = stat.readAll();
+            const QList<QByteArray> fields = data.mid(data.lastIndexOf(')') + 2).simplified().split(' ');
+            if (identity.size() >= 2 && fields.size() > 19 && identity[1] == fields[19])
+                return QString::fromLatin1(identity[0]);
         }
         return QString();
     }
 
     QWaylandSurfaceItem *contentItemAt(const QPointF &pos) const
     {
+        // Dashboard apps are previews; the shell opens them on a tap.
+        if (m_dashboard && m_shellItem
+                && m_shellItem->contains(m_shellItem->mapFromScene(pos)))
+            return m_shellItem;
         for (int i = m_content.count() - 1; i >= 0; --i) {
             const ContentWin &c = m_content.at(i);
             if (!c.visible)
                 continue;
-            if (c.item->contains(c.item->mapFromScene(pos)))
+            if (c.item->parentItem()->contains(c.item->parentItem()->mapFromScene(pos))
+                    && c.item->contains(c.item->mapFromScene(pos)))
                 return c.item;
         }
         if (m_shellItem
@@ -808,22 +824,50 @@ public:
             return;
         item->setSize(QSizeF(s));
         item->setTransformOrigin(QQuickItem::Center);
-        const qreal aw = m_width - kDockW;
-        const qreal ah = m_height;
+        const qreal aw = item->parentItem()->width();
+        const qreal ah = item->parentItem()->height();
         // Slight left overscan hides application-side edge drawers which are
         // normally kept just off the phone screen. Fit against a canvas that
         // is wider by the crop amount, then clip it at the real content area;
         // this keeps the right edge flush instead of leaving a black strip.
-        const qreal fitWidth = aw + kContentCropLeft;
+        const qreal crop = m_dashboard ? 0 : kContentCropLeft;
+        const qreal fitWidth = aw + crop;
         const qreal scale = qMin(fitWidth / s.width(), ah / s.height());
         item->setScale(scale);
         item->setPosition(QPointF((fitWidth - s.width()) / 2.0
-                                      - kContentCropLeft,
+                                      - crop,
                                   (ah - s.height()) / 2.0));
         fprintf(stderr,
                 "imira-comp: content fit '%s' surface=%dx%d scale=%.2f\n",
                 qPrintable(item->surface()->title()), s.width(), s.height(),
                 scale);
+    }
+
+    void layoutDashboard()
+    {
+        const qreal aw = m_width - kDockW;
+        const qreal scale = m_width / 1920.0;
+        const qreal gap = 16 * scale, top = 64 * scale;
+        const qreal mapWidth = (aw - 3 * gap) * 0.65;
+        for (ContentWin &c : m_content) {
+            const bool map = !m_dashboardMap.isEmpty() && c.appKey == m_dashboardMap;
+            const bool music = !m_dashboardMusic.isEmpty() && c.appKey == m_dashboardMusic;
+            QQuickItem *viewport = c.item->parentItem();
+            viewport->setPosition(m_dashboard
+                ? QPointF(map ? gap : mapWidth + 2 * gap, top) : QPointF(0, 0));
+            viewport->setSize(m_dashboard
+                ? QSizeF(map ? mapWidth : aw - mapWidth - 3 * gap, m_height - top - gap)
+                : QSizeF(aw, m_height));
+            if (m_dashboard) {
+                c.visible = map || music;
+                c.item->setVisible(c.visible);
+            }
+            const QSize requested = m_dashboard
+                ? QSize(qRound(viewport->width()), qRound(viewport->height()))
+                : QSize(m_width, m_height);
+            c.item->surface()->requestSize(requested);
+            syncContent(c.item);
+        }
     }
 
     void pollCarlifeCmd()
@@ -842,7 +886,17 @@ public:
         const QList<QByteArray> lines = data.split('\n');
         for (const QByteArray &line : lines) {
             const QByteArray t = line.trimmed();
-            if (t == "H" || t.startsWith("H ")) {
+            if (t.startsWith("D ")) {
+                const QList<QByteArray> keys = t.mid(2).split(' ');
+                if (keys.size() != 2) continue;
+                m_dashboard = true;
+                m_dashboardMap = keys[0] == "-" ? QString() : QString::fromLatin1(keys[0]);
+                m_dashboardMusic = keys[1] == "-" ? QString() : QString::fromLatin1(keys[1]);
+                layoutDashboard();
+            } else if (t == "H" || t.startsWith("H ")) {
+                m_dashboard = false;
+                m_dashboardMap.clear(); m_dashboardMusic.clear();
+                layoutDashboard();
                 // Home/settings means no content surface may remain visible.
                 // Hide all, so an earlier state bug cannot leave a second
                 // window receiving input behind the first one.
@@ -1076,6 +1130,8 @@ private:
     QWaylandSurfaceItem *m_shellItem = nullptr;
     QQuickItem *m_contentRoot = nullptr;
     QVector<ContentWin> m_content;
+    bool m_dashboard = false;
+    QString m_dashboardMap, m_dashboardMusic;
     int m_nextContentZ = 10;
     quint64 m_hideSerial = 0;
     qint64 m_cmdOff = 0;

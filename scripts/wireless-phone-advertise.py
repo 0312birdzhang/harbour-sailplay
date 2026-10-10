@@ -55,9 +55,15 @@ def main():
     except dbus.DBusException:
         logging.info('adapter does not expose Connectable; using system defaults')
     existing = [str(v).lower() for v in props.Get('org.bluez.Adapter1', 'UUIDs')]
+    logging.info('advertisement setup adapter=%s alias=%s powered=%s UUIDs=%s',
+                 adapter, props.Get('org.bluez.Adapter1', 'Alias'),
+                 props.Get('org.bluez.Adapter1', 'Powered'), existing)
     probe = os.path.join(os.path.dirname(__file__), 'wireless-probe.py')
     if PHONE_EIR in existing:
-        return subprocess.call([sys.executable, probe] + sys.argv[1:])
+        logging.info('CarPlay EIR already present; preserving existing registration')
+        result = subprocess.call([sys.executable, probe] + sys.argv[1:])
+        logging.info('CarPlay profile process exited status=%d', result)
+        return result
     # Sailfish Python omits AF_BLUETOOTH even though the Linux kernel supports it.
     bluetooth_family = getattr(socket, 'AF_BLUETOOTH', 31)
     sock = socket.socket(bluetooth_family, socket.SOCK_RAW, 1)
@@ -87,7 +93,9 @@ def main():
             monitor = module.Monitor(adapter_index)
         except (OSError, ImportError, AttributeError):
             logging.exception('passive HCI monitoring unavailable')
-        return subprocess.call([sys.executable, probe] + sys.argv[1:])
+        result = subprocess.call([sys.executable, probe] + sys.argv[1:])
+        logging.info('CarPlay profile process exited status=%d', result)
+        return result
     finally:
         try:
             if monitor:
@@ -100,7 +108,8 @@ def main():
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+    from carplay_proto.runtime_logging import configure
+    configure('bluetooth-advertise')
     # SIGTERM must run the UUID cleanup instead of terminating immediately.
     def terminate(signum, frame):
         raise KeyboardInterrupt()

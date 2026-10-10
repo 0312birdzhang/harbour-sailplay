@@ -7,7 +7,7 @@ import struct
 
 def touch_layout(descriptor):
     page=0; size=count=0; report=0; maximum=0; usages=[]; low=high=None
-    offsets={}; layouts={}; stack=[]; i=0
+    offsets={}; layouts={}; contacts={}; stack=[]; i=0
     while i<len(descriptor):
         prefix=descriptor[i]; i+=1
         if prefix==254:
@@ -41,10 +41,20 @@ def touch_layout(descriptor):
                     usage=usages[min(k,len(usages)-1)] if usages else None
                     name={(1,0x30):'x',(1,0x31):'y',(13,0x33):'down',(13,0x42):'down',(13,0x34):'cancel'}.get(usage)
                     if name and not value&1 and value&2 and not value&4:
-                        layouts.setdefault(report,{})[name]=(offset+k*size,size,maximum)
+                        fields=layouts.setdefault(report,{})
+                        if name in fields:
+                            contacts.setdefault(report,[]).append(fields)
+                            fields={}; layouts[report]=fields
+                        fields[name]=(offset+k*size,size,maximum)
                 offsets[report]=offset+size*count
             usages=[]; low=high=None
-    return {r:f for r,f in layouts.items() if all(k in f for k in ('x','y','down'))}
+    result={}
+    for report,fields in layouts.items():
+        complete=[f for f in contacts.get(report,[])+[fields] if all(k in f for k in ('x','y','down'))]
+        if complete:
+            result[report]=dict(complete[0])
+            if len(complete)>1: result[report]['_contacts']=complete
+    return result
 
 
 def decode_touch(layouts, data, width=1920,height=720):
@@ -53,6 +63,14 @@ def decode_touch(layouts, data, width=1920,height=720):
     if not fields: raise ValueError('unknown touch report')
     body=data[1:] if report else data
     raw=int.from_bytes(body,'little')
+    # A mouse represents one active contact. Do not overwrite the first
+    # finger with a second, inactive contact from a multitouch descriptor.
+    candidates=fields.get('_contacts',[fields])
+    def pressed(candidate):
+        offset,size,_=candidate['down']
+        if offset+size>len(body)*8: raise ValueError('short touch report')
+        return (raw>>offset)&((1<<size)-1)
+    fields=next((candidate for candidate in candidates if pressed(candidate)),candidates[0])
     def field(name):
         offset,size,maximum=fields[name]
         if offset+size>len(body)*8 or not size: raise ValueError('short touch report')
@@ -66,6 +84,7 @@ def decode_touch(layouts, data, width=1920,height=720):
 class TouchInput:
     def __init__(self,devices,display_uuid,width=1920,height=720):
         self.width,self.height=width,height
+        self.debug_reports=0
         self.layouts={str(d['uuid']):touch_layout(bytes(d['hidDescriptor'])) for d in devices
                       if d.get('displayUUID')==display_uuid and 'hidDescriptor' in d}
         self.layouts={k:v for k,v in self.layouts.items() if v}
@@ -89,8 +108,15 @@ class TouchInput:
     def command(self,value):
         if value.get('type')!='hidSendReport': return
         layout=self.layouts.get(str(value.get('uuid')))
-        if layout is None: return
+        if layout is None:
+            if self.debug_reports < 5:
+                print('Touch unknown uuid={!r} known={}'.format(value.get('uuid'),list(self.layouts)),flush=True)
+                self.debug_reports+=1
+            return
         down,x,y=decode_touch(layout,bytes(value['hidReport']),self.width,self.height)
+        if self.debug_reports < 5:
+            print('Touch report uuid={} bytes={} decoded=({}, {}, {})'.format(value.get('uuid'),bytes(value['hidReport']).hex(),down,x,y),flush=True)
+            self.debug_reports+=1
         self.event(2,0,x-self.x); self.event(2,1,y-self.y)
         if down!=self.down: self.event(1,0x110,int(down))
         self.event(0,0,0)

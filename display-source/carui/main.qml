@@ -1,6 +1,7 @@
 import QtQuick 2.0
 import QtQuick.Window 2.0
 import Sailfish.Silica 1.0 as Silica
+import Sailfish.Media 1.0 as Media
 Window {
     id: projectionWindow
     visible: true; width: Number(Qt.application.arguments[2] || 1920); height: Number(Qt.application.arguments[3] || 720); color: "#17203a"
@@ -78,6 +79,12 @@ Window {
             }
         }
         Rectangle {
+            x: 25; y: parent.height - 178; width: 90; height: 58; radius: 16
+            color: carController.dashboardActive ? "#526795" : "#263249"
+            Text { anchors.centerIn: parent; text: "◫"; color: "white"; font.pixelSize: 42 }
+            MouseArea { anchors.fill: parent; onClicked: carController.openDashboard() }
+        }
+        Rectangle {
             x: 25; y: parent.height - 108; width: 90; height: 86; radius: 22; color: homeTouch.pressed ? "#526795" : "transparent"
             Grid { anchors.centerIn: parent; columns: 3; spacing: 5; Repeater { model: 9; Rectangle { width: 11; height: 11; radius: 3; color: "white" } } }
             MouseArea { id: homeTouch; anchors.fill: parent; onClicked: carController.homeClicked() }
@@ -85,7 +92,7 @@ Window {
     }
     Silica.SlideshowView {
         id: pages
-        visible: carController.currentApp === ""
+        visible: carController.currentApp === "" && !carController.dashboardActive
         x: dock.width; width: root.width - x; height: root.height - 66
         itemWidth: width; itemHeight: height
         orientation: Qt.Horizontal
@@ -133,6 +140,140 @@ Window {
                         }
                     }
                 }
+            }
+        }
+    }
+    Item {
+        visible: carController.dashboardActive
+        x: dock.width; width: root.width - x; height: root.height
+        property real mapWidth: (width - 48) * 0.65
+        Text { x: 24; y: 14; text: "地图"; font.pixelSize: 30; color: "white" }
+        Text { x: parent.mapWidth + 40; y: 14; text: "音乐"; font.pixelSize: 30; color: "white" }
+        Rectangle {
+            x: 16; y: 64; width: parent.mapWidth; height: parent.height - 80
+            radius: 22; color: "#263249"
+            property var player: lockscreenMusic.item ? lockscreenMusic.item.mprisController : null
+            property string artworkKey: player ? String(player.metaData.artUrl || player.metaData.url || "") : ""
+            property url artwork: ""
+            onArtworkKeyChanged: refreshArtwork()
+            function refreshArtwork() {
+                artwork = player ? carController.artworkSource(player.metaData.artUrl || "", player.metaData.url || "") : ""
+            }
+            Connections {
+                target: carController
+                onArtworkAvailable: if (key === musicCard.artworkKey) musicCard.artwork = localUrl
+            }
+            Text { anchors.centerIn: parent; width: parent.width - 40; wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter; color: "#aebcd4"; font.pixelSize: 26
+                visible: !carController.dashboardMapApp
+                text: "在 Sailplay App 中选择地图应用" }
+            MouseArea {
+                anchors.fill: parent
+                enabled: !!carController.dashboardMapApp
+                onClicked: carController.dockClicked(carController.dashboardMapApp)
+            }
+        }
+        Rectangle {
+            id: musicCard
+            x: parent.mapWidth + 32; y: 64; width: parent.width - parent.mapWidth - 48; height: parent.height - 80
+            radius: 22; color: "#263249"
+            function openMusic() {
+                if (carController.dashboardMusicApp)
+                    carController.dockClicked(carController.dashboardMusicApp)
+            }
+            MouseArea { anchors.fill: parent; onClicked: musicCard.openMusic() }
+            Media.MprisPlayerControls {
+                id: lockscreenMusic
+                onLoaded: {
+                    // The system loader reparents its controls to this card.
+                    item.width = Qt.binding(function() { return musicCard.width - 64 })
+                    item.x = 32
+                    item.y = Qt.binding(function() { return Math.max(24, (musicCard.height - 140 - item.height) / 2) })
+                    item.clicked.connect(musicCard.openMusic)
+                    item.albumArtSource = Qt.binding(function() { return musicCard.artwork })
+                    musicCard.refreshArtwork()
+                }
+            }
+            // Override the system title area's play/pause shortcut. Buttons
+            // in the bottom row retain their original handlers.
+            MouseArea {
+                visible: !!lockscreenMusic.item
+                z: 2
+                x: 32; width: parent.width - 64
+                y: lockscreenMusic.item ? lockscreenMusic.item.y : 0
+                height: lockscreenMusic.item ? Math.max(0, lockscreenMusic.item.height - lockscreenMusic.item._squareSize) : 0
+                onClicked: musicCard.openMusic()
+            }
+            Item {
+                id: musicProgress
+                z: 2
+                x: 32; width: parent.width - 64; height: 112
+                y: lockscreenMusic.item ? lockscreenMusic.item.y + lockscreenMusic.item.height + 16 : 0
+                visible: !!lockscreenMusic.item
+                property var player: lockscreenMusic.item ? lockscreenMusic.item.mprisController : null
+                // Amber.Mpris exposes position in milliseconds, duration in seconds.
+                property real durationSeconds: player ? Math.max(0, Number(player.metaData.duration || 0)) : 0
+                property real positionSeconds: 0
+                property var seekTrackId
+                property string seekService
+                function timeText(seconds) {
+                    var n = Math.max(0, Math.floor(seconds))
+                    var minutes = Math.floor(n / 60)
+                    return minutes + ":" + (n % 60 < 10 ? "0" : "") + (n % 60)
+                }
+                function refresh() {
+                    positionSeconds = player ? Math.max(0, Number(player.position) / 1000) : 0
+                    if (!seekSlider.pressed)
+                        seekSlider.value = Math.min(durationSeconds || positionSeconds, positionSeconds)
+                }
+                Timer {
+                    interval: 1000; repeat: true; triggeredOnStart: true
+                    running: musicProgress.visible && carController.dashboardActive && !!musicProgress.player
+                    onTriggered: musicProgress.refresh()
+                }
+                Connections {
+                    target: musicProgress.player
+                    onPositionChanged: musicProgress.refresh()
+                    onPlaybackStatusChanged: musicProgress.refresh()
+                }
+                Silica.Slider {
+                    id: seekSlider
+                    width: parent.width; height: 72
+                    minimumValue: 0; maximumValue: Math.max(1, musicProgress.durationSeconds)
+                    stepSize: 1
+                    enabled: !!musicProgress.player && musicProgress.player.canSeek && musicProgress.durationSeconds > 0
+                    onPressedChanged: {
+                        if (!musicProgress.player) return
+                        if (pressed) {
+                            musicProgress.seekTrackId = musicProgress.player.metaData.trackId
+                            musicProgress.seekService = musicProgress.player.currentService
+                        } else if (enabled && musicProgress.seekService === musicProgress.player.currentService)
+                            carController.seekPlayer(musicProgress.seekService, musicProgress.seekTrackId, value)
+                    }
+                }
+                Text {
+                    x: 8; y: 76; color: "#aebcd4"; font.pixelSize: 24
+                    text: musicProgress.timeText(seekSlider.pressed ? seekSlider.value : musicProgress.positionSeconds)
+                }
+                Text {
+                    anchors.right: parent.right; anchors.rightMargin: 8
+                    y: 76; color: "#aebcd4"; font.pixelSize: 24
+                    text: musicProgress.durationSeconds > 0 ? musicProgress.timeText(musicProgress.durationSeconds) : "--:--"
+                }
+            }
+            Text {
+                anchors.centerIn: parent; width: parent.width - 64; wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter; color: "#aebcd4"; font.pixelSize: 26
+                visible: !lockscreenMusic.item
+                text: carController.dashboardMusicApp ? "打开音乐应用开始播放" : "暂无音乐播放\n在 Sailplay App 中选择音乐应用"
+            }
+            Rectangle {
+                anchors.bottom: parent.bottom; anchors.bottomMargin: 20
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width - 64; height: 56; radius: 16; color: "#354460"
+                visible: !!carController.dashboardMusicApp && !lockscreenMusic.item
+                Text { anchors.centerIn: parent; text: "打开音乐应用"; font.pixelSize: 24; color: "white" }
+                MouseArea { anchors.fill: parent; onClicked: carController.dockClicked(carController.dashboardMusicApp) }
             }
         }
     }
