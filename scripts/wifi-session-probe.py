@@ -111,15 +111,30 @@ def main():
                             dbus.Dictionary({'key_mgmt': dbus.String('WPA-PSK'),
                                              'proto': dbus.String('RSN')}, signature='sv'))
                 print('HU network only: selected WPA2-PSK instead of SAE', flush=True)
-                # ConnMan selects the network before NetworkAdded reaches our
-                # GLib loop. Updating it alone leaves the first attempt on SAE.
-                # Re-select only this HU network to apply the new configuration.
+                # Keep ConnMan's association alive. Explicit Disconnect was
+                # interpreted as SAE authentication failure and removed this
+                # network before the WPA2 attempt could complete.
                 interface_path = str(path).split('/Networks/')[0]
                 interface = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', interface_path),
                                            'fi.w1.wpa_supplicant1.Interface')
-                interface.Disconnect()
-                interface.SelectNetwork(path)
-                print('HU network only: restarted association with WPA2 configuration', flush=True)
+                properties = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', interface_path),
+                                            'org.freedesktop.DBus.Properties')
+                from carplay_proto.wifiretry import reassociate_target
+                selection_deadline=time.monotonic()+2
+                def apply_reassociation():
+                    try:
+                        if reassociate_target(interface,properties,path):
+                            print('HU network only: requested WPA2 reassociation without Disconnect',flush=True)
+                            return False
+                    except dbus.DBusException as error:
+                        print('WPA2 reassociation request failed: '+error.get_dbus_name(),flush=True)
+                        return False
+                    if time.monotonic() >= selection_deadline:
+                        print('HU WPA2 properties updated; target was not selected, leaving current network unchanged',flush=True)
+                        return False
+                    return True
+                if apply_reassociation():
+                    GLib.timeout_add(50,apply_reassociation)
         bus.add_signal_receiver(network_added, signal_name='NetworkAdded',
                                 dbus_interface='fi.w1.wpa_supplicant1.Interface', bus_name='fi.w1.wpa_supplicant1')
     if args.trace_supplicant:

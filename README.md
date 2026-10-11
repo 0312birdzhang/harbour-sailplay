@@ -4,7 +4,7 @@ Wireless CarPlay phone/source implementation for SailfishOS, tested on Xiaomi Pa
 
 ## Current status
 
-Version 0.1.0-53 includes Bluetooth RFCOMM/iAP2, accessory certificate pinning and challenge verification, ConnMan Wi-Fi handover, encrypted AirPlay control/video/audio, a virtual 1920x720 compositor and reverse touch input.
+Version 0.1.0-54 includes Bluetooth RFCOMM/iAP2, accessory certificate pinning and challenge verification, ConnMan Wi-Fi handover, encrypted AirPlay control/video/audio, a virtual 1920x720 compositor and reverse touch input.
 
 - Continuous projection, application launching and touch have been confirmed on the head unit.
 - A standalone Sailplay tablet app selects the applications shown on the car display; changes save automatically.
@@ -17,6 +17,8 @@ Version 0.1.0-53 includes Bluetooth RFCOMM/iAP2, accessory certificate pinning a
 - Return to the original head-unit UI closes only the screen stream, keeping audio and control connected. Native UI switching was confirmed on the head unit; its requestUI event also re-established video. The packaged return tile, head-unit CarPlay re-entry and restored touch were confirmed on the tested head unit.
 
 ## Source layout
+
+Version 54 replaces the explicit Disconnect/SelectNetwork WPA2 fallback with Reassociate, guarded by the currently selected network identity. October 11 logs showed that version 53 waited as intended, but ConnMan had already removed the association after the forced disconnect and reported invalid-key. The phone exposes Reassociate; regression tests protect unrelated network selection and forbid explicit disconnect in this fallback. Successful in-car association remains pending.
 
 Version 53 scans again when a saved HU profile has no signal, instead of treating its cached presence as AP availability. WPA2 reselection allows a bounded 15-second grace period for the retired attempt's failure and waits for the new connection to become ready. Network sampling now starts before association, retaining supplicant state/status evidence for failed connections. October 10 logs showed repeated NoCarrier, then invalid-key immediately after intentional WPA2 reselection; successful in-car connection after this change remains unverified.
 

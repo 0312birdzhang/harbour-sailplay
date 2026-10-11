@@ -2,6 +2,17 @@
 import time
 
 
+def reassociate_target(interface, properties, target):
+    """Restart authentication only when ConnMan has selected the HU network."""
+    current=properties.Get('fi.w1.wpa_supplicant1.Interface','CurrentNetwork')
+    if str(current)!=str(target):
+        return False
+    # Explicit Disconnect emits a disconnected transition which ConnMan's
+    # SAE failure handler treats as invalid-key and removes the network.
+    interface.Reassociate()
+    return True
+
+
 class ReassociationWindow:
     def __init__(self, clock=time.monotonic):
         self.clock=clock
