@@ -117,7 +117,14 @@ class TouchInput:
         if self.debug_reports < 5:
             print('Touch report uuid={} bytes={} decoded=({}, {}, {})'.format(value.get('uuid'),bytes(value['hidReport']).hex(),down,x,y),flush=True)
             self.debug_reports+=1
-        self.event(2,0,x-self.x); self.event(2,1,y-self.y)
+        if down and not self.down:
+            # Other pointers or a compositor restart can move its cursor
+            # independently. Anchor each new gesture before pressing; do not
+            # recenter during a drag, which would scroll through the origin.
+            self.event(2,0,-2*self.width); self.event(2,1,-2*self.height)
+            self.event(2,0,x); self.event(2,1,y)
+        else:
+            self.event(2,0,x-self.x); self.event(2,1,y-self.y)
         if down!=self.down: self.event(1,0x110,int(down))
         self.event(0,0,0)
         self.x,self.y,self.down=x,y,down

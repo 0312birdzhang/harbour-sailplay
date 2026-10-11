@@ -66,7 +66,15 @@ class ScreenEncoder:
 class DemoEvents:
     def __init__(self,address,port,interface,shared,handler=None):
         self.handler=handler
+        self.received = 0
+        self.last_received = None
         transport = connect(address,port,interface)
+        # The touch channel can be idle for minutes while video stays busy.
+        transport.sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        transport.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 15)
+        transport.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
+        transport.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+        transport.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         # Events is an inbound request channel: phone acts as RTSP server.
         read = crypto.hkdf_sha512(shared,b'Events-Salt',b'Events-Write-Encryption-Key',32)
         write = crypto.hkdf_sha512(shared,b'Events-Salt',b'Events-Read-Encryption-Key',32)
@@ -99,6 +107,8 @@ class DemoEvents:
                         return
                     buf += block
                 body,buf = buf[:size],buf[size:]
+                self.received += 1
+                self.last_received = time.monotonic()
                 print('Demo event: {} bytes={}'.format(lines[0],size),flush=True)
                 code=200
                 reply=b''
@@ -111,13 +121,16 @@ class DemoEvents:
                             result=self.handler(value)
                             if result is not None:
                                 reply=plistlib.dumps(result,fmt=plistlib.FMT_BINARY)
-                    except Exception:
+                    except Exception as error:
+                        print('Event handler failed: {}'.format(type(error).__name__),flush=True)
                         code=400
                 self.sock.sendall(('RTSP/1.0 {} {}\r\nCSeq: {}\r\nContent-Type: application/x-apple-binary-plist\r\nContent-Length: {}\r\n\r\n'.format(
                     code,'OK' if code==200 else 'Bad Request',headers.get('cseq','0').strip(),len(reply))).encode()+reply)
         except Exception as error:
             if not self.stop.is_set():
                 print('Demo event channel: {}'.format(type(error).__name__),flush=True)
+        finally:
+            self.stop.set()
 
     def close(self):
         self.stop.set()
@@ -235,7 +248,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
     if not live and (int(display['widthPixels']),int(display['heightPixels'])) != (1920,720):
         raise ValueError('demo requires 1920x720 display')
     stream_id = int.from_bytes(__import__('os').urandom(7),'big') or 1
-    touch = audio = None
+    touch = audio = power = None
     resume = threading.Event()
     modes={'appStates':[{'appStateID':1,'entity':0,'speechMode':-1},
                         {'appStateID':2,'entity':0},{'appStateID':3,'entity':0}],
@@ -272,6 +285,15 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
     commands = None
     screen = None
     try:
+        if live:
+            from .projectionpower import ProjectionPower
+            power = ProjectionPower(lambda: {
+                'events': events.received if events else 0,
+                'event_age': round(time.monotonic() - events.last_received, 1)
+                             if events and events.last_received is not None else None,
+                'event_thread_alive': bool(events and events.thread.is_alive()),
+            })
+            power.start()
         events = DemoEvents(address,int(setup_info['eventPort']),interface,shared,
                             event_command)
         first_live_frame = None
@@ -315,7 +337,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         encoder = ScreenEncoder(shared,stream_id)
         if live:
             from .screenstream import ScreenStream
-            screen=ScreenStream(client,address,interface,shared,display,video,stream_id,width,height)
+            screen=ScreenStream(client,address,interface,shared,display,video,stream_id,width,height,
+                                request_keyframe=pipeline.request_keyframe)
             feedback=ScreenFeedback(client,commands,modes,resume,screen)
         if live:
             import itertools
@@ -328,6 +351,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         previous_config = None
         sample = open('/tmp/sailplay-live-video.h264','wb') if live else None
         for config,nals in source:
+            if events and events.stop.is_set():
+                raise RuntimeError('touch/event channel ended; reconnecting media session')
             if feedback and feedback.stop.is_set():
                 raise RuntimeError('control feedback ended')
             if on_activity:
@@ -371,6 +396,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                 print('Demo video sent {} frames in {:.2f}s'.format(count,time.monotonic()-start),flush=True)
         print('Demo complete: {} frames'.format(count),flush=True)
     finally:
+        if power:
+            power.close()
         if audio:
             audio.close()
         if 'sample' in locals() and sample:

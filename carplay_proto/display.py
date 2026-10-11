@@ -107,6 +107,30 @@ class DisplayPipeline:
         print('Sailife virtual UI/capture started; dedicated CarPlay FIFO',flush=True)
         return self
 
+    def request_keyframe(self):
+        # su remains as a parent; never signal the entire group, which would
+        # also terminate su. Validate the executable and this pipeline's FIFO.
+        parent = self.capture.pid
+        children = '/proc/{0}/task/{0}/children'.format(parent)
+        try:
+            with open(children) as source:
+                candidates = [parent] + [int(pid) for pid in source.read().split()]
+        except FileNotFoundError:
+            raise RuntimeError('capture process exited before keyframe request')
+        for pid in candidates:
+            try:
+                executable = os.readlink('/proc/{}/exe'.format(pid))
+                if executable != '/opt/sailplay/carlife-capture':
+                    continue
+                with open('/proc/{}/cmdline'.format(pid), 'rb') as source:
+                    arguments = source.read().split(b'\0')
+                if self.fifo.encode() in arguments:
+                    os.kill(pid, signal.SIGUSR1)
+                    return
+            except FileNotFoundError:
+                continue
+        raise RuntimeError('owned capture process not found for keyframe request')
+
     def frames(self,seconds):
         parser=AnnexBFrames()
         deadline=time.monotonic()+seconds if seconds else float('inf')

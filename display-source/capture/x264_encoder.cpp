@@ -16,7 +16,7 @@ bool X264Encoder::init(int width, int height, int fps, int bitrate,
     m_height = height;
 
     x264_param_t param;
-    if (x264_param_default_preset(&param, "ultrafast", "zerolatency") < 0) {
+    if (x264_param_default_preset(&param, "superfast", "zerolatency") < 0) {
         m_error = "x264_param_default_preset failed";
         return false;
     }
@@ -26,8 +26,19 @@ bool X264Encoder::init(int width, int height, int fps, int bitrate,
     param.i_fps_den = 1;
     param.i_threads = 2;
     param.i_csp = X264_CSP_I420;
-    param.rc.i_rc_method = X264_RC_ABR;
+    /* UI frames need stable quality, rather than spending an ABR budget on
+     * a motionless gradient. Keep VBV as the transport safety limit. */
+    param.rc.i_rc_method = X264_RC_CRF;
+    param.rc.f_rf_constant = 20.0f;
     param.rc.i_bitrate = bitrate / 1000;
+    param.rc.f_ip_factor = 1.0f; // avoid a quality jump at each periodic IDR
+    param.rc.i_aq_mode = X264_AQ_VARIANCE;
+    param.rc.f_aq_strength = 0.8f;
+    param.b_deblocking_filter = 1;
+    param.b_intra_refresh = 1; // refresh columns gradually, without periodic IDR flashes
+    param.i_scenecut_threshold = 0;
+    // Baseline-compatible I4x4 and sub-pixel prediction preserve map labels
+    // with less bitrate than ultrafast's I16-only, integer-pixel prediction.
     /* Bound the per-frame size. On high-detail content (browser pages) an
      * unconstrained IDR balloons to ~470KB, which overruns the head unit's
      * decode buffer and kills the session right at the first video frame.
@@ -35,7 +46,7 @@ bool X264Encoder::init(int width, int height, int fps, int bitrate,
      * 4Mbps/30fps) and makes rate control spread the rest over the GOP. */
     param.rc.i_vbv_max_bitrate = bitrate / 1000;
     param.rc.i_vbv_buffer_size = bitrate / 1000 * 4 / fps + 1;
-    param.i_keyint_max = fps / 2;  /* 0.5s GOP: fast resync */
+    param.i_keyint_max = fps * 2;  /* interval between gradual refresh cycles */
     param.i_keyint_min = 1;
     param.b_open_gop = 0;           /* closed GOP: IDR frames */
     param.b_repeat_headers = 1;   /* SPS/PPS in stream (Annex-B) */
@@ -48,7 +59,7 @@ bool X264Encoder::init(int width, int height, int fps, int bitrate,
      * the stream starts with a real IDR slice (type 5); the head unit's
      * decoder refuses to start on an open-GOP I/P frame (black screen). */
     param.b_open_gop = 0;
-    param.i_keyint_max = fps / 2;
+    param.i_keyint_max = fps * 2;
     param.i_keyint_min = 1;
 
     m_enc = x264_encoder_open(&param);
@@ -65,13 +76,15 @@ bool X264Encoder::init(int width, int height, int fps, int bitrate,
     }
     m_pic->i_pts = 0;
     fprintf(stderr, "x264 cfg: open_gop=%d keyint_max=%d keyint_min=%d fps=%d threads=%d "
-                    "vbv_max=%d vbv_buf=%d\n",
+                    "vbv_max=%d vbv_buf=%d crf=%.1f ip_factor=%.2f aq=%d deblock=%d intra_refresh=%d\n",
             param.b_open_gop, param.i_keyint_max, param.i_keyint_min, fps, param.i_threads,
-            param.rc.i_vbv_max_bitrate, param.rc.i_vbv_buffer_size);
+            param.rc.i_vbv_max_bitrate, param.rc.i_vbv_buffer_size,
+            param.rc.f_rf_constant, param.rc.f_ip_factor, param.rc.i_aq_mode,
+            param.b_deblocking_filter, param.b_intra_refresh);
     return true;
 }
 
-bool X264Encoder::encode(const uint8_t *i420, size_t size)
+bool X264Encoder::encode(const uint8_t *i420, size_t size, bool forceIdr)
 {
     if (!m_enc)
         return false;
@@ -83,6 +96,7 @@ bool X264Encoder::encode(const uint8_t *i420, size_t size)
     memcpy(m_pic->img.plane[1], i420 + ysz, uvsz);
     memcpy(m_pic->img.plane[2], i420 + ysz + uvsz, uvsz);
     m_pic->i_pts = m_pts++;
+    m_pic->i_type = forceIdr ? X264_TYPE_IDR : X264_TYPE_AUTO;
 
     x264_nal_t *nals = nullptr;
     int i_nals = 0;

@@ -1,5 +1,9 @@
 import unittest
-from carplay_proto.display import AnnexBFrames
+import io
+import signal
+from types import SimpleNamespace
+from unittest.mock import patch
+from carplay_proto.display import AnnexBFrames, DisplayPipeline
 
 
 class DisplayFramesTests(unittest.TestCase):
@@ -19,3 +23,27 @@ class DisplayFramesTests(unittest.TestCase):
     def test_unbounded_capture_input_rejected(self):
         with self.assertRaises(ValueError):
             AnnexBFrames().feed(bytes(8*1024*1024+1))
+
+    def test_keyframe_signals_only_owned_capture_child(self):
+        pipeline = DisplayPipeline()
+        pipeline.capture = SimpleNamespace(pid=100)
+        def read(path, mode='r'):
+            if path.endswith('/children'):
+                return io.StringIO('101 102')
+            if path == '/proc/101/cmdline':
+                return io.BytesIO(b'carlife-capture\0--out\0/unrelated\0')
+            return io.BytesIO(b'carlife-capture\0--out\0' + pipeline.fifo.encode() + b'\0')
+        with patch('builtins.open', side_effect=read), \
+             patch('os.readlink', side_effect=lambda path: '/usr/bin/su' if path == '/proc/100/exe' else '/opt/sailplay/carlife-capture'), \
+             patch('os.kill') as kill:
+            pipeline.request_keyframe()
+            kill.assert_called_once_with(102, signal.SIGUSR1)
+
+    def test_keyframe_never_signals_unrelated_process(self):
+        pipeline = DisplayPipeline()
+        pipeline.capture = SimpleNamespace(pid=100)
+        with patch('builtins.open', return_value=io.StringIO('')), \
+             patch('os.readlink', return_value='/usr/bin/su'), patch('os.kill') as kill:
+            with self.assertRaises(RuntimeError):
+                pipeline.request_keyframe()
+            kill.assert_not_called()

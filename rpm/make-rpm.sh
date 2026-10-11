@@ -2,7 +2,7 @@
 set -eu
 REPO=/parentroot/mnt/d/code/sfos-carlife/harbour-sailplay
 WORK=$(mktemp -d /tmp/sailplay-rpm.XXXXXX)
-STAGE=$WORK/harbour-sailplay-0.1.0
+STAGE=$WORK/harbour-sailplay-0.1.1
 mkdir -p "$STAGE/rpm/payload" "$STAGE/display-source/carui"
 cp -r "$REPO/carplay_proto" "$STAGE/"
 find "$STAGE/carplay_proto" -type d -name __pycache__ -exec rm -rf {} +
@@ -20,6 +20,6 @@ cp "$REPO/rpm/sailplay-xpolicy.conf" "$STAGE/rpm/"
 cp "$REPO/rpm/50-sailplay.rules" "$STAGE/rpm/"
 cp "$REPO/rpm/sailplay-reconnect.service" "$STAGE/rpm/"
 cd "$WORK"
-tar cjf harbour-sailplay-0.1.0.tar.bz2 harbour-sailplay-0.1.0
-rpmbuild -ta --target aarch64 --define 'debug_package %{nil}' --define '__os_install_post %{nil}' harbour-sailplay-0.1.0.tar.bz2
-test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.0-54.aarch64.rpm"
+tar cjf harbour-sailplay-0.1.1.tar.bz2 harbour-sailplay-0.1.1
+rpmbuild -ta --target aarch64 --define 'debug_package %{nil}' --define '__os_install_post %{nil}' harbour-sailplay-0.1.1.tar.bz2
+test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.1-1.aarch64.rpm"

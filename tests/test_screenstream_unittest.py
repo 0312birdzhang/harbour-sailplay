@@ -23,7 +23,8 @@ class ScreenStreamTests(unittest.TestCase):
                     return 200, {}, plistlib.dumps({'streams': [{'type': 110, 'dataPort': 1234}]})
                 return 200, {}, b''
         client = Client()
-        stream = ScreenStream(client, '127.0.0.1', 'wlan0', bytes(32), {'uuid': 'screen'}, Video(), 42)
+        stream = ScreenStream(client, '127.0.0.1', 'wlan0', bytes(32), {'uuid': 'screen'}, Video(), 42,
+                              request_keyframe=lambda: order.append('IDR'))
         try:
             stream.ownership(2)
             self.assertEqual(order, ['shutdown', 'close', 'TEARDOWN'])
@@ -31,7 +32,7 @@ class ScreenStreamTests(unittest.TestCase):
             self.assertFalse(stream.send(b'config', [b'\x65\x80'], 0))
             with patch('carplay_proto.screenstream.connect', return_value=SimpleNamespace(sock=Video())):
                 stream.ownership(1)
-            self.assertEqual(order[-2:], ['SETUP', 'RECORD'])
+            self.assertEqual(order[-3:], ['SETUP', 'RECORD', 'IDR'])
             self.assertFalse(stream.send(b'config', [b'\x41\x80'], 0))
             self.assertTrue(stream.send(b'config', [b'\x65\x80'], 0))
             self.assertFalse(stream.need_idr)

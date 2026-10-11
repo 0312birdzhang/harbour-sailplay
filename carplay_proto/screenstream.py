@@ -10,7 +10,7 @@ from .videodemo import ScreenEncoder
 
 
 class ScreenStream:
-    def __init__(self, client, address, interface, shared, display, video, stream_id, width=1920, height=720):
+    def __init__(self, client, address, interface, shared, display, video, stream_id, width=1920, height=720, request_keyframe=None):
         self.width,self.height=width,height
         self.client, self.address, self.interface = client, address, interface
         self.shared, self.display = shared, display
@@ -20,6 +20,7 @@ class ScreenStream:
         self.need_idr = True
         self.last_keepalive = time.monotonic()
         self.lock = threading.RLock()
+        self.request_keyframe = request_keyframe
 
     def _close_video(self):
         if self.video is not None:
@@ -65,6 +66,8 @@ class ScreenStream:
             if status != 200:
                 self._close_video()
                 raise RuntimeError('screen resume RECORD rejected')
+            if self.request_keyframe:
+                self.request_keyframe()
 
     def send(self, config, nals, timestamp):
         with self.lock:

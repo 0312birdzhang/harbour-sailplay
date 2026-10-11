@@ -24,6 +24,9 @@ using namespace imira;
 
 static volatile sig_atomic_t g_running = 1;
 static void onSig(int) { g_running = 0; }
+static_assert(ATOMIC_BOOL_LOCK_FREE == 2, "signal flag must be lock-free");
+static std::atomic<bool> g_forceIdr{false};
+static void onKeyframe(int) { g_forceIdr.store(true, std::memory_order_relaxed); }
 
 static std::queue<std::vector<uint8_t>> g_frames;
 static std::mutex g_mtx;
@@ -49,6 +52,7 @@ int main(int argc, char **argv)
 
     signal(SIGINT, onSig);
     signal(SIGTERM, onSig);
+    signal(SIGUSR1, onKeyframe);
     // Writing to the video FIFO when no reader is attached (e.g. the car
     // disconnected between reconnects) must not kill us with SIGPIPE.
     signal(SIGPIPE, SIG_IGN);
@@ -92,7 +96,7 @@ int main(int argc, char **argv)
                 g_frames.pop();
             }
             const auto before = std::chrono::steady_clock::now();
-            if (!enc.encode(f.data(), f.size()))
+            if (!enc.encode(f.data(), f.size(), g_forceIdr.exchange(false)))
                 fprintf(stderr, "carlife-capture: encode failed: %s\n",
                         enc.lastError().c_str());
             const auto now = std::chrono::steady_clock::now();

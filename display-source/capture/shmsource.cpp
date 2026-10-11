@@ -85,6 +85,9 @@ bool ShmFrameSource::start(int fps, const FrameCallback &cb)
                     __atomic_load_n(&header->seq, __ATOMIC_ACQUIRE);
                 if (seq != lastSeq && (seq & 1) == 0) {
                     memcpy(copy.data(), frame, frameBytes);
+                    // On ARM the frame reads must finish before validating
+                    // the sequence; an acquire load alone only orders later reads.
+                    __atomic_thread_fence(__ATOMIC_ACQUIRE);
                     uint32_t after =
                         __atomic_load_n(&header->seq, __ATOMIC_ACQUIRE);
                     if (after == seq) { // no tear: frame was stable

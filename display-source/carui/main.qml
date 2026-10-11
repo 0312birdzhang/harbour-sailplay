@@ -79,14 +79,9 @@ Window {
             }
         }
         Rectangle {
-            x: 25; y: parent.height - 178; width: 90; height: 58; radius: 16
-            color: carController.dashboardActive ? "#526795" : "#263249"
-            Text { anchors.centerIn: parent; text: "◫"; color: "white"; font.pixelSize: 42 }
-            MouseArea { anchors.fill: parent; onClicked: carController.openDashboard() }
-        }
-        Rectangle {
             x: 25; y: parent.height - 108; width: 90; height: 86; radius: 22; color: homeTouch.pressed ? "#526795" : "transparent"
-            Grid { anchors.centerIn: parent; columns: 3; spacing: 5; Repeater { model: 9; Rectangle { width: 11; height: 11; radius: 3; color: "white" } } }
+            Grid { visible: carController.dashboardActive || carController.currentApp !== ""; anchors.centerIn: parent; columns: 3; spacing: 5; Repeater { model: 9; Rectangle { width: 11; height: 11; radius: 3; color: "white" } } }
+            Text { visible: !carController.dashboardActive && carController.currentApp === ""; anchors.centerIn: parent; text: "◫"; color: "white"; font.pixelSize: 42 }
             MouseArea { id: homeTouch; anchors.fill: parent; onClicked: carController.homeClicked() }
         }
     }

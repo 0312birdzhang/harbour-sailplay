@@ -25,7 +25,7 @@ public:
     // Encode I420 frames.
     bool init(int width, int height, int fps, int bitrate,
               const OutputCallback &cb);
-    bool encode(const uint8_t *i420, size_t size);
+    bool encode(const uint8_t *i420, size_t size, bool forceIdr = false);
     void stop();
 
     const std::string &lastError() const { return m_error; }

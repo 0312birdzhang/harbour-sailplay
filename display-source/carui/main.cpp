@@ -850,9 +850,12 @@ public:
             writeCmd(QStringLiteral("H"));
             m_dashboardActive = false;
             emit currentAppChanged();
-        }
-        if (m_currentApp.isEmpty())
             return;
+        }
+        if (m_currentApp.isEmpty()) {
+            openDashboard();
+            return;
+        }
         const QString appId = m_currentApp;
         hideCurrent();
         fprintf(stderr, "carui: home (hid %s)\n",
