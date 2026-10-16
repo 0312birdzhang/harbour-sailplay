@@ -1,10 +1,28 @@
 import struct
 import unittest
+from unittest.mock import Mock, mock_open, patch
 from carplay_proto.videodemo import ScreenEncoder, demo_frames
 from carplay_proto import crypto
 
 
 class VideoDemoTests(unittest.TestCase):
+    def test_record_precedes_stream_setup_for_native_receiver(self):
+        from carplay_proto.videodemo import run_demo
+        client = Mock()
+        def request(method, *args, **kwargs):
+            if method == 'SETUP':
+                raise RuntimeError('stop after observing stream setup')
+            return 200, {}, b''
+        client.request.side_effect = request
+        info = {'displays': [{'widthPixels': 1920, 'heightPixels': 720, 'uuid': 'display'}]}
+        with patch('builtins.open', mock_open(read_data=b'')), \
+             patch('carplay_proto.videodemo.demo_frames', return_value=(b'', [])), \
+             patch('carplay_proto.videodemo.DemoEvents'):
+            with self.assertRaisesRegex(RuntimeError, 'stop after observing'):
+                run_demo(client, 'receiver', None, bytes(32), {'eventPort': 1}, info, path='demo')
+        self.assertEqual([call.args[0] for call in client.request.call_args_list],
+                         ['RECORD', 'SETUP', 'TEARDOWN'])
+
     def test_multislice_and_mixed_start_codes(self):
         data = b'\x00\x00\x00\x01\x67\x42\x00\x1f\x00\x00\x01\x68\x01'
         data += b'\x00\x00\x01\x65\x80\xaa\x00\x00\x00\x01\x65\x40\xbb'

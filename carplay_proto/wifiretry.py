@@ -2,6 +2,26 @@
 import time
 
 
+class HandoverRetry:
+    """Retry a failed Wi-Fi handover while its authenticated Bluetooth link lives."""
+    def __init__(self, active, launch, clock=time.monotonic, interval=45):
+        self.active, self.launch, self.clock = active, launch, clock
+        self.interval = interval
+        self.deadline = None
+
+    def arm(self):
+        self.deadline = self.clock() + self.interval
+
+    def poll(self):
+        if self.deadline is None or self.clock() < self.deadline:
+            return False
+        self.arm()
+        if self.active():
+            return False
+        self.launch()
+        return True
+
+
 def reassociate_target(interface, properties, target):
     """Restart authentication only when ConnMan has selected the HU network."""
     current=properties.Get('fi.w1.wpa_supplicant1.Interface','CurrentNetwork')

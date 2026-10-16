@@ -1,5 +1,6 @@
 """Bounded plain RTSP transport for initial AirPlay discovery."""
 import socket
+import time
 
 
 class RTSPClient:
@@ -12,6 +13,9 @@ class RTSPClient:
         self.buffer = b''
 
     def request(self, method, path, body=b'', headers=None):
+        # Retry receiving the SAME feedback response; never resend a request
+        # or advance CSeq after a receive timeout on the encrypted stream.
+        self.receive_deadline=time.monotonic()+20 if path=='/feedback' else None
         self.sequence += 1
         fields = {'CSeq': str(self.sequence), 'Content-Length': str(len(body)),
                   'User-Agent': 'Sailplay/0.1'}
@@ -45,7 +49,13 @@ class RTSPClient:
         return status, response, payload
 
     def _receive(self):
-        data = self.sock.recv(16384)
+        while True:
+            try:
+                data = self.sock.recv(16384)
+                break
+            except socket.timeout:
+                if self.receive_deadline is None or time.monotonic()>=self.receive_deadline:raise
+                print('RTSP feedback response delayed; retaining request CSeq={}'.format(self.sequence),flush=True)
         if not data:
             raise EOFError('RTSP peer closed')
         self.buffer += data

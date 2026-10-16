@@ -16,6 +16,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from carplay_proto.bluezadapter import select_adapter
 
 PHONE_EIR = '2d8d2466-e14d-451c-88bc-7301abea291a'
+IAP_V2_EIR = '02030302-1d19-415f-86f2-22a2106a0a77'
+
+
+def missing_advertisements(existing):
+    present = {str(value).lower() for value in existing}
+    return [value for value in (PHONE_EIR, IAP_V2_EIR) if value not in present]
 
 
 def command(sock, opcode, payload, adapter_index=0):
@@ -59,8 +65,9 @@ def main():
                  adapter, props.Get('org.bluez.Adapter1', 'Alias'),
                  props.Get('org.bluez.Adapter1', 'Powered'), existing)
     probe = os.path.join(os.path.dirname(__file__), 'wireless-probe.py')
-    if PHONE_EIR in existing:
-        logging.info('CarPlay EIR already present; preserving existing registration')
+    missing = missing_advertisements(existing)
+    if not missing:
+        logging.info('CarPlay and iAP2 EIR already present; preserving existing registrations')
         result = subprocess.call([sys.executable, probe] + sys.argv[1:])
         logging.info('CarPlay profile process exited status=%d', result)
         return result
@@ -77,13 +84,14 @@ def main():
         error = ctypes.get_errno()
         sock.close()
         raise OSError(error, os.strerror(error))
-    value = uuid.UUID(PHONE_EIR).bytes[::-1]
-    added = False
+    added = []
     monitor = None
     try:
-        command(sock, 0x0010, value + b'\x00', adapter_index)
-        added = True
-        logging.info('temporary CarPlay phone EIR added on %s', adapter)
+        for identifier in missing:
+            value = uuid.UUID(identifier).bytes[::-1]
+            command(sock, 0x0010, value + b'\x00', adapter_index)
+            added.append(value)
+            logging.info('temporary phone service EIR added on %s uuid=%s', adapter, identifier)
         try:
             import importlib.util
             path = os.path.join(os.path.dirname(__file__), 'bluetooth-monitor.py')
@@ -100,9 +108,12 @@ def main():
         try:
             if monitor:
                 monitor.close()
-            if added:
-                command(sock, 0x0011, value, adapter_index)
-                logging.info('temporary CarPlay phone EIR removed')
+            for value in reversed(added):
+                try:
+                    command(sock, 0x0011, value, adapter_index)
+                    logging.info('temporary phone service EIR removed uuid=%s', uuid.UUID(bytes=value[::-1]))
+                except (OSError, TimeoutError):
+                    logging.exception('temporary phone service EIR removal failed')
         finally:
             sock.close()
 

@@ -13,6 +13,15 @@ import json
 import audioop
 
 
+class BufferAttr(C.Structure):
+    # Public libpulse ABI: five uint32_t fields, including maxlength.
+    _fields_=[(name,C.c_uint32) for name in ('maxlength','tlength','prebuf','minreq','fragsize')]
+
+
+def capture_buffer_attr():
+    return BufferAttr(0xffffffff,0xffffffff,0xffffffff,0xffffffff,4096)
+
+
 def pactl(*args):
     return subprocess.check_output(['pactl']+list(args),stderr=subprocess.DEVNULL,
                                    env=dict(os.environ,LC_ALL='C'),timeout=3).decode()
@@ -44,6 +53,13 @@ def stream_diagnostics(output, heading='Sink Input'):
             if match:item[field]=match.group(1)
         result.append(item)
     return result
+
+
+def muted_cast_streams(output,sink_index):
+    """Only active playback already routed to our private sink is eligible."""
+    return [item for item in stream_diagnostics(output)
+            if item.get('sink')==str(sink_index) and item.get('mute')=='yes'
+            and item.get('corked')=='no']
 
 
 def capture_gain(output):
@@ -99,6 +115,17 @@ def restore_outputs():
     os.unlink(ROUTE_STATE)
 
 
+def load_private_sink(name):
+    """Allow a brief PulseAudio restart without tearing down CarPlay."""
+    for attempt in range(5):
+        try:
+            return pactl('load-module','module-null-sink','sink_name='+name,'rate=48000','channels=2').strip()
+        except subprocess.CalledProcessError:
+            if attempt==4:raise
+            print('Audio server not ready; retrying private sink {}/4'.format(attempt+1),file=sys.stderr,flush=True)
+            time.sleep(.5)
+
+
 def main():
     restore_outputs()
     stop=[False]
@@ -110,6 +137,7 @@ def main():
     last_diagnostic=[0.0]
     router=None; route_stop=threading.Event();route_wake=threading.Event()
     sink_mutes={};default_sink=None
+    stream_mutes={}
     lib=C.CDLL(ctypes.util.find_library('pulse'))
     signatures={
         'pa_mainloop_new':([],C.c_void_p), 'pa_mainloop_get_api':([C.c_void_p],C.c_void_p),
@@ -122,6 +150,7 @@ def main():
         'pa_context_subscribe':([C.c_void_p,C.c_int,C.c_void_p,C.c_void_p],C.c_void_p),
         'pa_operation_unref':([C.c_void_p],None),
         'pa_stream_new':([C.c_void_p,C.c_char_p,C.c_void_p,C.c_void_p],C.c_void_p),
+        'pa_stream_get_buffer_attr':([C.c_void_p],C.POINTER(BufferAttr)),
         'pa_stream_connect_record':([C.c_void_p,C.c_char_p,C.c_void_p,C.c_int],C.c_int),
         'pa_stream_get_state':([C.c_void_p],C.c_int), 'pa_stream_get_device_name':([C.c_void_p],C.c_char_p),
         'pa_stream_set_read_callback':([C.c_void_p,C.c_void_p,C.c_void_p],None),
@@ -142,6 +171,12 @@ def main():
         raise RuntimeError('capture stopped')
     def route():
         inputs=pactl('list','sink-inputs')
+        muted=muted_cast_streams(inputs,sink_index)
+        for item in muted:
+            stream_mutes.setdefault(item['id'],True)
+            pactl('set-sink-input-mute',item['id'],'0')
+            print('Audio private playback unmuted id='+item['id'],file=sys.stderr,flush=True)
+        if muted:inputs=pactl('list','sink-inputs')
         pcm_gain[0]=capture_gain(inputs)
         now=time.monotonic()
         if now-last_diagnostic[0]>=10:
@@ -169,7 +204,7 @@ def main():
                 print('Audio routing maintenance failed: '+type(error).__name__,file=sys.stderr,flush=True)
             route_wake.wait(1);route_wake.clear()
     try:
-        module=pactl('load-module','module-null-sink','sink_name='+name,'rate=48000','channels=2').strip()
+        module=load_private_sink(name)
         sink_index=next(l.split()[0] for l in pactl('list','short','sinks').splitlines() if l.split()[1]==name)
         default_sink=pactl('get-default-sink').strip()
         # Policy modules may initially select a hardware sink before the
@@ -224,8 +259,11 @@ def main():
                 if peeked:lib.pa_stream_drop(s)
         callbacks.append(read);lib.pa_stream_set_read_callback(stream,read,None)
         # DONT_MOVE protects against policy modules redirecting this to a microphone.
-        if lib.pa_stream_connect_record(stream,(name+'.monitor').encode(),None,0x200)<0:raise RuntimeError('monitor connect failed')
+        attrs=capture_buffer_attr()
+        if lib.pa_stream_connect_record(stream,(name+'.monitor').encode(),C.byref(attrs),0x200|0x2000)<0:raise RuntimeError('monitor connect failed')
         wait_state(stream,lib.pa_stream_get_state,2)
+        actual=lib.pa_stream_get_buffer_attr(stream)
+        if actual:print('Audio record buffer fragsize={} maxlength={} requestedFragmentMs=21.33'.format(actual.contents.fragsize,actual.contents.maxlength),file=sys.stderr,flush=True)
         print('Audio capturing '+name+'.monitor 48000Hz stereo S16LE',file=sys.stderr,flush=True)
         router=threading.Thread(target=routing_loop,daemon=True)
         router.start()
@@ -240,6 +278,9 @@ def main():
         if stream:lib.pa_stream_disconnect(stream);lib.pa_stream_unref(stream)
         if context:lib.pa_context_disconnect(context);lib.pa_context_unref(context)
         if loop:lib.pa_mainloop_free(loop)
+        for index in stream_mutes:
+            try:pactl('set-sink-input-mute',index,'1')
+            except subprocess.SubprocessError:pass
         for index,sink in moved.items():
             try:pactl('move-sink-input',index,sink)
             except subprocess.SubprocessError:pass

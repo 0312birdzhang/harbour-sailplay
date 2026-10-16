@@ -4,7 +4,25 @@ Wireless CarPlay phone/source implementation for SailfishOS, tested on Xiaomi Pa
 
 ## Current status
 
+Version 0.1.1-10 removes the music-app selector from phone settings. Both car music layouts follow the active MPRIS player, independent of any old music binding. Map selection remains. Audio/Music desktop categories identify phone-side music shortcuts; the old music ID is used only to recognize an existing shortcut for compatibility, not to choose the player or launch target.
+
+Version 0.1.1-9 renders artwork, metadata, playback buttons and progress from the same explicit Amber.Mpris controller. The car music page and dashboard no longer depend on the lock-screen loader's dynamically reparented item. A missing player hides both controls and progress; unavailable previous/next buttons remain dimmed. The configured music app is a launch shortcut, while playback data follows the current MPRIS player, including other compatible music apps.
+
+Version 0.1.1-8 keeps the configured dashboard music app and the built-in Media app on the phone's lipstick display. Vehicle tile/dock taps show Sailplay's independent now-playing page, sharing the existing MPRIS controls, artwork and seek bar with the split dashboard. The normal desktop entry launches through `gio launch`, retaining sailjail/invoker and single-instance behavior where the app supports it. Projection teardown does not own the phone player. Other apps keep the existing virtual-screen launch path. When no music app is configured, the launch button defaults to Media. Phone/car simultaneous windows still need live verification; apps without MPRIS cannot provide car playback controls.
+
+Version 0.1.1-7 localizes both the phone management app and the vehicle UI with Qt translation catalogs. English (fallback), Simplified Chinese, Traditional Chinese, German, French and Russian follow the system message locale at launch. Restart the app or reconnect projection after changing the system language. Service errors authored by Sailplay are localized; raw system D-Bus errors retain their original diagnostic text.
+
+Version 0.1.1-6 corrects audio diagnostics: `peak` now measures PCM after sender ownership/duck gain, while `capturePeak` measures the incoming PCM. Logs record resource transfer requests, applied sender gain and timing request/response counters. On 2026-10-13 LEVIN requested audio ownership at 10:28:57, setting the sender gain to zero; the old pre-gain peak incorrectly suggested non-silent transmitted audio afterward. This does not establish why the earlier 10:27 playback was silent. DiPlay-Legacy's HSAE support adapts proprietary Android Bluetooth services, not the native receiver's audio pipeline. Native HSAE type-100 jitter buffering aligns its first RTP packet with the output sample clock; missing legacy RTCP sync packets are not established as the cause.
+
 Version 0.1.1 includes Bluetooth RFCOMM/iAP2, accessory certificate pinning and challenge verification, ConnMan Wi-Fi handover, encrypted AirPlay control/video/audio, a virtual 1920x720 compositor and reverse touch input.
+
+Version 0.1.1-5 persists the declared audio compatibility build, AAD length and negotiated audio ports alongside existing route/gain/PCM-peak/RTP statistics. Automatic Wi-Fi handover now uses ConnMan's normal security negotiation; the explicit force-WPA2 diagnostic option remains. On the connected COROLLA bench, forced reassociation failed with invalid-key while a normal handover completed. A three-second reference tone reached RTP with peak 4000. The bench has no speakers: audible output and real LEVIN compatibility are still unverified.
+
+Version 0.1.1-4 declares the AirPlay audio compatibility build 13A344 (the product remains SailfishOS). The mounted HSAE libAirPlay.so compares 13A1 with the sender build at 0x1af74 and selects RTP AAD length in APSRTPPacketHandlerDecryptCurrentMessage at 0x252c0. The prior 5.2 value compares older, selecting the full 12-byte header, while Sailplay seals only timestamp/SSRC (8 bytes). The compatibility build selects the matching eight-byte path. This is separate from playback gain; live source PCM and outgoing UDP were verified before the change.
+
+Version 0.1.1-3 removes Wi-Fi power cycling during AP discovery and enables Wi-Fi before a requested handover or manual reconnect. October 12 logs show successful iAP2 handover after ignition, immediate NoCarrier, then a recovery power-off at 13:27:01. ConnMan lost its D-Bus name before re-enabling and restarted at 13:27:03, leaving Wi-Fi off. NoCarrier now triggers bounded scan retries. Tests verify stale discovery never disables Wi-Fi and an already-enabled connection remains untouched. An actual ignition-cycle repeat remains pending.
+
+Version 0.1.1-2 also advertises the iAP2 service UUID already declared in SDP. On October 12 the real LEVIN accepted RFCOMM then disconnected before sending any iAP2 data, and the user reported no CarPlay icon. The phone controller advertised CarPlay and phone-role UUIDs but lacked the iAP2 UUID. This closes an announcement gap; in-car acceptance remains unverified.
 
 Version 59 anchors each new touch gesture to the HID coordinates before pressing. Relative deltas during dragging remain unchanged. A second pointer (including an injected diagnostic pointer) previously moved the compositor cursor without updating TouchInput's cached position: the head unit reported (70,660), but the compositor received clicks around (0,700). The regression exercises an external cursor offset and verifies accurate press placement without recentering during a drag.
 
@@ -123,3 +141,11 @@ Root installation uses an interactive `devel-su` password prompt. Device credent
 Earlier USB transport work is retained in [USB_HISTORY.md](USB_HISTORY.md). It does not describe the current wireless transport.
 
 License: GPL-3.0-or-later; see [LICENSE](LICENSE).
+
+### Local-only vehicle Wi-Fi
+
+Wireless CarPlay does not require Internet access, DNS resolution or a SIM card. ConnMan `ready` is sufficient; `online` is not required. If Connect reports an error (including `NoCarrier`), Sailplay checks the actual supplicant association and probes the iAP2-provided CarPlay endpoint bound to that Wi-Fi interface. A verified local connection continues into AirPlay; stale IPs, association to another SSID and unreachable endpoints retain the normal retry path.
+
+Version 0.1.1-17 also includes AAC-LC media output (48 kHz stereo, stream type 102 when advertised), 21 ms PulseAudio capture fragments, pause-safe audio pacing, bounded delayed-feedback handling, and independent active-player music controls. AAC encoding requires `ffmpeg-tools`. Vehicle speaker output and long ignition/reconnection cycles should be checked on each head-unit model.
+
+Run the Linux protocol regression suite with `python3 -m unittest discover -s tests -p "*unittest.py"`.

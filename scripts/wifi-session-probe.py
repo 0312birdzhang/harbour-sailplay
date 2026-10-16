@@ -33,7 +33,14 @@ def main():
             fcntl.flock(media_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             os.close(media_lock)
-            print('Existing media handover active; duplicate StartSession ignored', flush=True)
+            message = 'Existing media handover active; duplicate StartSession ignored'
+            print(message, flush=True)
+            from carplay_proto.runtime_logging import private_handler
+            import logging
+            handler = private_handler('wifi-airplay')
+            if handler:
+                handler.handle(logging.LogRecord('wifi-airplay', logging.INFO, '', 0, message, (), None))
+                handler.close()
             return
     if args.log_file:
         original_log=args.log_file
@@ -168,8 +175,14 @@ def main():
                                        "type='method_call',destination='fi.w1.wpa_supplicant1'",
                                        "type='method_call',destination='{}'".format(owner),
                                        "type='method_call',sender='{}'".format(connman_owner)], signature='s'), dbus.UInt32(0))
+    from carplay_proto.wifidiscovery import find_service, ensure_wifi_powered
+    wifi_path = None
+    if args.connect:
+        wifi_path = ensure_wifi_powered(manager,
+            lambda path, powered: dbus.Interface(bus.get_object('net.connman', path),
+                'net.connman.Technology').SetProperty('Powered', dbus.Boolean(powered, variant_level=1)),
+            log=lambda message: print(message, flush=True))
     services = manager.GetServices()
-    from carplay_proto.wifidiscovery import find_service
     target = find_service(services, session['ssid'], require_available=True)
     if args.connect and not target:
         # StartSession can precede ConnMan discovering the newly enabled HU AP.
@@ -309,9 +322,12 @@ def main():
                         from carplay_proto.airplaytiming import TimingServer
                         timing = TimingServer(client.sock.sock)
                         import uuid
+                        from carplay_proto.audio import AUDIO_COMPAT_BUILD
+                        print('AirPlay audio compatibility build={} RTP authenticated header=timestamp+SSRC (8 bytes)'.format(
+                            AUDIO_COMPAT_BUILD), flush=True)
                         setup = {'deviceID':'D8:B0:53:22:CE:CF','macAddress':'D8:B0:53:22:CE:CF',
                                  'model':'Sailplay1,1','name':phone_name,'osName':'SailfishOS',
-                                 'osBuildVersion':'5.2','sourceVersion':'566.25.21',
+                                 'osBuildVersion':AUDIO_COMPAT_BUILD,'sourceVersion':'566.25.21',
                                  'sessionUUID':str(uuid.uuid4()),'timingPort':timing.port,
                                  'features':[],'statsCollectionEnabled':False}
                         setup_status, _, setup_body = client.request('SETUP','/setup',plistlib.dumps(setup,fmt=plistlib.FMT_BINARY),
@@ -342,7 +358,8 @@ def main():
                         os.utime(restore_clock, None)
                         run_demo(client,address,interface,verified.shared,setup_info,info,demo_path,
                                  seconds=(0 if args.sustained else 45) if live_ui else 15,live=live_ui,
-                                 on_activity=lambda:os.utime(restore_clock,None))
+                                 on_activity=lambda:os.utime(restore_clock,None),
+                                 bluetooth_address=session.get('bluetooth_address'))
                         break
             except Exception as error:
                 print('AirPlay probe failed: {}, errno={}'.format(type(error).__name__, getattr(error, 'errno', None)), flush=True)
@@ -353,10 +370,73 @@ def main():
                 if client:
                     client.sock.close()
         loop.quit()
+    no_carrier_retries = [0]
+    def after_carrier_scan(*unused):
+        nonlocal target
+        try:
+            available = find_service(manager.GetServices(timeout=5), session['ssid'], require_available=True)
+            if available:
+                if available!=target:
+                    print('HU service refreshed after scan; replacing stale object path',flush=True)
+                    target=available
+                props=service(target).GetProperties()
+                print('Retrying HU Wi-Fi after fresh scan state={} strength={} error={}'.format(props.get('State'),int(props.get('Strength') or 0),props.get('Error')),flush=True)
+                service(target).Connect(reply_handler=connected, error_handler=failed, timeout=12)
+            else:
+                failed(NoCarrierRetry())
+        except dbus.DBusException as error:
+            failed(error)
+    def carrier_scan_failed(error):
+        print('HU retry scan failed: {}'.format(error.get_dbus_name()), flush=True)
+        failed(NoCarrierRetry())
+    def retry_no_carrier():
+        # A synchronous Scan inside a GLib callback stalls the deadline and
+        # D-Bus handlers. Oct 16 retries took 64 seconds instead of 8 seconds.
+        try:
+            technology = dbus.Interface(bus.get_object('net.connman', wifi_path, introspect=False),
+                                        'net.connman.Technology')
+            technology.Scan(reply_handler=after_carrier_scan,
+                            error_handler=carrier_scan_failed, timeout=8)
+        except dbus.DBusException as error:
+            carrier_scan_failed(error)
+        return False
+    class NoCarrierRetry:
+        def get_dbus_name(self):
+            return 'net.connman.Error.NoCarrier'
     def failed(error):
         print('ConnMan Connect failed: {}'.format(error.get_dbus_name()), flush=True)
+        # Connect errors can coexist with a usable local link. Never infer this
+        # merely from cached IPs or lack of Internet; verify association and TCP.
+        try:
+            props=service(target).GetProperties()
+            iface=str(props.get('Ethernet',{}).get('Interface',''))
+            associated=None
+            root=dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1','/fi/w1/wpa_supplicant1'),
+                                'org.freedesktop.DBus.Properties')
+            for path in root.Get('fi.w1.wpa_supplicant1','Interfaces'):
+                iprops=dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1',path),
+                                      'org.freedesktop.DBus.Properties')
+                if str(iprops.Get('fi.w1.wpa_supplicant1.Interface','Ifname'))!=iface:continue
+                if str(iprops.Get('fi.w1.wpa_supplicant1.Interface','State'))!='completed':continue
+                bss=iprops.Get('fi.w1.wpa_supplicant1.Interface','CurrentBSS')
+                bprops=dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1',bss),
+                                      'org.freedesktop.DBus.Properties')
+                associated=bytes(bprops.Get('fi.w1.wpa_supplicant1.BSS','SSID')).decode('utf-8')
+            from carplay_proto.wifidiscovery import verify_local_carplay,probe_bound_endpoint
+            if verify_local_carplay(props,session['ssid'],associated,session['addresses'],session['port'],
+                                    probe_bound_endpoint,log=lambda line:print(line,flush=True)):
+                print('Ignoring ConnMan Connect error for verified local CarPlay link',flush=True)
+                connected()
+                return
+        except (dbus.DBusException,OSError,ValueError,KeyError) as check_error:
+            print('HU local bypass check failed: '+type(check_error).__name__,flush=True)
         if wpa2_retry.waiting():
             print('Waiting for WPA2 reassociation after the retired connection failed', flush=True)
+            return
+        if error.get_dbus_name() == 'net.connman.Error.NoCarrier' and wifi_path and no_carrier_retries[0] < 3:
+            no_carrier_retries[0] += 1
+            print('HU carrier not ready; scheduling scan retry {}/3'.format(no_carrier_retries[0]), flush=True)
+            GLib.timeout_add_seconds(2, retry_no_carrier)
             return
         if args.trace_supplicant:
             output = subprocess.run(['journalctl', '_COMM=wpa_supplicant', '--since', '-2 min', '--no-pager', '-o', 'cat'],
@@ -395,6 +475,7 @@ def main():
         GLib.timeout_add_seconds(30, lambda: (loop.quit(), False)[1])
         loop.run()
     finally:
+        print('Wi-Fi/AirPlay handover worker exiting; releasing media lock', flush=True)
         network_trace.close()
         manager.UnregisterAgent('/org/sailplay/WifiAgent')
         agent.remove_from_connection()

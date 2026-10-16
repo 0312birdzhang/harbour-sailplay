@@ -233,7 +233,20 @@ class ScreenFeedback:
         self.thread.join(6)
 
 
-def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=15,live=False,on_activity=None):
+def disable_bluetooth(client,address):
+    """Ask the authenticated receiver to hand off BT; leave the adapter powered."""
+    import re
+    if not re.fullmatch(r'[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}',str(address)):
+        raise ValueError('invalid local Bluetooth address')
+    status,_,body=client.request('POST','/command',plistlib.dumps(
+        {'type':'disableBluetooth','params':{'deviceID':address.upper()}},fmt=plistlib.FMT_BINARY),
+        {'Content-Type':'application/x-apple-binary-plist'})
+    result=plistlib.loads(body).get('status',0) if body else 0
+    print('Bluetooth handoff localAddress={} HTTP={} result={}'.format(address,status,result),flush=True)
+    if status!=200 or result!=0:raise RuntimeError('Bluetooth handoff rejected')
+
+
+def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=15,live=False,on_activity=None,bluetooth_address=None):
     display = info['displays'][0]
     pipeline = None
     width,height,fps=1920,720,30
@@ -260,6 +273,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             resume.set()
             return {'status':0}
         if value.get('type')=='changeModes':
+            print('HU mode transfer request resources={}'.format(
+                value.get('params',{}).get('resources',[])),flush=True)
             for request in value.get('params',{}).get('resources',[]):
                 resource=next((r for r in modes['resources'] if r['resourceID']==request.get('resourceID')),None)
                 if resource is not None:
@@ -271,11 +286,15 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                         resume.set()
             if audio:
                 audio.gain=1.0 if modes['resources'][1]['entity']==1 else 0.0
+                print('Audio ownership entity={} senderGain={}'.format(
+                    modes['resources'][1]['entity'],audio.gain),flush=True)
             print('HU mode request applied: {}'.format(modes['resources']),flush=True)
             return {'status':0,'params':modes}
         if audio and value.get('type') in ('duckAudio','unduckAudio'):
             volume=max(-144,min(0,float(value.get('params',{}).get('volume',0))))
             audio.gain=10**(volume/20) if value['type']=='duckAudio' else 1.0
+            print('Audio duck command={} volumeDb={} senderGain={}'.format(
+                value['type'],volume,audio.gain),flush=True)
     if live:
         from .touch import TouchInput
         touch=TouchInput(info.get('hidDevices',[]),display['uuid'],width,height)
@@ -305,11 +324,19 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             source = pipeline.frames(seconds)
             first_live_frame = next(source)
             print('Live screen first IDR ready: {} bytes'.format(sum(map(len,first_live_frame[1]))),flush=True)
+        # Start the session before adding streams. HSAE starts audio receive
+        # workers from SETUP only when the session's started flag is already set;
+        # RECORD after stream SETUP starts ALSA but leaves the UDP queue unread.
+        status,_,_ = client.request('RECORD','/')
+        print('Demo RECORD before stream SETUP status={}'.format(status),flush=True)
+        if status!=200:
+            raise RuntimeError('media RECORD rejected')
         payload = {'streams':[{'type':110,'streamConnectionID':stream_id,'latencyMs':100,'uuid':display['uuid']}]}
         if live:
             from .audio import AudioSender
             audio=AudioSender(client,shared,info)
-            payload['streams'].append(audio.description())
+            if bluetooth_address:
+                disable_bluetooth(client,bluetooth_address)
         status,_,body = client.request('SETUP','/setup',plistlib.dumps(payload,fmt=plistlib.FMT_BINARY),
             {'Content-Type':'application/x-apple-binary-plist'})
         print('Demo screen SETUP status={}'.format(status),flush=True)
@@ -319,12 +346,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         print('Demo screen response={}'.format(response),flush=True)
         stream = next(s for s in response['streams'] if s['type']==110)
         video = connect(address,int(stream['dataPort']),interface).sock
-        status,_,_ = client.request('RECORD','/')
-        print('Demo RECORD status={}'.format(status),flush=True)
-        if status!=200:
-            raise RuntimeError('media RECORD rejected')
         if audio:
-            audio_stream=next(s for s in response['streams'] if s['type']==100)
+            audio.prepare()
             # Phone is the resource arbiter: it asserts ownership using modesChanged.
             # changeModes requests travel from the head unit to the phone.
             request={'type':'modesChanged','params':modes}
@@ -333,6 +356,12 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             print('Audio resource request status={}'.format(mode_status),flush=True)
             if mode_status!=200 or (mode_body and plistlib.loads(mode_body).get('status',0)!=0):
                 raise RuntimeError('HU did not grant audio resource')
+            audio_status,_,audio_body=client.request('SETUP','/setup',
+                plistlib.dumps({'streams':[audio.description()]},fmt=plistlib.FMT_BINARY),
+                {'Content-Type':'application/x-apple-binary-plist'})
+            print('Audio SETUP after capture ready/resource claim status={}'.format(audio_status),flush=True)
+            if audio_status!=200:raise RuntimeError('audio SETUP rejected')
+            audio_stream=next(s for s in plistlib.loads(audio_body)['streams'] if s['type']==audio.description()['type'])
             audio.start(audio_stream,client.sock.sock.getpeername())
         encoder = ScreenEncoder(shared,stream_id)
         if live:
@@ -351,6 +380,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         previous_config = None
         sample = open('/tmp/sailplay-live-video.h264','wb') if live else None
         for config,nals in source:
+            if audio and audio.stop.is_set():
+                raise RuntimeError('audio encoder/capture ended; reconnecting media session')
             if events and events.stop.is_set():
                 raise RuntimeError('touch/event channel ended; reconnecting media session')
             if feedback and feedback.stop.is_set():

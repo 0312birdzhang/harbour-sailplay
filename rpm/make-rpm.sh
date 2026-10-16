@@ -11,8 +11,10 @@ for name in wireless-probe.py wireless-phone-advertise.py bluetooth-monitor.py w
     cp "$REPO/scripts/$name" "$STAGE/scripts/"
 done
 cp "$REPO/diagnostics/corolla-accessory-key.json" "$STAGE/diagnostics/"
-cp "$REPO/rpm/payload/"* "$STAGE/rpm/payload/"
+cp -r "$REPO/rpm/payload/"* "$STAGE/rpm/payload/"
+cp -r "$REPO/display-source/carui/translations" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/main.qml" "$REPO/display-source/carui/carui-apps.conf" "$STAGE/display-source/carui/"
+cp "$REPO/display-source/carui/MusicPlayer.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/mobile-settings.qml" "$REPO/display-source/carui/harbour-sailplay.png" "$STAGE/display-source/carui/"
 cp "$REPO/rpm/harbour-sailplay.desktop" "$STAGE/rpm/"
 cp "$REPO/rpm/harbour-sailplay.spec" "$REPO/rpm/sailplay.service" "$STAGE/rpm/"
@@ -22,4 +24,4 @@ cp "$REPO/rpm/sailplay-reconnect.service" "$STAGE/rpm/"
 cd "$WORK"
 tar cjf harbour-sailplay-0.1.1.tar.bz2 harbour-sailplay-0.1.1
 rpmbuild -ta --target aarch64 --define 'debug_package %{nil}' --define '__os_install_post %{nil}' harbour-sailplay-0.1.1.tar.bz2
-test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.1-1.aarch64.rpm"
+test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.1-17.aarch64.rpm"

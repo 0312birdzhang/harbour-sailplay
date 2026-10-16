@@ -1,9 +1,38 @@
 import unittest
 from unittest.mock import Mock
-from carplay_proto.wifiretry import ReassociationWindow, reassociate_target
+from carplay_proto.wifiretry import ReassociationWindow, reassociate_target, HandoverRetry
 
 
 class RetryTests(unittest.TestCase):
+    def test_failed_handover_retries_without_new_bluetooth_connection(self):
+        now = [100]
+        launch = Mock()
+        retry = HandoverRetry(lambda: False, launch, clock=lambda: now[0])
+        self.assertFalse(retry.poll())
+        retry.arm()
+        now[0] = 144
+        self.assertFalse(retry.poll())
+        now[0] = 145
+        self.assertTrue(retry.poll())
+        self.assertFalse(retry.poll())
+        launch.assert_called_once_with()
+        now[0] = 190
+        self.assertTrue(retry.poll())
+        self.assertEqual(launch.call_count, 2)
+
+    def test_active_media_is_never_restarted_by_retry(self):
+        now = [100]
+        active, launch = Mock(return_value=True), Mock()
+        retry = HandoverRetry(active, launch, clock=lambda: now[0])
+        retry.arm()
+        now[0] = 145
+        self.assertFalse(retry.poll())
+        launch.assert_not_called()
+        active.return_value = False
+        now[0] = 190
+        self.assertTrue(retry.poll())
+        launch.assert_called_once_with()
+
     def test_hu_reassociation_never_disconnects_or_reselects(self):
         interface=Mock();properties=Mock()
         properties.Get.return_value='/hu-network'

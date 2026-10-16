@@ -31,6 +31,11 @@ def main():
     logging.info('Reconnect target: %s', target)
     props = dbus.Interface(bus.get_object('org.bluez', adapter), 'org.freedesktop.DBus.Properties')
     props.Set('org.bluez.Adapter1', 'Powered', dbus.Boolean(True))
+    from carplay_proto.wifidiscovery import ensure_wifi_powered
+    manager_wifi = dbus.Interface(bus.get_object('net.connman', '/'), 'net.connman.Manager')
+    ensure_wifi_powered(manager_wifi, lambda path, enabled:
+        dbus.Interface(bus.get_object('net.connman', path), 'net.connman.Technology').SetProperty(
+            'Powered', dbus.Boolean(enabled, variant_level=1)), log=logging.info)
     # The service owns RFCOMM and all handover units. Restarting it retires
     # stale workers/media before a fresh Bluetooth connection can trigger iAP2.
     subprocess.run(['systemctl', 'restart', 'sailplay.service'], check=True, timeout=30)

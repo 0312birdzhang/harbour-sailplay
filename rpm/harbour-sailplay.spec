@@ -1,10 +1,11 @@
 Name: harbour-sailplay
 Version: 0.1.1
-Release: 1
+Release: 17
 Summary: SailfishOS wireless CarPlay phone and virtual vehicle display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
 BuildArch: aarch64
+Requires: ffmpeg-tools
 Requires: python3-base
 Requires: python3-dbus
 Requires: python3-gobject
@@ -31,7 +32,10 @@ install -m 2755 rpm/payload/imira-comp %{buildroot}/opt/sailplay/imira-comp
 install -m 2755 rpm/payload/carlife-capture %{buildroot}/opt/sailplay/carlife-capture
 install -m 0755 rpm/payload/carui %{buildroot}/opt/sailplay/carui/carui
 install -m 0644 display-source/carui/main.qml %{buildroot}/opt/sailplay/carui/main.qml
+install -m 0644 display-source/carui/MusicPlayer.qml %{buildroot}/opt/sailplay/carui/MusicPlayer.qml
 install -m 0644 display-source/carui/mobile-settings.qml %{buildroot}/opt/sailplay/carui/mobile-settings.qml
+mkdir -p %{buildroot}/opt/sailplay/carui/translations
+install -m 0644 rpm/payload/translations/*.qm %{buildroot}/opt/sailplay/carui/translations/
 install -m 0644 display-source/carui/harbour-sailplay.png %{buildroot}/opt/sailplay/carui/harbour-sailplay.png
 install -D -m 0644 rpm/harbour-sailplay.desktop %{buildroot}/usr/share/applications/harbour-sailplay.desktop
 install -D -m 0644 display-source/carui/harbour-sailplay.png %{buildroot}/usr/share/icons/hicolor/172x172/apps/harbour-sailplay.png

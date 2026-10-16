@@ -425,8 +425,8 @@ class CarUiController : public QObject
     Q_PROPERTY(QStringList projectionResolutions READ projectionResolutions NOTIFY projectionSettingsChanged)
     Q_PROPERTY(int maximumFps READ maximumFps NOTIFY projectionSettingsChanged)
     Q_PROPERTY(bool dashboardActive READ dashboardActive NOTIFY currentAppChanged)
+    Q_PROPERTY(bool musicActive READ musicActive NOTIFY currentAppChanged)
     Q_PROPERTY(QString dashboardMapApp READ dashboardMapApp NOTIFY dashboardSettingsChanged)
-    Q_PROPERTY(QString dashboardMusicApp READ dashboardMusicApp NOTIFY dashboardSettingsChanged)
 
 public:
     explicit CarUiController(QObject *parent = nullptr) : QObject(parent)
@@ -505,6 +505,7 @@ public:
     // appId of the app currently on screen ("" = home grid visible)
     QString currentApp() const { return m_currentApp; }
     bool dashboardActive() const { return m_dashboardActive; }
+    bool musicActive() const { return m_musicActive; }
     static QString dashboardConfigPath() {
         return QDir::homePath() + QStringLiteral("/.config/sailplay/dashboard.ini");
     }
@@ -512,24 +513,28 @@ public:
         QSettings s(dashboardConfigPath(), QSettings::IniFormat);
         return s.value(QStringLiteral("Dashboard/map")).toString();
     }
-    QString dashboardMusicApp() const {
+    bool isMusicApp(const QString &id) const {
+        if (id == QLatin1String("jolla-mediaplayer")) return true;
+        QSettings desktop(QStringLiteral("/usr/share/applications/") + id + QStringLiteral(".desktop"), QSettings::IniFormat);
+        const QStringList categories = desktop.value(QStringLiteral("Desktop Entry/Categories")).toString().split(QLatin1Char(';'));
+        if (categories.contains(QStringLiteral("Music"))
+                || (categories.contains(QStringLiteral("Player")) && !categories.contains(QStringLiteral("Video"))
+                    && (categories.contains(QStringLiteral("Audio")) || categories.contains(QStringLiteral("AudioVideo"))))) return true;
+        // Retain recognition of a previously configured music shortcut,
+        // without selecting it as the player or using it for new launches.
         QSettings s(dashboardConfigPath(), QSettings::IniFormat);
-        return s.value(QStringLiteral("Dashboard/music")).toString();
+        return !id.isEmpty() && id == s.value(QStringLiteral("Dashboard/music")).toString();
     }
     Q_INVOKABLE void setDashboardApp(const QString &role, const QString &id) {
-        if ((role != QLatin1String("map") && role != QLatin1String("music"))
+        if (role != QLatin1String("map")
                 || (!id.isEmpty() && !findAvailable(id))) return;
-        const QString other = role == QLatin1String("map") ? dashboardMusicApp() : dashboardMapApp();
-        if (!id.isEmpty() && id == other) {
-            m_serviceError = QStringLiteral("Choose different apps for map and music");
-            emit serviceRunningChanged(); return;
-        }
         QDir().mkpath(QFileInfo(dashboardConfigPath()).absolutePath());
         QSettings s(dashboardConfigPath(), QSettings::IniFormat);
         s.setValue(QStringLiteral("Dashboard/") + role, id); s.sync();
         emit dashboardSettingsChanged();
     }
     Q_INVOKABLE void openDashboard() {
+        m_musicActive = false;
         if (!m_currentApp.isEmpty()) hideCurrent();
         writeCmd(QStringLiteral("H"));
         m_dashboardActive = true;
@@ -545,6 +550,61 @@ public:
             m_hiddenApps.insert(id);
         }
         emit currentAppChanged();
+    }
+    Q_INVOKABLE void openMusic() {
+        if (!m_currentApp.isEmpty()) hideCurrent();
+        writeCmd(QStringLiteral("H"));
+        m_dashboardActive = false;
+        m_musicActive = true;
+        emit currentAppChanged();
+    }
+    Q_INVOKABLE void startMusicOnPhone(const QString &requestedId = QString()) {
+        const QString id = requestedId.isEmpty() ? QStringLiteral("jolla-mediaplayer") : requestedId;
+        if (!findAvailable(id)) return;
+        QSettings entry(QStringLiteral("/usr/share/applications/") + id + QStringLiteral(".desktop"), QSettings::IniFormat);
+        const QString service = entry.value(QStringLiteral("Desktop Entry/X-Maemo-Service")).toString();
+        if (!service.isEmpty()) {
+            QDBusMessage owner = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.DBus"),
+                QStringLiteral("/org/freedesktop/DBus"), QStringLiteral("org.freedesktop.DBus"), QStringLiteral("NameHasOwner"));
+            owner << service;
+            const QDBusMessage reply = QDBusConnection::sessionBus().call(owner, QDBus::Block, 500);
+            if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()
+                    && reply.arguments().first().toBool()) {
+                fprintf(stderr, "carui: sharing existing phone music service %s\n", service.toUtf8().constData());
+                return;
+            }
+        }
+        QDBusMessage names = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.DBus"),
+            QStringLiteral("/org/freedesktop/DBus"), QStringLiteral("org.freedesktop.DBus"), QStringLiteral("ListNames"));
+        const QDBusMessage listed = QDBusConnection::sessionBus().call(names, QDBus::Block, 500);
+        if (listed.type() == QDBusMessage::ReplyMessage && !listed.arguments().isEmpty()) {
+            for (const QString &player : listed.arguments().first().toStringList()) {
+                if (!player.startsWith(QStringLiteral("org.mpris.MediaPlayer2."))) continue;
+                QDBusMessage get = QDBusMessage::createMethodCall(player, QStringLiteral("/org/mpris/MediaPlayer2"),
+                    QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
+                get << QStringLiteral("org.mpris.MediaPlayer2") << QStringLiteral("DesktopEntry");
+                const QDBusMessage reply = QDBusConnection::sessionBus().call(get, QDBus::Block, 500);
+                if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()
+                        && qvariant_cast<QDBusVariant>(reply.arguments().first()).variant().toString() == id) {
+                    fprintf(stderr, "carui: sharing existing phone MPRIS %s\n", player.toUtf8().constData());
+                    return;
+                }
+            }
+        }
+        // Use the desktop's normal sailjail/invoker entry rather than the
+        // stripped projection binary. The player stays on lipstick, outside
+        // projection's process group and its disconnect teardown.
+        QString desktop = QStringLiteral("/usr/share/applications/") + id + QStringLiteral(".desktop");
+        desktop.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+        const QString command = QStringLiteral(
+            "exec env -u CARLIFE_APP_KEY -u QT_IM_MODULE -u QML2_IMPORT_PATH "
+            "XDG_RUNTIME_DIR=/run/user/100000 WAYLAND_DISPLAY=../../display/wayland-0 "
+            "QT_QPA_PLATFORM=wayland /usr/bin/gio launch '") + desktop + QLatin1Char('\'');
+        if (!QProcess::startDetached(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), command})) {
+            m_serviceError = tr("Could not open the music app on the phone");
+            emit serviceRunningChanged();
+        }
+        fprintf(stderr, "carui: music phone desktop launch %s\n", id.toUtf8().constData());
     }
     Q_INVOKABLE QUrl artworkSource(const QUrl &remote, const QUrl &track) {
         if (remote.isLocalFile()) return remote;
@@ -651,7 +711,7 @@ public:
         settings.setValue(QStringLiteral("Display/fps"), qMin(fps, maximumFps()));
         settings.sync();
         if (settings.status() != QSettings::NoError) {
-            m_serviceError = QStringLiteral("Could not save projection settings");
+            m_serviceError = tr("Could not save projection settings");
             emit serviceRunningChanged();
         }
         emit projectionSettingsChanged();
@@ -846,9 +906,10 @@ public:
 
     Q_INVOKABLE void homeClicked()
     {
-        if (m_dashboardActive) {
+        if (m_dashboardActive || m_musicActive) {
             writeCmd(QStringLiteral("H"));
             m_dashboardActive = false;
+            m_musicActive = false;
             emit currentAppChanged();
             return;
         }
@@ -1004,6 +1065,7 @@ private:
     QVariantList m_rows;
     QString m_currentApp;
     bool m_dashboardActive = false;
+    bool m_musicActive = false;
     QNetworkAccessManager *m_artworkNetwork = nullptr;
     QSet<QString> m_artworkPending;
     QMap<QString, qint64> m_appPids;
@@ -1040,7 +1102,7 @@ private:
                 m_reconnectPending = false;
                 m_serviceBusy = false;
                 if (state == QStringLiteral("failed"))
-                    m_serviceError = QStringLiteral("Car connection request failed; see sailplay-reconnect service log.");
+                    m_serviceError = tr("Car connection request failed; see sailplay-reconnect service log.");
                 else if (reply.type() == QDBusMessage::ErrorMessage)
                     m_serviceError = reply.errorMessage();
                 emit serviceRunningChanged();
@@ -1087,7 +1149,14 @@ private:
     void activate(const QString &appId, const QString &exec,
                   const QString &name)
     {
-        if (m_dashboardActive) homeClicked();
+        if (isMusicApp(appId)) {
+            startMusicOnPhone(appId);
+            moveToFront(appId);
+            openMusic();
+            emit dockChanged();
+            return;
+        }
+        if (m_dashboardActive || m_musicActive) homeClicked();
         if (appId == m_currentApp)
             return;   // already on screen
         if (m_hiddenApps.contains(appId)) {
@@ -1160,6 +1229,18 @@ Q_DECL_EXPORT int main(int argc, char **argv)
     ::signal(SIGPIPE, SIG_IGN);
     inheritSystemLocale();
     QGuiApplication app(argc, argv);
+    QTranslator uiTranslator;
+    QString uiLocale = QString::fromUtf8(qgetenv("LC_ALL"));
+    if (uiLocale.isEmpty()) uiLocale = QString::fromUtf8(qgetenv("LC_MESSAGES"));
+    if (uiLocale.isEmpty()) uiLocale = QLocale::system().name();
+    uiLocale.remove(QRegExp(QStringLiteral("[.@].*$")));
+    if (uiLocale.startsWith(QStringLiteral("zh"))) {
+        uiLocale = (uiLocale.contains(QStringLiteral("TW")) || uiLocale.contains(QStringLiteral("HK"))
+                    || uiLocale.contains(QStringLiteral("Hant"))) ? QStringLiteral("zh_TW") : QStringLiteral("zh_CN");
+    }
+    if (uiTranslator.load(QLocale(uiLocale), QStringLiteral("sailplay"), QStringLiteral("_"),
+                          QStringLiteral("/opt/sailplay/carui/translations")))
+        app.installTranslator(&uiTranslator);
     const bool mobileSettings = argc > 1
         && QString::fromLocal8Bit(argv[1]).endsWith(
             QStringLiteral("mobile-settings.qml"));

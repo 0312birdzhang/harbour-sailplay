@@ -42,6 +42,10 @@ rm -f Makefile carui
 qmake carui.pro
 make -j"$(nproc)"
 cp carui "$PAYLOAD/carui"
+mkdir -p "$PAYLOAD/translations"
+for catalog in translations/*.ts; do
+    lrelease "$catalog" -qm "$PAYLOAD/translations/$(basename "${catalog%.ts}").qm"
+done
 echo "carui built"
 
 # --- carlife-capture (shm capture + x264 Annex-B encode) --------------------

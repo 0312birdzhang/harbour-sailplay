@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import Mock
-from carplay_proto.wifidiscovery import discover, find_service
+from carplay_proto.wifidiscovery import discover, find_service, ensure_wifi_powered
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -49,9 +49,24 @@ class DiscoveryTests(unittest.TestCase):
         self.assertIsNone(result[0])
         power.assert_not_called()
 
-    def test_stale_service_list_cycles_wifi_only_once(self):
+    def test_stale_service_list_never_turns_wifi_off(self):
         manager = Mock()
         manager.GetServices.return_value = []
         result, power = self.run_discovery(manager, Mock(return_value=True))
         self.assertIsNone(result[0])
-        self.assertEqual([c.args for c in power.call_args_list], [('/wifi', False), ('/wifi', True)])
+        power.assert_not_called()
+
+    def test_carplay_enables_disabled_wifi_without_disabling_it(self):
+        manager = Mock()
+        manager.GetTechnologies.return_value = [('/wifi', {'Type':'wifi','Powered':False})]
+        power = Mock()
+        self.assertEqual(ensure_wifi_powered(manager,power,log=Mock()), '/wifi')
+        power.assert_called_once_with('/wifi',True)
+
+    def test_enabled_wifi_and_current_connection_are_untouched(self):
+        manager = Mock()
+        manager.GetTechnologies.return_value = [('/wifi', {'Type':'wifi','Powered':True})]
+        power = Mock()
+        ensure_wifi_powered(manager,power)
+        power.assert_not_called()
+        manager.GetServices.assert_not_called()

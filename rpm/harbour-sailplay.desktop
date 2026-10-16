@@ -3,6 +3,10 @@ Type=Application
 Name=Sailplay
 Comment=Choose apps for the CarPlay display
 Comment[zh_CN]=选择车机主页显示的应用
+Comment[zh_TW]=選擇車機主畫面顯示的應用程式
+Comment[de]=Apps für das CarPlay-Display auswählen
+Comment[fr]=Choisir les applications de l’écran CarPlay
+Comment[ru]=Выбор приложений для экрана CarPlay
 Icon=harbour-sailplay
 Exec=/usr/bin/invoker --type=silica-qt5 -s -n -d 5 /opt/sailplay/carui/carui /opt/sailplay/carui/mobile-settings.qml
 X-Nemo-Application-Type=silica-qt5

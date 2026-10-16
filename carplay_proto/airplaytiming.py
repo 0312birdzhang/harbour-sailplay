@@ -24,6 +24,7 @@ class TimingServer:
         self.sock.settimeout(0.2)
         self.port = self.sock.getsockname()[1]
         self.stop = threading.Event()
+        self.requests = self.responses = self.rejected = 0
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
 
@@ -32,10 +33,17 @@ class TimingServer:
             try:
                 request, peer = self.sock.recvfrom(256)
                 received = time.monotonic_ns()
+                self.requests += 1
                 if peer[0] == self.peer:
                     response = timing_response(request, received, time.monotonic_ns())
                     if response is not None:
                         self.sock.sendto(response,peer)
+                        self.responses += 1
+                        if self.responses == 1:
+                            print('AirPlay timing first response peer={} localPort={} clock=monotonic'.format(
+                                peer[0],self.port),flush=True)
+                        continue
+                self.rejected += 1
             except socket.timeout:
                 pass
             except OSError:
@@ -45,3 +53,5 @@ class TimingServer:
         self.stop.set()
         self.thread.join(0.5)
         self.sock.close()
+        print('AirPlay timing stopped requests={} responses={} rejected={}'.format(
+            self.requests,self.responses,self.rejected),flush=True)

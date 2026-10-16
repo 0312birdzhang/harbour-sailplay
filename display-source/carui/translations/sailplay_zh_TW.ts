@@ -1,0 +1,147 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TS version="2.1" language="zh_TW" sourcelanguage="en">
+  <context>
+    <name>Sailplay</name>
+    <message>
+      <source>%1 fps</source>
+      <translation>%1 影格/秒</translation>
+    </message>
+    <message>
+      <source>Car display apps</source>
+      <translation>車機應用程式管理</translation>
+    </message>
+    <message>
+      <source>Car display home apps</source>
+      <translation>車機主畫面應用程式</translation>
+    </message>
+    <message>
+      <source>Car display: %1; maximum %2 fps. Lower resolutions reduce encoding load. Reconnect to apply.</source>
+      <translation>車機螢幕：%1；最高 %2 影格/秒。較低解析度可降低編碼負載，重新連接後生效。</translation>
+    </message>
+    <message>
+      <source>Choose a map app in Sailplay</source>
+      <translation>在 Sailplay 中選擇地圖應用程式</translation>
+    </message>
+    <message>
+      <source>Connect / reconnect to car</source>
+      <translation>連接車機／重新連接</translation>
+    </message>
+    <message>
+      <source>Connect once to read the car display resolution and frame-rate limit.</source>
+      <translation>連接車機後讀取螢幕解析度及影格率上限。</translation>
+    </message>
+    <message>
+      <source>Dashboard</source>
+      <translation>儀表板</translation>
+    </message>
+    <message>
+      <source>Enable Sailplay</source>
+      <translation>啟用 Sailplay</translation>
+    </message>
+    <message>
+      <source>Failed</source>
+      <translation>啟動失敗</translation>
+    </message>
+    <message>
+      <source>Frame rate</source>
+      <translation>影格率</translation>
+    </message>
+    <message>
+      <source>Map</source>
+      <translation>地圖</translation>
+    </message>
+    <message>
+      <source>Map app</source>
+      <translation>地圖應用程式</translation>
+    </message>
+    <message>
+      <source>Music</source>
+      <translation>音樂</translation>
+    </message>
+    <message>
+      <source>No music playing
+Start music on your phone</source>
+      <translation>目前沒有音樂播放
+請在手機上開始播放音樂</translation>
+    </message>
+    <message>
+      <source>Not selected</source>
+      <translation>未選擇</translation>
+    </message>
+    <message>
+      <source>Open music app</source>
+      <translation>開啟音樂應用程式</translation>
+    </message>
+    <message>
+      <source>Processing…</source>
+      <translation>正在處理…</translation>
+    </message>
+    <message>
+      <source>Projection service</source>
+      <translation>投影服務</translation>
+    </message>
+    <message>
+      <source>Resolution</source>
+      <translation>解析度</translation>
+    </message>
+    <message>
+      <source>Return to car</source>
+      <translation>返回車機</translation>
+    </message>
+    <message>
+      <source>Running</source>
+      <translation>執行中</translation>
+    </message>
+    <message>
+      <source>Save failed</source>
+      <translation>儲存失敗</translation>
+    </message>
+    <message>
+      <source>Saved automatically</source>
+      <translation>已自動儲存</translation>
+    </message>
+    <message>
+      <source>Select the apps to show on the car display home screen. Changes are saved and applied immediately.</source>
+      <translation>勾選要顯示在車機主畫面的應用程式，變更會立即儲存並套用。</translation>
+    </message>
+    <message>
+      <source>Service status: %1</source>
+      <translation>服務狀態：%1</translation>
+    </message>
+    <message>
+      <source>Starting</source>
+      <translation>正在啟動</translation>
+    </message>
+    <message>
+      <source>Stopped</source>
+      <translation>已停止</translation>
+    </message>
+    <message>
+      <source>Stopping</source>
+      <translation>正在停止</translation>
+    </message>
+    <message>
+      <source>The music app stays on the phone; both screens control the same playback.</source>
+      <translation>音樂應用程式留在手機上，手機和車機控制同一次播放。</translation>
+    </message>
+    <message>
+      <source>Unavailable</source>
+      <translation>無法讀取</translation>
+    </message>
+  </context>
+  <context>
+    <name>CarUiController</name>
+    <message>
+      <source>Car connection request failed; see sailplay-reconnect service log.</source>
+      <translation>連接車機失敗，請查看 sailplay-reconnect 服務日誌。</translation>
+    </message>
+    <message>
+      <source>Could not save projection settings</source>
+      <translation>無法儲存投影設定</translation>
+    </message>
+    <message>
+      <source>Could not open the music app on the phone</source>
+      <translation>無法在手機上開啟音樂應用程式</translation>
+    </message>
+  </context>
+</TS>
