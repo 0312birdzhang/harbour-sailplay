@@ -47,3 +47,10 @@ class DisplayFramesTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 pipeline.request_keyframe()
             kill.assert_not_called()
+
+    def test_dead_shell_is_not_treated_as_healthy_video(self):
+        from unittest.mock import Mock
+        pipeline=DisplayPipeline();pipeline.ui=Mock(returncode=1)
+        pipeline.ui.poll.return_value=1
+        with self.assertRaisesRegex(RuntimeError,'carui exited'):
+            pipeline.check_health()

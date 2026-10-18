@@ -58,12 +58,15 @@ class DisplayPipeline:
         self.width,self.height,self.fps=width,height,fps
         self.processes=[]
         self.logs=[]
+        self.ui=None
+        self.comp=None
         self.fd=None
         self.lock_fd=None
         self.fifo='/tmp/sailplay-display-{}.h264'.format(os.getpid())
 
     def launch(self,name,command):
-        log=open('/home/defaultuser/sailplay-{}.log'.format(name),'wb')
+        log=open('/home/defaultuser/sailplay-{}.log'.format(name),'ab')
+        log.write(('\nSailplay launch {} at {}\n'.format(name,time.time())).encode());log.flush()
         self.logs.append(log)
         process=subprocess.Popen(['su','defaultuser','-s','/bin/sh','-c','exec '+command],
             stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
@@ -90,14 +93,14 @@ class DisplayPipeline:
         os.mkfifo(self.fifo,0o666)
         os.chmod(self.fifo,0o666)
         self.fd=os.open(self.fifo,os.O_RDONLY|os.O_NONBLOCK|os.O_NOFOLLOW)
-        comp=self.launch('comp','env XDG_RUNTIME_DIR=/run/user/100000 WAYLAND_DISPLAY=../../display/wayland-0 '
+        comp=self.comp=self.launch('comp','env XDG_RUNTIME_DIR=/run/user/100000 WAYLAND_DISPLAY=../../display/wayland-0 '
                          '/opt/sailplay/imira-comp --width {} --height {} --fps {}'.format(self.width,self.height,self.fps))
         deadline=time.monotonic()+8
         while not os.path.exists('/run/user/100000/imira-comp-0'):
             if comp.poll() is not None or time.monotonic()>deadline:
                 raise RuntimeError('virtual compositor failed to start')
             time.sleep(.1)
-        self.launch('carui','env XDG_RUNTIME_DIR=/run/user/100000 '
+        self.ui=self.launch('carui','env XDG_RUNTIME_DIR=/run/user/100000 '
                     'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100000/dbus/user_bus_socket '
                     'QT_QPA_PLATFORM=wayland '
                     'WAYLAND_DISPLAY=imira-comp-0 /opt/sailplay/carui/carui /opt/sailplay/carui/main.qml {} {}'.format(self.width,self.height))
@@ -106,6 +109,11 @@ class DisplayPipeline:
                         self.width,self.height,self.fps,4000000*self.fps//30))
         print('Sailife virtual UI/capture started; dedicated CarPlay FIFO',flush=True)
         return self
+
+    def check_health(self):
+        for name,process in (('compositor',self.comp),('carui',self.ui)):
+            if process is not None and process.poll() is not None:
+                raise RuntimeError('{} exited status={}; rebuilding display session'.format(name,process.returncode))
 
     def request_keyframe(self):
         # su remains as a parent; never signal the entire group, which would
@@ -136,6 +144,7 @@ class DisplayPipeline:
         deadline=time.monotonic()+seconds if seconds else float('inf')
         last_data=time.monotonic()
         while time.monotonic()<deadline:
+            self.check_health()
             if self.capture.poll() is not None:
                 raise RuntimeError('capture exited')
             ready,_,_=select.select([self.fd],[],[],.2)

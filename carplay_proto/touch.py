@@ -3,6 +3,7 @@ import ctypes
 import fcntl
 import os
 import struct
+import socket
 
 
 def touch_layout(descriptor):
@@ -89,21 +90,16 @@ class TouchInput:
                       if d.get('displayUUID')==display_uuid and 'hidDescriptor' in d}
         self.layouts={k:v for k,v in self.layouts.items() if v}
         if not self.layouts: raise ValueError('no supported absolute touch HID descriptor')
-        self.fd=os.open('/dev/uinput',os.O_WRONLY|os.O_NONBLOCK)
-        self.x,self.y=width//2,height//2; self.down=False
-        try:
-            for ev in (0,1,2): fcntl.ioctl(self.fd,0x40045564,ev)
-            for axis in (0,1): fcntl.ioctl(self.fd,0x40045566,axis)
-            fcntl.ioctl(self.fd,0x40045565,0x110)
-            setup=struct.pack('HHHH80sI',3,1,1,1,b'sailplay-mouse',0)
-            fcntl.ioctl(self.fd,0x405c5503,setup)
-            fcntl.ioctl(self.fd,0x5501)
-        except Exception:
-            os.close(self.fd); raise
-        print('Touch uinput ready: {} HID devices'.format(len(self.layouts)),flush=True)
+        self.sock=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM)
+        self.sock.setblocking(False)
+        self.path='/run/user/100000/sailplay-touch.sock'
+        self.x,self.y=width//2,height//2;self.down=False
+        print('Touch private compositor channel ready: {} HID devices'.format(len(self.layouts)),flush=True)
 
-    def event(self,kind,code,value):
-        os.write(self.fd,struct.pack('llHHi',0,0,kind,code,value))
+    def send(self,down,x,y):
+        # No uinput fallback: if the compositor is gone, never inject into
+        # the phone desktop. The receiving compositor owns absolute routing.
+        self.sock.sendto('T {} {} {}'.format(int(down),x,y).encode('ascii'),self.path)
 
     def command(self,value):
         if value.get('type')!='hidSendReport': return
@@ -117,20 +113,12 @@ class TouchInput:
         if self.debug_reports < 5:
             print('Touch report uuid={} bytes={} decoded=({}, {}, {})'.format(value.get('uuid'),bytes(value['hidReport']).hex(),down,x,y),flush=True)
             self.debug_reports+=1
-        if down and not self.down:
-            # Other pointers or a compositor restart can move its cursor
-            # independently. Anchor each new gesture before pressing; do not
-            # recenter during a drag, which would scroll through the origin.
-            self.event(2,0,-2*self.width); self.event(2,1,-2*self.height)
-            self.event(2,0,x); self.event(2,1,y)
-        else:
-            self.event(2,0,x-self.x); self.event(2,1,y-self.y)
-        if down!=self.down: self.event(1,0x110,int(down))
-        self.event(0,0,0)
+        self.send(down,x,y)
         self.x,self.y,self.down=x,y,down
         if down: print('Touch down/move x={} y={}'.format(x,y),flush=True)
 
     def close(self):
-        if self.down: self.event(1,0x110,0); self.event(0,0,0)
-        fcntl.ioctl(self.fd,0x5502)
-        os.close(self.fd)
+        if self.down:
+            try:self.send(False,self.x,self.y)
+            except OSError:pass
+        self.sock.close()

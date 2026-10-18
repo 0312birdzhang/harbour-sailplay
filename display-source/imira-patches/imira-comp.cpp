@@ -24,6 +24,9 @@
 #include <linux/input.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <functional>
@@ -1175,11 +1178,7 @@ public:
           m_pos(width / 2, height / 2)
     {
         m_cursor->setPosition(m_pos);
-        scan();
-        // Hotplug the cheap way: rescan for new devices every few seconds.
-        auto *t = new QTimer(this);
-        connect(t, &QTimer::timeout, this, [this]() { scan(); });
-        t->start(3000);
+        startPrivateInput();
         // carui drives shell<->app switching through command lines appended
         // to /tmp/imira-touch ("H" hide current app -> home, "S" show the
         // hidden one again). Poll on the main thread, where the items live.
@@ -1189,7 +1188,49 @@ public:
         cmd->start(120);
     }
 
+    ~InputManager() override
+    {
+        if (m_privateFd>=0) { close(m_privateFd);unlink(privatePath()); }
+    }
+
 private:
+    static const char *privatePath() { return "/run/user/100000/sailplay-touch.sock"; }
+    void startPrivateInput()
+    {
+        struct stat st;
+        if (lstat(privatePath(),&st)==0) {
+            if (!S_ISSOCK(st.st_mode) || st.st_uid!=geteuid()) qFatal("unsafe Sailplay input socket path");
+            unlink(privatePath());
+        }
+        m_privateFd=socket(AF_UNIX,SOCK_DGRAM|SOCK_NONBLOCK|SOCK_CLOEXEC,0);
+        if (m_privateFd<0) qFatal("Sailplay input socket failed");
+        sockaddr_un addr={};addr.sun_family=AF_UNIX;
+        strncpy(addr.sun_path,privatePath(),sizeof(addr.sun_path)-1);
+        if (bind(m_privateFd,reinterpret_cast<sockaddr *>(&addr),sizeof(addr))<0
+                || chmod(privatePath(),0600)<0) qFatal("Sailplay input bind failed");
+        auto *notifier=new QSocketNotifier(m_privateFd,QSocketNotifier::Read,this);
+        connect(notifier,&QSocketNotifier::activated,this,[this](int) {
+            char data[64];ssize_t n;
+            while ((n=recv(m_privateFd,data,sizeof(data)-1,0))>0) {
+                data[n]=0;int down,x,y;char extra;
+                if (sscanf(data,"T %d %d %d%c",&down,&x,&y,&extra)!=3
+                        || down<0 || down>1 || x<0 || x>=m_w || y<0 || y>=m_h) continue;
+                m_pos=QPointF(x,y);m_cursor->setPosition(m_pos);
+                if (m_contentPressed) {
+                    auto *seat=m_comp->defaultInputDevice();
+                    seat->sendMouseMoveEvent(m_contentPressed,m_contentPressed->mapFromScene(m_pos),m_pos);
+                }
+                if (bool(down)!=m_privateDown) {
+                    input_event ev={};ev.type=EV_KEY;ev.code=BTN_LEFT;ev.value=down;
+                    pointerEvent(ev);m_privateDown=bool(down);
+                }
+            }
+        });
+        fprintf(stderr,"imira-comp: private Sailplay input ready (no global input grab)\n");
+    }
+    int m_privateFd=-1;
+    bool m_privateDown=false;
+
     static bool hasBit(const unsigned long *bits, int bit)
     {
         return bits[bit / (8 * sizeof(long))]

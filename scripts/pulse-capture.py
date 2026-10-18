@@ -19,7 +19,7 @@ class BufferAttr(C.Structure):
 
 
 def capture_buffer_attr():
-    return BufferAttr(0xffffffff,0xffffffff,0xffffffff,0xffffffff,4096)
+    return BufferAttr(0xffffffff,0xffffffff,0xffffffff,0xffffffff,48000)
 
 
 def pactl(*args):
@@ -88,11 +88,39 @@ def hardware_volumes(output):
     return result
 
 
+def save_recovery(state):
+    fd=os.open(ROUTE_STATE+'.tmp',os.O_WRONLY|os.O_CREAT|os.O_TRUNC|os.O_NOFOLLOW,0o600)
+    with os.fdopen(fd,'w') as saved:json.dump(state,saved)
+    os.replace(ROUTE_STATE+'.tmp',ROUTE_STATE)
+
+
+def private_playback(output,sink_index):
+    volumes=playback_volumes(output)
+    return [(item,volumes.get(item['id'],[])) for item in stream_diagnostics(output)
+            if item.get('sink')==str(sink_index) and item.get('corked')=='no']
+
+
+def restore_private_inputs(state):
+    cast=state.get('cast','')
+    if not cast.startswith('sailplay_cast_'):return
+    index=next((l.split()[0] for l in pactl('list','short','sinks').splitlines() if len(l.split())>1 and l.split()[1]==cast),None)
+    if index is None:return
+    current={item['id']:item for item in stream_diagnostics(pactl('list','sink-inputs'))}
+    for key,old in state.get('streams',{}).items():
+        item=current.get(key,{})
+        if not item or item.get('sink')!=index or item.get('application.process.binary')!=old.get('binary'):continue
+        try:
+            if old.get('volumes'):pactl('set-sink-input-volume',key,*old['volumes'])
+            pactl('set-sink-input-mute',key,str(int(old.get('mute',False))))
+        except subprocess.SubprocessError:pass
+
+
 def restore_outputs():
     try:
         with open(ROUTE_STATE) as source:state=json.load(source)
     except FileNotFoundError:return
     for sink in state['mutes']:pactl('set-sink-mute',sink,'1')
+    restore_private_inputs(state)
     if state.get('default') and pactl('get-default-sink').strip()==state.get('cast'):
         pactl('set-default-sink',state['default'])
     # Remove only the private sink belonging to this recovery record. Moving
@@ -170,14 +198,33 @@ def main():
             lib.pa_mainloop_iterate(loop,0,None);time.sleep(.01)
         raise RuntimeError('capture stopped')
     def route():
+        for line in pactl('list','short','sink-inputs').splitlines():
+            fields=line.split()
+            if len(fields)<2:continue
+            index,sink=fields[:2]
+            if sink!=sink_index:
+                moved.setdefault(index,sink)
+                try:pactl('move-sink-input',index,name)
+                except subprocess.SubprocessError:continue
         inputs=pactl('list','sink-inputs')
-        muted=muted_cast_streams(inputs,sink_index)
-        for item in muted:
-            stream_mutes.setdefault(item['id'],True)
-            pactl('set-sink-input-mute',item['id'],'0')
-            print('Audio private playback unmuted id='+item['id'],file=sys.stderr,flush=True)
-        if muted:inputs=pactl('list','sink-inputs')
-        pcm_gain[0]=capture_gain(inputs)
+        for item,volumes in private_playback(inputs,sink_index):
+            if item.get('mute')!='yes' and volumes and all(int(v)==65536 for v in volumes):continue
+            key=item['id']
+            if key not in recovery['streams']:
+                recovery['streams'][key]={'binary':item.get('application.process.binary'),
+                    'mute':item.get('mute')=='yes','volumes':volumes}
+                save_recovery(recovery)
+            if item.get('mute')=='yes':pactl('set-sink-input-mute',key,'0')
+            if volumes and any(int(v)!=65536 for v in volumes):pactl('set-sink-input-volume',key,'100%')
+            print('Audio private playback independent level id='+key,file=sys.stderr,flush=True)
+        # Only private render/monitor levels are normalized; physical outputs
+        # and the user's hardware volume are never raised by this path.
+        for kind,device in (('sink',name),('source',name+'.monitor')):
+            if pactl('get-'+kind+'-mute',device).strip().endswith('yes'):pactl('set-'+kind+'-mute',device,'0')
+            volume=pactl('get-'+kind+'-volume',device)
+            levels=re.findall(r':\s*(\d+)\s*/',volume)
+            if any(int(v)!=65536 for v in levels):pactl('set-'+kind+'-volume',device,'100%')
+        pcm_gain[0]=1.0
         now=time.monotonic()
         if now-last_diagnostic[0]>=10:
             snapshot={'cast':name,'gain':pcm_gain[0],
@@ -189,14 +236,6 @@ def main():
                       'monitor_volume':pactl('get-source-volume',name+'.monitor').strip()}
             print('Audio route state '+json.dumps(snapshot,sort_keys=True),file=sys.stderr,flush=True)
             last_diagnostic[0]=now
-        for line in pactl('list','short','sink-inputs').splitlines():
-            fields=line.split()
-            if len(fields)<2:continue
-            index,sink=fields[:2]
-            if sink!=sink_index:
-                moved.setdefault(index,sink)
-                try:pactl('move-sink-input',index,name)
-                except subprocess.SubprocessError:continue
     def routing_loop():
         while not route_stop.is_set() and not stop[0]:
             try:route()
@@ -217,10 +256,8 @@ def main():
         os.makedirs(os.path.dirname(ROUTE_STATE),exist_ok=True)
         all_volumes=hardware_volumes(pactl('list','sinks'))
         recovery={'default':default_sink,'cast':name,'mutes':sink_mutes,
-                  'volumes':{sink:all_volumes[sink] for sink in sink_mutes if sink in all_volumes}}
-        fd=os.open(ROUTE_STATE+'.tmp',os.O_WRONLY|os.O_CREAT|os.O_TRUNC|os.O_NOFOLLOW,0o600)
-        with os.fdopen(fd,'w') as saved:json.dump(recovery,saved)
-        os.replace(ROUTE_STATE+'.tmp',ROUTE_STATE)
+                  'volumes':{sink:all_volumes[sink] for sink in sink_mutes if sink in all_volumes},'streams':{}}
+        save_recovery(recovery)
         pactl('set-default-sink',name)
         for sink in sink_mutes:pactl('set-sink-mute',sink,'1')
         print('CarPlay default output selected; phone hardware outputs protected',file=sys.stderr,flush=True)
@@ -263,7 +300,7 @@ def main():
         if lib.pa_stream_connect_record(stream,(name+'.monitor').encode(),C.byref(attrs),0x200|0x2000)<0:raise RuntimeError('monitor connect failed')
         wait_state(stream,lib.pa_stream_get_state,2)
         actual=lib.pa_stream_get_buffer_attr(stream)
-        if actual:print('Audio record buffer fragsize={} maxlength={} requestedFragmentMs=21.33'.format(actual.contents.fragsize,actual.contents.maxlength),file=sys.stderr,flush=True)
+        if actual:print('Audio record buffer fragsize={} maxlength={} requestedFragmentMs=250'.format(actual.contents.fragsize,actual.contents.maxlength),file=sys.stderr,flush=True)
         print('Audio capturing '+name+'.monitor 48000Hz stereo S16LE',file=sys.stderr,flush=True)
         router=threading.Thread(target=routing_loop,daemon=True)
         router.start()
@@ -278,6 +315,9 @@ def main():
         if stream:lib.pa_stream_disconnect(stream);lib.pa_stream_unref(stream)
         if context:lib.pa_context_disconnect(context);lib.pa_context_unref(context)
         if loop:lib.pa_mainloop_free(loop)
+        if default_sink:
+            try:restore_private_inputs(recovery)
+            except (subprocess.SubprocessError,OSError):pass
         for index in stream_mutes:
             try:pactl('set-sink-input-mute',index,'1')
             except subprocess.SubprocessError:pass

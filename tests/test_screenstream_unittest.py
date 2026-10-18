@@ -43,3 +43,13 @@ class ScreenStreamTests(unittest.TestCase):
             self.assertEqual(order, previous)
         finally:
             stream.close()
+
+    def test_resource_take_blocks_video_before_control_worker_teardown(self):
+        from unittest.mock import Mock
+        stream=ScreenStream(Mock(),'receiver','wlan0',bytes(32),{'uuid':'screen'},Mock(),42)
+        try:
+            stream.expect_owner(2)
+            self.assertFalse(stream.send(b'config',[b'\x65\x80'],0))
+            stream.video.sendall.assert_not_called()
+            self.assertTrue(stream.reopen_required)
+        finally:stream.close()

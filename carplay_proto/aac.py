@@ -6,6 +6,18 @@ import threading
 import time
 import array
 
+# 48kHz stereo S16: PA may deliver 250ms batches. Retain up to one
+# second, rather than dropping the next batch at the former 250ms cap.
+PCM_BYTES_PER_SECOND=48000*2*2
+PCM_BACKLOG_BYTES=PCM_BYTES_PER_SECOND
+PCM_START_MARGIN=.1
+
+
+def trim_pcm_backlog(data):
+    excess=max(0,(len(data)-PCM_BACKLOG_BYTES)//4*4)
+    return data[excess:],excess//4
+
+
 class AdtsReader:
     def __init__(self,stream):self.stream=stream;self.buffer=bytearray()
     def frame(self,timeout=10):
@@ -53,7 +65,7 @@ class AacCapture:
                     if not select.select([self.source],[],[],.2)[0]:continue
                     data=os.read(self.source.fileno(),16384)
                     if not data:raise EOFError('PCM capture ended')
-                    pending+=data;deadline=time.monotonic()+.1
+                    pending+=data;deadline=time.monotonic()+PCM_START_MARGIN
                 # A steady sample clock must survive paused/suspended PA sinks.
                 # Read until the next encoder tick, padding gaps with silence.
                 while not self.stop.is_set():
@@ -63,9 +75,8 @@ class AacCapture:
                         data=os.read(self.source.fileno(),16384)
                         if not data:raise EOFError('PCM capture ended')
                         pending+=data
-                        if len(pending)>48000:
-                            excess=(len(pending)-48000)//4*4
-                            pending=pending[excess:];self.dropped_frames+=excess//4
+                        pending,dropped=trim_pcm_backlog(pending)
+                        self.dropped_frames+=dropped
                 if self.stop.is_set():break
                 size=min(4096,len(pending)//4*4)
                 data,pending=pending[:size],pending[size:]

@@ -15,6 +15,8 @@ class ScreenStream:
         self.client, self.address, self.interface = client, address, interface
         self.shared, self.display = shared, display
         self.video = video
+        self.desired_owner=1
+        self.reopen_required=False
         self.encoder = ScreenEncoder(shared, stream_id)
         self.config = None
         self.need_idr = True
@@ -31,9 +33,16 @@ class ScreenStream:
             self.video.close()
             self.video = None
 
+    def expect_owner(self,owner):
+        # Called by the event thread: no I/O or control-socket requests here.
+        self.desired_owner=owner
+        if owner==2:self.reopen_required=True
+
     def ownership(self, owner):
         with self.lock:
             if owner == 2:
+                self.desired_owner=2
+                self.reopen_required=True
                 if self.video is None:
                     return
                 # Match the sender teardown order: stop TCP before TEARDOWN.
@@ -46,7 +55,16 @@ class ScreenStream:
                 if status != 200:
                     raise RuntimeError('screen-only TEARDOWN rejected')
                 return
+            if self.video is not None and self.reopen_required:
+                # A fast MODE round-trip may coalesce before the worker sees
+                # the take. The old video TCP must still be retired.
+                self._close_video()
+                status,_,_=self.client.request('TEARDOWN','/',plistlib.dumps(
+                    {'streams':[{'type':110,'uuid':self.display['uuid']}]},fmt=plistlib.FMT_BINARY),
+                    {'Content-Type':'application/x-apple-binary-plist'})
+                if status!=200:raise RuntimeError('stale screen teardown rejected')
             if self.video is not None:
+                self.desired_owner=1
                 return
             stream_id = int.from_bytes(os.urandom(7), 'big') or 1
             payload = {'streams': [{'type': 110, 'streamConnectionID': stream_id,
@@ -66,12 +84,14 @@ class ScreenStream:
             if status != 200:
                 self._close_video()
                 raise RuntimeError('screen resume RECORD rejected')
+            self.desired_owner=1
+            self.reopen_required=False
             if self.request_keyframe:
                 self.request_keyframe()
 
     def send(self, config, nals, timestamp):
         with self.lock:
-            if self.video is None:
+            if self.video is None or self.desired_owner!=1:
                 return False
             if self.need_idr and not any(n and n[0] & 31 == 5 for n in nals):
                 return False

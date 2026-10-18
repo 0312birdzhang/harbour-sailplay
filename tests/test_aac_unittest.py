@@ -50,3 +50,36 @@ class AacTests(unittest.TestCase):
             self.assertIsNone(capture.error)
         finally:
             stop.set();capture.close();os.close(w);source.close()
+
+    def test_two_pa_batches_are_kept_without_dropping_samples(self):
+        from carplay_proto.aac import trim_pcm_backlog
+        samples=bytes(range(256))*375  # 500ms, two 250ms capture batches
+        kept,dropped=trim_pcm_backlog(samples)
+        self.assertEqual(kept,samples);self.assertEqual(dropped,0)
+    def test_backlog_limit_preserves_sample_alignment_and_newest_audio(self):
+        from carplay_proto.aac import trim_pcm_backlog,PCM_BACKLOG_BYTES
+        data=bytes(range(256))*1000
+        kept,dropped=trim_pcm_backlog(data)
+        self.assertEqual(len(kept),PCM_BACKLOG_BYTES)
+        self.assertEqual(kept,data[dropped*4:])
+    def test_250ms_batch_feed_has_no_padding_or_loss(self):
+        import shutil,threading,time
+        from carplay_proto.aac import AacCapture
+        if not shutil.which('ffmpeg'):self.skipTest('ffmpeg unavailable')
+        r,w=os.pipe();source=os.fdopen(r,'rb',buffering=0);stop=threading.Event()
+        capture=AacCapture(source,stop,lambda:1.0)
+        def writer():
+            try:
+                for _ in range(6):
+                    view=memoryview(bytes(48000))
+                    while view:
+                        n=os.write(w,view);view=view[n:]
+                    if stop.wait(.25):break
+            except OSError:pass
+        t=threading.Thread(target=writer,daemon=True);t.start()
+        try:
+            for _ in range(40):self.assertTrue(capture.reader.frame(timeout=12))
+            self.assertEqual(capture.underrun_frames,0)
+            self.assertEqual(capture.dropped_frames,0)
+        finally:
+            stop.set();capture.close();source.close();t.join(1);os.close(w)

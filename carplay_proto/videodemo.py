@@ -181,12 +181,17 @@ class UiCommands:
 
 class ScreenFeedback:
     """Keep control requests away from the video producer's critical path."""
-    def __init__(self,client,commands=None,modes=None,resume=None,screen=None):
+    def __init__(self,client,commands=None,modes=None,resume=None,screen=None,resource_changed=None,audio=None,duck=None,mode_lock=None,mode_revision=None):
         self.client=client
         self.commands=commands
         self.modes=modes
         self.resume=resume
         self.screen=screen
+        self.resource_changed=resource_changed
+        self.audio=audio
+        self.duck=duck if duck is not None else [1.0]
+        self.mode_lock=mode_lock or threading.RLock()
+        self.mode_revision=mode_revision if mode_revision is not None else [0]
         self.stop=threading.Event()
         self.thread=threading.Thread(target=self.run,daemon=True)
         self.thread.start()
@@ -197,26 +202,46 @@ class ScreenFeedback:
             try:
                 returning=self.commands and self.commands.return_requested()
                 resuming=(self.resume is not None and self.resume.is_set()) or (self.commands and self.commands.resume.is_set())
-                if returning or resuming:
+                changed=self.resource_changed is not None and self.resource_changed.is_set()
+                if returning or resuming or changed:
+                    if changed:self.resource_changed.clear()
                     if resuming:
                         if self.resume is not None:
                             self.resume.clear()
                         if self.commands:
                             self.commands.resume.clear()
-                    print('Screen ownership command: {}'.format('CarPlay' if resuming else 'OEM'),flush=True)
-                    proposed=copy.deepcopy(self.modes)
-                    screen=next(r for r in proposed['resources'] if r['resourceID']==1)
-                    owner=1 if resuming else 2
-                    screen.update(entity=owner,permanentEntity=owner)
+                    reason='CarPlay' if resuming else 'OEM' if returning else 'HU resource transfer'
+                    print('Screen ownership command: '+reason,flush=True)
+                    with self.mode_lock:
+                        revision=self.mode_revision[0]
+                        proposed=copy.deepcopy(self.modes)
+                    if resuming:
+                        # Native MODE switches deliver Play + requestUI after
+                        # taking BOTH resources for FM. Reclaim both together.
+                        for resource in proposed['resources']:
+                            if resource['resourceID'] in (1,2):resource.update(entity=1,permanentEntity=1)
+                    elif returning:
+                        next(r for r in proposed['resources'] if r['resourceID']==1).update(entity=2,permanentEntity=2)
+                    owner=next(r['entity'] for r in proposed['resources'] if r['resourceID']==1)
                     payload=plistlib.dumps({'type':'modesChanged','params':proposed},fmt=plistlib.FMT_BINARY)
                     status,_,body=self.client.request('POST','/command',payload,
                         {'Content-Type':'application/x-apple-binary-plist'})
                     command_status=plistlib.loads(body).get('status',0) if body else 0
                     accepted=status==200 and command_status==0
                     if accepted:
-                        next(r for r in self.modes['resources'] if r['resourceID']==1).update(entity=owner,permanentEntity=owner)
-                        if self.screen:
-                            self.screen.ownership(owner)
+                        with self.mode_lock:
+                            current=self.mode_revision[0]==revision
+                            if current:
+                                self.modes.update(proposed)
+                                self.mode_revision[0]+=1
+                                if self.audio:
+                                    entity=next(r['entity'] for r in self.modes['resources'] if r['resourceID']==2)
+                                    self.audio.gain=self.duck[0] if entity==1 else 0.0
+                                    print('Audio resource reconciled entity={} senderGain={}'.format(entity,self.audio.gain),flush=True)
+                        if current and self.screen:self.screen.ownership(owner)
+                        elif not current and self.resource_changed is not None:self.resource_changed.set()
+                    elif changed:
+                        raise RuntimeError('HU resource notification rejected')
                     print('Screen ownership response owner={} status={} command_status={} accepted={}'.format(owner,status,command_status,accepted),flush=True)
                 if time.monotonic()<next_feedback:
                     continue
@@ -261,13 +286,16 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
     if not live and (int(display['widthPixels']),int(display['heightPixels'])) != (1920,720):
         raise ValueError('demo requires 1920x720 display')
     stream_id = int.from_bytes(__import__('os').urandom(7),'big') or 1
-    touch = audio = power = None
+    touch = audio = power = media = None
     resume = threading.Event()
+    resource_changed=threading.Event()
+    mode_lock=threading.RLock();mode_revision=[0];duck=[1.0]
     modes={'appStates':[{'appStateID':1,'entity':0,'speechMode':-1},
                         {'appStateID':2,'entity':0},{'appStateID':3,'entity':0}],
            'resources':[{'resourceID':r,'entity':1,'permanentEntity':1} for r in (1,2)]}
     def event_command(value):
-        if touch:
+        handled=media.command(value) if media else False
+        if touch and not handled:
             touch.command(value)
         if value.get('type')=='requestUI':
             resume.set()
@@ -275,27 +303,35 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         if value.get('type')=='changeModes':
             print('HU mode transfer request resources={}'.format(
                 value.get('params',{}).get('resources',[])),flush=True)
-            for request in value.get('params',{}).get('resources',[]):
-                resource=next((r for r in modes['resources'] if r['resourceID']==request.get('resourceID')),None)
-                if resource is not None:
-                    transfer=request.get('transferType')
-                    if transfer in (1,3): resource['entity']=2
-                    elif transfer in (2,4): resource['entity']=1
-                    if transfer in (1,2):resource['permanentEntity']=resource['entity']
-                    if resource['resourceID']==1 and resource['entity']==1:
-                        resume.set()
-            if audio:
-                audio.gain=1.0 if modes['resources'][1]['entity']==1 else 0.0
-                print('Audio ownership entity={} senderGain={}'.format(
-                    modes['resources'][1]['entity'],audio.gain),flush=True)
+            with mode_lock:
+                for request in value.get('params',{}).get('resources',[]):
+                    resource=next((r for r in modes['resources'] if r['resourceID']==request.get('resourceID')),None)
+                    if resource is not None:
+                        transfer=request.get('transferType')
+                        if transfer in (1,3): resource['entity']=2
+                        elif transfer==2:resource['entity']=1
+                        elif transfer==4:resource['entity']=resource['permanentEntity']
+                        if transfer in (1,2):resource['permanentEntity']=resource['entity']
+
+                if audio:
+                    audio.gain=duck[0] if modes['resources'][1]['entity']==1 else 0.0
+                    print('Audio ownership entity={} senderGain={}'.format(
+                        modes['resources'][1]['entity'],audio.gain),flush=True)
+                mode_revision[0]+=1
+                if screen:screen.expect_owner(modes['resources'][0]['entity'])
+                resource_changed.set()
             print('HU mode request applied: {}'.format(modes['resources']),flush=True)
-            return {'status':0,'params':modes}
+            return {'status':0,'params':copy.deepcopy(modes)}
         if audio and value.get('type') in ('duckAudio','unduckAudio'):
             volume=max(-144,min(0,float(value.get('params',{}).get('volume',0))))
-            audio.gain=10**(volume/20) if value['type']=='duckAudio' else 1.0
+            with mode_lock:
+                duck[0]=10**(volume/20) if value['type']=='duckAudio' else 1.0
+                audio.gain=duck[0] if modes['resources'][1]['entity']==1 else 0.0
             print('Audio duck command={} volumeDb={} senderGain={}'.format(
                 value['type'],volume,audio.gain),flush=True)
     if live:
+        from .mediakeys import MediaKeys
+        media=MediaKeys(info.get('hidDevices',[]))
         from .touch import TouchInput
         touch=TouchInput(info.get('hidDevices',[]),display['uuid'],width,height)
     events = None
@@ -363,12 +399,13 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             if audio_status!=200:raise RuntimeError('audio SETUP rejected')
             audio_stream=next(s for s in plistlib.loads(audio_body)['streams'] if s['type']==audio.description()['type'])
             audio.start(audio_stream,client.sock.sock.getpeername())
+            if media:media.started()
         encoder = ScreenEncoder(shared,stream_id)
         if live:
             from .screenstream import ScreenStream
             screen=ScreenStream(client,address,interface,shared,display,video,stream_id,width,height,
                                 request_keyframe=pipeline.request_keyframe)
-            feedback=ScreenFeedback(client,commands,modes,resume,screen)
+            feedback=ScreenFeedback(client,commands,modes,resume,screen,resource_changed,audio,duck,mode_lock,mode_revision)
         if live:
             import itertools
             source = itertools.chain([first_live_frame],source)
@@ -427,6 +464,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                 print('Demo video sent {} frames in {:.2f}s'.format(count,time.monotonic()-start),flush=True)
         print('Demo complete: {} frames'.format(count),flush=True)
     finally:
+        if media:media.close()
         if power:
             power.close()
         if audio:
