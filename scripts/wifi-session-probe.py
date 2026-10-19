@@ -436,6 +436,18 @@ def main():
         if wpa2_retry.waiting():
             print('Waiting for WPA2 reassociation after the retired connection failed', flush=True)
             return
+        if error.get_dbus_name() == 'net.connman.Error.NoCarrier':
+            try:
+                from carplay_proto.networkrecovery import recover_split_registry
+                owner_api = network_interface(network_object(bus, 'org.freedesktop.DBus',
+                    '/org/freedesktop/DBus'), 'org.freedesktop.DBus')
+                if recover_split_registry(manager, service, target, session['ssid'],
+                        str(owner_api.GetNameOwner('net.connman')),
+                        log=lambda line: print(line, flush=True)):
+                    loop.quit()
+                    return
+            except (dbus.DBusException, OSError, ValueError, subprocess.SubprocessError) as recovery_error:
+                print('HU registry recovery unavailable: '+type(recovery_error).__name__, flush=True)
         if error.get_dbus_name() == 'net.connman.Error.NoCarrier' and wifi_path and no_carrier_retries[0] < 3:
             no_carrier_retries[0] += 1
             print('HU carrier not ready; scheduling scan retry {}/3'.format(no_carrier_retries[0]), flush=True)
