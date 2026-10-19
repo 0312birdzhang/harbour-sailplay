@@ -20,10 +20,11 @@ while not Path('/dev/shm/imira-comp-fb').exists() or not Path('/run/user/100000/
  if time.monotonic()>deadline:raise RuntimeError('projected compositor is not running')
  time.sleep(.2)
 _,_,width,height=struct.unpack('<4I',Path('/dev/shm/imira-comp-fb').read_bytes()[:16])
+print('OUTPUT_RESOLUTION',width,height,flush=True)
 scale=width/1920
 full_width=width-math.floor(140*scale+.5)
 map_width=math.floor((full_width-48*scale)*.65+.5)
-map_height=math.floor(height-32*scale+.5)
+map_height=math.floor(height*(1-32/720)+.5)
 key='c2FpbHBsYXktZ2VvbWV0cnktcHJvYmU='
 def command(text):
  with commands.open('a') as f:f.write(text+'\n')

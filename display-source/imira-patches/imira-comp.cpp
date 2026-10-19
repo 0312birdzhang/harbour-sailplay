@@ -865,7 +865,7 @@ public:
     {
         const qreal scale = m_width / 1920.0;
         if (m_dashboard && !key.isEmpty() && key == m_dashboardMap)
-            return QSize(qRound((m_width - kDockW - 48 * scale) * 0.65), qRound(m_height - 32 * scale));
+            return QSize(qRound((m_width - kDockW - 48 * scale) * 0.65), qRound(m_height * (1.0 - 32.0 / 720.0)));
         return QSize(m_width - kDockW, m_height);
     }
 
@@ -892,7 +892,8 @@ public:
     {
         const qreal aw = m_width - kDockW;
         const qreal scale = m_width / 1920.0;
-        const qreal gap = 16 * scale, top = 16 * scale;
+        const qreal gap = 16 * scale;
+        const qreal top = 16.0 * m_height / 720.0;
         const qreal mapWidth = (aw - 3 * gap) * 0.65;
         for (ContentWin &c : m_content) {
             const bool map = !m_dashboardMap.isEmpty() && c.appKey == m_dashboardMap;
@@ -906,7 +907,7 @@ public:
             viewport->setPosition(m_dashboard
                 ? QPointF(map ? gap : mapWidth + 2 * gap, top) : QPointF(0, 0));
             viewport->setSize(m_dashboard
-                ? QSizeF(map ? mapWidth : aw - mapWidth - 3 * gap, m_height - top - gap)
+                ? QSizeF(map ? mapWidth : aw - mapWidth - 3 * gap, m_height - 2 * top)
                 : QSizeF(aw, m_height));
             if (m_dashboard) {
                 c.visible = map || music;

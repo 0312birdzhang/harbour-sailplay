@@ -32,7 +32,7 @@ Window {
     }
     Rectangle {
         id: dock
-        width: 140; height: parent.height; color: carPalette.dock
+        width: Math.round(140 * root.scale) / root.scale; height: parent.height; color: carPalette.dock
         Text { y: 25; anchors.horizontalCenter: parent.horizontalCenter; text: root.clockText; color: carPalette.text; font.pixelSize: 37; font.bold: true }
         Row {
             anchors.horizontalCenter: parent.horizontalCenter; y: 83; spacing: 7
@@ -149,18 +149,20 @@ Window {
     Item {
         visible: carController.dashboardActive || carController.musicActive
         x: dock.width; width: root.width - x; height: root.height
+        // Horizontal design units scale with width; vertical spacing follows height.
+        property real verticalGap: height * 16 / 720
         property real mapWidth: (width - 48) * 0.65
         Loader {
             id: weatherCard
             visible: !carController.musicActive
-            x: parent.mapWidth + 32; y: 16
+            x: parent.mapWidth + 32; y: parent.verticalGap
             width: parent.width - parent.mapWidth - 48
-            height: (parent.height - 48) * 0.35
+            height: (parent.height - 3 * parent.verticalGap) * 0.35
             source: "WeatherCard.qml"
         }
         Rectangle {
             visible: !carController.musicActive
-            x: 16; y: 16; width: parent.mapWidth; height: parent.height - 32
+            x: 16; y: parent.verticalGap; width: parent.mapWidth; height: parent.height - 2 * parent.verticalGap
             radius: 22; color: carPalette.card
             Text { anchors.centerIn: parent; width: parent.width - 40; wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter; color: carPalette.secondary; font.pixelSize: 26
@@ -175,9 +177,9 @@ Window {
         Rectangle {
             id: musicCard
             x: carController.musicActive ? 16 : parent.mapWidth + 32
-            y: carController.musicActive ? 16 : weatherCard.y + weatherCard.height + 16
+            y: carController.musicActive ? parent.verticalGap : weatherCard.y + weatherCard.height + parent.verticalGap
             width: carController.musicActive ? parent.width - 32 : parent.width - parent.mapWidth - 48
-            height: parent.height - y - 16
+            height: parent.height - y - parent.verticalGap
             radius: 22; color: carPalette.card
             property var player: lockscreenMusic.mprisController
             property string artworkKey: player ? String(player.metaData.artUrl || player.metaData.url || "") : ""
