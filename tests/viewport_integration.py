@@ -37,6 +37,8 @@ try:
  while not Path('/run/user/100000/imira-comp-0').exists():
   if time.monotonic()>deadline:raise RuntimeError('projected compositor is not running')
   time.sleep(.2)
+ command('D '+key+' -')
+ time.sleep(.3)
  child=subprocess.Popen(['/tmp/sailplay-viewport-probe'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
  def wait_size(width,height):
   deadline=time.monotonic()+8;state={}
@@ -48,10 +50,14 @@ try:
    if child.poll() is not None:raise RuntimeError(child.stderr.read().decode())
    time.sleep(.15)
   raise AssertionError(state)
- time.sleep(1)
- command('D '+key+' -');wait_size(map_width,map_height)
- command('H\nS '+key);wait_size(full_width,height)
- command('D '+key+' -');wait_size(map_width,map_height)
+ wait_size(map_width,map_height)  # First configure may precede shell role creation.
+ for cycle in range(5):
+  command('H');time.sleep(.3)
+  wait_size(map_width,map_height)  # Hidden maps keep their viewport.
+  command('S '+key);wait_size(full_width,height)
+  command('D '+key+' -');wait_size(map_width,map_height)
+  command('D '+key+' -');wait_size(map_width,map_height)
+  print('VIEWPORT_CYCLE_OK',cycle+1,flush=True)
  print('VIEWPORT_ROUNDTRIP_OK',flush=True)
 finally:
  if child and child.poll() is None:child.terminate();child.wait(3)

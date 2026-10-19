@@ -637,7 +637,6 @@ public:
     Q_INVOKABLE void openDashboard() {
         m_musicActive = false;
         if (!m_currentApp.isEmpty()) hideCurrent();
-        writeCmd(QStringLiteral("H"));
         m_dashboardActive = true;
         saveShellView(QStringLiteral("dashboard"));
         const QString map = dashboardMapApp();

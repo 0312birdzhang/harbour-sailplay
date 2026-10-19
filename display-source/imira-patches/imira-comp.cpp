@@ -717,7 +717,11 @@ public:
                 if (!m_content.at(i).visible
                     && ((!appKey.isEmpty() && m_content.at(i).appKey == appKey)
                         || (appKey.isEmpty() && m_content.at(i).title == title)))
-                    m_content.removeAt(i);   // stale hidden entry, same app
+                {
+                    m_content[i].item->setVisible(false);
+                    m_content[i].item->parentItem()->setVisible(false);
+                    m_content.removeAt(i);
+                }
             }
             m_content.append(ContentWin{item, title, appKey, true, 0});
             if (m_dashboard) layoutDashboard();
@@ -857,7 +861,13 @@ public:
             fprintf(stderr, "imira-comp: client viewport pid=%lld screen=%dx%d outputs=%d\n",
                 (long long)client->processId(), size.width(), size.height(), update.sent);
         }
-        surface->requestSize(size);
+        // Repeated dashboard refreshes must not reconfigure an unchanged
+        // surface. Keep a retry when an early configure was not honoured.
+        if (surface->property("sailplayRequestedSize").toSize() != size
+                || surface->size() != size) {
+            surface->setProperty("sailplayRequestedSize", size);
+            surface->requestSize(size);
+        }
         wl_client_flush(client->client());
     }
 
@@ -896,6 +906,7 @@ public:
         const qreal top = 16.0 * m_height / 720.0;
         const qreal mapWidth = (aw - 3 * gap) * 0.65;
         for (ContentWin &c : m_content) {
+            if (!m_dashboard && !c.visible) continue;
             const bool map = !m_dashboardMap.isEmpty() && c.appKey == m_dashboardMap;
             const bool music = !m_dashboardMusic.isEmpty() && c.appKey == m_dashboardMusic;
             if (m_dashboard && !map && !music) {
@@ -911,6 +922,7 @@ public:
                 : QSizeF(aw, m_height));
             if (m_dashboard) {
                 c.visible = map || music;
+                viewport->setVisible(c.visible);
                 c.item->setVisible(c.visible);
             }
             const QSize requested = m_dashboard
@@ -947,7 +959,9 @@ public:
             } else if (t == "H" || t.startsWith("H ")) {
                 m_dashboard = false;
                 m_dashboardMap.clear(); m_dashboardMusic.clear();
-                layoutDashboard();
+                // H only hides. Resizing every hidden app here caused a
+                // split -> full -> split configure burst for H followed by D.
+                // The selected app is resized when S actually restores it.
                 // Home/settings means no content surface may remain visible.
                 // Hide all, so an earlier state bug cannot leave a second
                 // window receiving input behind the first one.
@@ -1004,6 +1018,8 @@ public:
                         }
                     }
                     m_content[target].visible = true;
+                    layoutDashboard();
+                    m_content[target].item->parentItem()->setVisible(true);
                     m_content[target].item->setVisible(true);
                     m_content[target].item->setZ(m_nextContentZ++);
                 } else {
@@ -1661,12 +1677,6 @@ int main(int argc, char *argv[])
         renderControl.render();
         context.functions()->glFlush();
 
-        // Tell every client its frame was consumed — without this they
-        // block on the wl_surface frame callback after a few frames (the
-        // gallery froze exactly like that). Lipstick does the same after
-        // each swap.
-        compositor.sendFrameCallbacks(compositor.surfaces());
-
         fbo.bind();
         hdr->seq++;                     // odd: writing
         __sync_synchronize();
@@ -1675,6 +1685,12 @@ int main(int argc, char *argv[])
         __sync_synchronize();
         hdr->seq++;                     // even: complete
         fbo.release();
+
+        // glFlush only submits the draw. Readback above waits for sampling
+        // of imported client buffers to finish. Announce consumption after
+        // that boundary, so a native GL map cannot start its next frame
+        // while the compositor is still reading the current one.
+        compositor.sendFrameCallbacks(compositor.surfaces());
     });
     frameTimer.start();
 

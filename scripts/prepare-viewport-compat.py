@@ -1,5 +1,10 @@
 #!/usr/bin/python3
-"""Use live window dimensions for projected Silica pages, without system edits."""
+"""Use the client-specific output for projected Silica pages, without system edits.
+
+QWindow geometry can lag behind wl_output/configure during startup and resizing.
+Use the live QtQuick Screen dimensions so layout does not feed back through a
+partly resized window. The system Silica Screen singleton remains untouched.
+"""
 from pathlib import Path
 import os
 
@@ -16,7 +21,7 @@ def adapt(text):
     if any(text.count(old)!=1 for old in changes) or text.count('id: window')!=1:
         raise RuntimeError('unsupported Silica ApplicationWindow source; viewport override not applied')
     for old,new in changes.items():text=text.replace(old,new)
-    return text.replace('id: window', 'id: window\n    readonly property real _sailplayPortraitWidth: __quickWindow ? Math.min(__quickWindow.width, __quickWindow.height) : Screen.width\n    readonly property real _sailplayPortraitHeight: __quickWindow ? Math.max(__quickWindow.width, __quickWindow.height) : Screen.height',1)
+    return text.replace('id: window', 'id: window\n    readonly property real _sailplayPortraitWidth: Math.min(window.QtQuick.Screen.width, window.QtQuick.Screen.height)\n    readonly property real _sailplayPortraitHeight: Math.max(window.QtQuick.Screen.width, window.QtQuick.Screen.height)',1)
 
 
 def prepare():

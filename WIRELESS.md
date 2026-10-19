@@ -34,3 +34,31 @@ session's CPU lease. Display and lock state are only read, never changed.
 The return tile sends modesChanged and shuts down the screen TCP socket before a screen-only TEARDOWN (type 110 and display UUID). Audio and control remain active. The native head-unit UI switch was confirmed in a device test. A subsequent head-unit requestUI caused fresh screen-only SETUP and RECORD, followed by IDR-started video transmission. Resume uses a new stream connection ID and encryption key. Earlier video-pause behavior only froze the picture and has been replaced. Version 0.1.0-17 was installed and the user confirmed the full tile return, head-unit CarPlay re-entry and restored-touch round trip.
 
 Device-specific captures, certificates, pins, private identities and operational scripts are kept locally and are not repository fixtures.
+
+
+## Split map viewport (0.1.1-33)
+
+The private Silica adapter uses the client's live QtQuick Screen geometry,
+which is updated by the per-client output mode, rather than feeding layout
+back through a QWindow whose width and height can still be changing. It does
+not modify the system Silica files. Map and expanded sizes continue to derive
+from the negotiated output dimensions and scaled dock/card margins.
+
+Home now hides content without resizing hidden apps. Dashboard selection goes
+directly to the split layout, and restoring an app resizes only the selected
+visible content. An unchanged viewport does not send another configure unless
+the actual surface size still differs; that exception is necessary because a
+request made before the Wayland shell role exists may be ignored. Replaced
+hidden surfaces are hidden together with their clipping viewport.
+
+Client frame callbacks run after framebuffer readback completes. A glFlush
+alone submits rendering but does not establish completion of sampling from
+imported client buffers.
+
+Device validation used a 1920x720 output: split map 1126x688 and expanded app
+1780x720. The live viewport probe passed initial split startup and five rounds
+of hide/restore/dashboard switching. Organic Maps passed five real split/full
+round trips without the observed uniform blank right-hand region. Forty
+consecutive static map samples showed no large-area pixel changes in the
+sampled map region. This is phone-side compositor validation; prolonged
+in-vehicle rendering still needs observation.
