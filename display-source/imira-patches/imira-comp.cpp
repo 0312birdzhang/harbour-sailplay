@@ -60,6 +60,8 @@
 #include <QWaylandQuickSurface>
 #include <QWaylandSurfaceItem>
 #include <QWaylandOutput>
+#include <wayland-server-core.h>
+#include <wayland-server-protocol.h>
 
 namespace {
 
@@ -694,15 +696,14 @@ public:
             // CarLife content window (a launched app): fills the area right
             // of the shell's dock, no chrome. CarPlay-style, an app replaces
             // the one on screen. Native apps honour the resize request and
-            // keep a full 1920x720 app canvas; it is scaled as one image into the
-            // 1780px area beside the dock, so fixed-layout apps cannot lose
-            // their right edge.
+            // render to their real viewport. Non-resizing buffers are fitted
+            // without overscan or cropping so controls remain visible.
             QQuickItem *viewport = new QQuickItem(m_contentRoot);
             viewport->setSize(QSizeF(m_contentRoot->width(), m_contentRoot->height()));
             viewport->setClip(true);
             item->setParentItem(viewport);
             item->setZ(m_nextContentZ++);
-            surface->requestSize(QSize(m_width, m_height));
+            requestViewport(surface, initialContentSize(appKey));
             syncContent(item);
             QObject::connect(surface, &QWaylandSurface::sizeChanged,
                              [this, item]() { syncContent(item); });
@@ -734,9 +735,9 @@ public:
         });
         // A desktop-sized window, not a phone screen: ask the client to lay
         // itself out for the workspace (output minus dock and title bar).
-        surface->requestSize(QSize(m_width - 96,
-                                   m_height - DockItem::kHeight
-                                       - WindowChrome::kTitle - 48));
+        const QString key = clientAppKey(surface);
+        if (!key.isEmpty()) requestViewport(surface, initialContentSize(key));
+        else surface->requestSize(QSize(m_width - kDockW, m_height));
     }
 
     // Topmost window under the cursor (stacking order = list order).
@@ -810,8 +811,14 @@ public:
     void removeContent(QWaylandSurfaceItem *item)
     {
         for (int i = m_content.count() - 1; i >= 0; --i) {
-            if (m_content.at(i).item == item)
+            if (m_content.at(i).item == item) {
+                // A closed/unmapped client's view can retain a black buffer.
+                // Removing only its bookkeeping entry leaves that view above
+                // the restored map, even though it can no longer receive input.
+                item->setVisible(false);
+                item->parentItem()->setVisible(false);
                 m_content.removeAt(i);
+            }
         }
     }
 
@@ -820,6 +827,48 @@ public:
     // the item is
     // sized to the raw buffer and SCALED — clients that honour the 1780x720
     // request land at scale 1, the rest get fitted anyway.
+    // Keep the compositor framebuffer full-sized, but expose the actual app
+    // viewport as that client's screen. Screen.width/height layouts otherwise
+    // continue to use the global 1920x720 mode despite a shell configure.
+    void requestViewport(QWaylandSurface *surface, const QSize &size)
+    {
+        QWaylandClient *client = surface->client();
+        if (client->property("sailplayViewportSize").toSize() != size) {
+            struct Update { QWaylandOutput *output; QSize size; int sent; } update{primaryOutput(), size, 0};
+            wl_client_for_each_resource(client->client(), [](wl_resource *resource, void *opaque) -> wl_iterator_result {
+                Update *u = static_cast<Update *>(opaque);
+                if (strcmp(wl_resource_get_class(resource), "wl_output") != 0
+                        || QWaylandOutput::fromResource(resource) != u->output)
+                    return WL_ITERATOR_CONTINUE;
+                const QSize original = u->output->geometry().size();
+                const QSize physical = u->output->physicalSize();
+                const int pw = original.width() ? qRound(physical.width() * qreal(u->size.width()) / original.width()) : 0;
+                const int ph = original.height() ? qRound(physical.height() * qreal(u->size.height()) / original.height()) : 0;
+                wl_output_send_geometry(resource, 0, 0, pw, ph, int(u->output->subpixel()),
+                    u->output->manufacturer().toUtf8().constData(), u->output->model().toUtf8().constData(), int(u->output->transform()));
+                wl_output_send_mode(resource, WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED,
+                    u->size.width(), u->size.height(), u->output->mode().refreshRate);
+                if (wl_resource_get_version(resource) >= WL_OUTPUT_DONE_SINCE_VERSION)
+                    wl_output_send_done(resource);
+                ++u->sent;
+                return WL_ITERATOR_CONTINUE;
+            }, &update);
+            if (update.sent) client->setProperty("sailplayViewportSize", size);
+            fprintf(stderr, "imira-comp: client viewport pid=%lld screen=%dx%d outputs=%d\n",
+                (long long)client->processId(), size.width(), size.height(), update.sent);
+        }
+        surface->requestSize(size);
+        wl_client_flush(client->client());
+    }
+
+    QSize initialContentSize(const QString &key) const
+    {
+        const qreal scale = m_width / 1920.0;
+        if (m_dashboard && !key.isEmpty() && key == m_dashboardMap)
+            return QSize(qRound((m_width - kDockW - 48 * scale) * 0.65), qRound(m_height - 32 * scale));
+        return QSize(m_width - kDockW, m_height);
+    }
+
     void syncContent(QWaylandSurfaceItem *item)
     {
         const QSize s = item->surface()->size();
@@ -829,16 +878,9 @@ public:
         item->setTransformOrigin(QQuickItem::Center);
         const qreal aw = item->parentItem()->width();
         const qreal ah = item->parentItem()->height();
-        // Slight left overscan hides application-side edge drawers which are
-        // normally kept just off the phone screen. Fit against a canvas that
-        // is wider by the crop amount, then clip it at the real content area;
-        // this keeps the right edge flush instead of leaving a black strip.
-        const qreal crop = m_dashboard ? 0 : kContentCropLeft;
-        const qreal fitWidth = aw + crop;
-        const qreal scale = qMin(fitWidth / s.width(), ah / s.height());
+        const qreal scale = qMin(aw / s.width(), ah / s.height());
         item->setScale(scale);
-        item->setPosition(QPointF((fitWidth - s.width()) / 2.0
-                                      - crop,
+        item->setPosition(QPointF((aw - s.width()) / 2.0,
                                   (ah - s.height()) / 2.0));
         fprintf(stderr,
                 "imira-comp: content fit '%s' surface=%dx%d scale=%.2f\n",
@@ -855,6 +897,11 @@ public:
         for (ContentWin &c : m_content) {
             const bool map = !m_dashboardMap.isEmpty() && c.appKey == m_dashboardMap;
             const bool music = !m_dashboardMusic.isEmpty() && c.appKey == m_dashboardMusic;
+            if (m_dashboard && !map && !music) {
+                c.visible = false;
+                c.item->setVisible(false);
+                continue; // Hidden apps must not be resized to the music card.
+            }
             QQuickItem *viewport = c.item->parentItem();
             viewport->setPosition(m_dashboard
                 ? QPointF(map ? gap : mapWidth + 2 * gap, top) : QPointF(0, 0));
@@ -867,8 +914,8 @@ public:
             }
             const QSize requested = m_dashboard
                 ? QSize(qRound(viewport->width()), qRound(viewport->height()))
-                : QSize(m_width, m_height);
-            c.item->surface()->requestSize(requested);
+                : QSize(qRound(aw), m_height);
+            requestViewport(c.item->surface(), requested);
             syncContent(c.item);
         }
     }
@@ -1129,7 +1176,6 @@ private:
 
     // CarLife shell/content state (see contentItemAt / pollCarlifeCmd)
     int kDockW = 140;   // scaled to the selected projection resolution
-    static const int kContentCropLeft = 28;
     QWaylandSurfaceItem *m_shellItem = nullptr;
     QQuickItem *m_contentRoot = nullptr;
     QVector<ContentWin> m_content;

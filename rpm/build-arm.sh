@@ -33,7 +33,7 @@ ls -la "$X264_OUT/libx264.a"
 cd "$REPO/imira-patches"
 CFLAGS=$(pkg-config --cflags Qt5Compositor Qt5Quick Qt5Gui Qt5Core Qt5Widgets)
 LIBS=$(pkg-config --libs Qt5Compositor Qt5Quick Qt5Gui Qt5Core Qt5Widgets)
-g++ -O2 -std=c++11 -fPIC $CFLAGS imira-comp.cpp $LIBS -lGLESv2 -o "$PAYLOAD/imira-comp"
+g++ -O2 -std=c++11 -fPIC $CFLAGS imira-comp.cpp $LIBS -lGLESv2 -lwayland-server -o "$PAYLOAD/imira-comp"
 echo "imira-comp built"
 
 # --- carui (Qt Quick launcher) ----------------------------------------------

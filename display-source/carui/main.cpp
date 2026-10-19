@@ -341,6 +341,8 @@ static qint64 launchApp(const QString &appId, const QString &exec)
         cmd = QStringLiteral("if python3 /opt/sailplay/scripts/prepare-media-compat.py; then ")
             + QStringLiteral("export QML2_IMPORT_PATH=\"$HOME/.cache/sailplay/qml\"; fi; ") + cmd;
     }
+    cmd = QStringLiteral("if python3 /opt/sailplay/scripts/prepare-viewport-compat.py; then "
+        "export QML2_IMPORT_PATH=\"$HOME/.cache/sailplay/viewport-qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}\"; fi; ") + cmd;
     qint64 pid = 0;
     QProcess::startDetached(QStringLiteral("/bin/sh"),
                             QStringList() << QStringLiteral("-c") << cmd,
