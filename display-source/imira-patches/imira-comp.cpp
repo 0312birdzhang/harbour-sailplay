@@ -850,7 +850,7 @@ public:
     {
         const qreal aw = m_width - kDockW;
         const qreal scale = m_width / 1920.0;
-        const qreal gap = 16 * scale, top = 64 * scale;
+        const qreal gap = 16 * scale, top = 16 * scale;
         const qreal mapWidth = (aw - 3 * gap) * 0.65;
         for (ContentWin &c : m_content) {
             const bool map = !m_dashboardMap.isEmpty() && c.appKey == m_dashboardMap;

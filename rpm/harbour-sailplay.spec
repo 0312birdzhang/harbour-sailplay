@@ -1,6 +1,6 @@
 Name: harbour-sailplay
 Version: 0.1.1
-Release: 21
+Release: 25
 Summary: SailfishOS wireless CarPlay phone and virtual vehicle display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
@@ -11,6 +11,7 @@ Requires: python3-dbus
 Requires: python3-gobject
 Requires: sailfishsilica-qt5
 Requires: sailfish-components-media-qt5
+Requires: sailfish-components-weather-qt5
 AutoReq: 0
 AutoProv: 0
 
@@ -32,6 +33,8 @@ install -m 2755 rpm/payload/imira-comp %{buildroot}/opt/sailplay/imira-comp
 install -m 2755 rpm/payload/carlife-capture %{buildroot}/opt/sailplay/carlife-capture
 install -m 0755 rpm/payload/carui %{buildroot}/opt/sailplay/carui/carui
 install -m 0644 display-source/carui/main.qml %{buildroot}/opt/sailplay/carui/main.qml
+install -m 0644 display-source/carui/CarPalette.qml %{buildroot}/opt/sailplay/carui/CarPalette.qml
+install -m 0644 display-source/carui/WeatherCard.qml %{buildroot}/opt/sailplay/carui/WeatherCard.qml
 install -m 0644 display-source/carui/MusicPlayer.qml %{buildroot}/opt/sailplay/carui/MusicPlayer.qml
 install -m 0644 display-source/carui/mobile-settings.qml %{buildroot}/opt/sailplay/carui/mobile-settings.qml
 mkdir -p %{buildroot}/opt/sailplay/carui/translations

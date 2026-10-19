@@ -128,6 +128,10 @@ Start music on your phone</source>
       <source>Unavailable</source>
       <translation>无法读取</translation>
     </message>
+    <message>
+      <source>Set a location in Weather</source>
+      <translation>请在天气中设置位置</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>
@@ -143,5 +147,14 @@ Start music on your phone</source>
       <source>Could not open the music app on the phone</source>
       <translation>无法在手机上打开音乐应用</translation>
     </message>
+    <message>
+      <source>Set a location in Weather</source>
+      <translation>请在天气中设置位置</translation>
+    </message>
+    <message><source>Car display theme</source><translation>车机显示主题</translation></message>
+    <message><source>Day theme starts</source><translation>白天主题开始时间</translation></message>
+    <message><source>Night theme starts</source><translation>夜间主题开始时间</translation></message>
+    <message><source>Switches automatically using phone local time. Changes apply immediately to the car display.</source><translation>按手机本地时间自动切换，修改后立即应用于车机界面。</translation></message>
+    <message><source>Choose different day and night times</source><translation>白天和夜间的开始时间不能相同</translation></message>
   </context>
 </TS>

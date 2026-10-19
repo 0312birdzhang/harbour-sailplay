@@ -1,3 +1,4 @@
+#include "themeschedule.h"
 #include <QGuiApplication>
 #include <QTranslator>
 #include <QLocale>
@@ -425,7 +426,13 @@ class CarUiController : public QObject
     Q_PROPERTY(QStringList projectionResolutions READ projectionResolutions NOTIFY projectionSettingsChanged)
     Q_PROPERTY(int maximumFps READ maximumFps NOTIFY projectionSettingsChanged)
     Q_PROPERTY(bool dashboardActive READ dashboardActive NOTIFY currentAppChanged)
+    Q_PROPERTY(bool dayTheme READ dayTheme NOTIFY themeSettingsChanged)
+    Q_PROPERTY(QString dayStart READ dayStart NOTIFY themeSettingsChanged)
+    Q_PROPERTY(QString nightStart READ nightStart NOTIFY themeSettingsChanged)
     Q_PROPERTY(bool musicActive READ musicActive NOTIFY currentAppChanged)
+    Q_PROPERTY(bool hasRememberedMusic READ hasRememberedMusic NOTIFY rememberedMusicChanged)
+    Q_PROPERTY(QString lastMusicApp READ lastMusicApp NOTIFY rememberedMusicChanged)
+    Q_PROPERTY(QString lastMusicName READ lastMusicName NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString dashboardMapApp READ dashboardMapApp NOTIFY dashboardSettingsChanged)
 
 public:
@@ -436,6 +443,7 @@ public:
             const QDateTime stamp = QFileInfo(userConfigPath()).lastModified();
             if (stamp != m_configStamp)
                 reloadConfig();
+            updateTheme();
             updateServiceState();
             updateReconnectState();
             const QDateTime dashStamp = QFileInfo(dashboardConfigPath()).lastModified();
@@ -456,6 +464,7 @@ public:
         connect(statusTimer, &QTimer::timeout, this, &CarUiController::updateStatus);
         statusTimer->start(5000);
         updateStatus();
+        updateTheme();
     }
 
     // one tile per config row (a category may appear several times)
@@ -533,11 +542,102 @@ public:
         s.setValue(QStringLiteral("Dashboard/") + role, id); s.sync();
         emit dashboardSettingsChanged();
     }
+    static QString themeConfigPath() {
+        return QDir::homePath() + QStringLiteral("/.config/sailplay/theme.ini");
+    }
+    QString themeTime(const QString &key, const QString &fallback) const {
+        QSettings settings(themeConfigPath(), QSettings::IniFormat);
+        const QTime time = QTime::fromString(settings.value(key, fallback).toString(), QStringLiteral("HH:mm"));
+        return time.isValid() ? time.toString(QStringLiteral("HH:mm")) : fallback;
+    }
+    QString dayStart() const { return themeTime(QStringLiteral("DayStart"), QStringLiteral("07:00")); }
+    QString nightStart() const { return themeTime(QStringLiteral("NightStart"), QStringLiteral("19:00")); }
+    bool dayTheme() const { return m_dayTheme; }
+    void updateTheme() {
+        const QString day = dayStart(), night = nightStart();
+        const QTime now = QTime::currentTime();
+        const QTime d = QTime::fromString(day, QStringLiteral("HH:mm"));
+        const QTime n = QTime::fromString(night, QStringLiteral("HH:mm"));
+        const bool daytime = day != night && sailplayDayAt(now.hour()*60+now.minute(), d.hour()*60+d.minute(), n.hour()*60+n.minute());
+        const QString schedule = day + QLatin1Char('|') + night;
+        if (daytime != m_dayTheme || schedule != m_themeSchedule) {
+            m_dayTheme = daytime; m_themeSchedule = schedule;
+            emit themeSettingsChanged();
+        }
+    }
+    Q_INVOKABLE bool setThemeTime(bool daytime, const QString &value) {
+        const QTime time = QTime::fromString(value, QStringLiteral("HH:mm"));
+        if (!time.isValid()) return false;
+        const QString formatted = time.toString(QStringLiteral("HH:mm"));
+        if (formatted == (daytime ? nightStart() : dayStart())) return false;
+        QDir().mkpath(QFileInfo(themeConfigPath()).absolutePath());
+        QSettings settings(themeConfigPath(), QSettings::IniFormat);
+        settings.setValue(daytime ? QStringLiteral("DayStart") : QStringLiteral("NightStart"), formatted);
+        settings.sync();
+        if (settings.status() != QSettings::NoError) return false;
+        updateTheme(); return true;
+    }
+    static QString uiStatePath() {
+        return QDir::homePath() + QStringLiteral("/.config/sailplay/ui-state.ini");
+    }
+    void saveShellView(const QString &view) {
+        QDir().mkpath(QFileInfo(uiStatePath()).absolutePath());
+        QSettings state(uiStatePath(), QSettings::IniFormat);
+        state.setValue(QStringLiteral("View"), view); state.sync();
+    }
+    bool hasRememberedMusic() const {
+        QSettings state(uiStatePath(), QSettings::IniFormat);
+        return findAvailable(state.value(QStringLiteral("MusicApp")).toString()) != nullptr;
+    }
+    Q_INVOKABLE QString preferredMusicService(const QStringList &services) const {
+        for (const QString &service : services) {
+            if (!service.startsWith(QStringLiteral("org.mpris.MediaPlayer2."))) continue;
+            QDBusMessage get = QDBusMessage::createMethodCall(service, QStringLiteral("/org/mpris/MediaPlayer2"),
+                QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
+            get << QStringLiteral("org.mpris.MediaPlayer2") << QStringLiteral("DesktopEntry");
+            const QDBusMessage reply = QDBusConnection::sessionBus().call(get, QDBus::Block, 500);
+            if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) continue;
+            QString id = qvariant_cast<QDBusVariant>(reply.arguments().first()).variant().toString();
+            if (id.endsWith(QStringLiteral(".desktop"))) id.chop(8);
+            if (id == lastMusicApp()) return service;
+        }
+        return QString();
+    }
+    QString lastMusicApp() const {
+        QSettings state(uiStatePath(), QSettings::IniFormat);
+        const QString id = state.value(QStringLiteral("MusicApp")).toString();
+        return findAvailable(id) ? id : QStringLiteral("jolla-mediaplayer");
+    }
+    QString lastMusicName() const {
+        const AvailableApp *a = findAvailable(lastMusicApp());
+        return a ? a->name : QString();
+    }
+    Q_INVOKABLE void rememberMusicPlayer(const QString &service) {
+        if (!service.startsWith(QStringLiteral("org.mpris.MediaPlayer2."))) return;
+        QDBusMessage get = QDBusMessage::createMethodCall(service, QStringLiteral("/org/mpris/MediaPlayer2"),
+            QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
+        get << QStringLiteral("org.mpris.MediaPlayer2") << QStringLiteral("DesktopEntry");
+        const QDBusMessage reply = QDBusConnection::sessionBus().call(get, QDBus::Block, 500);
+        if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) return;
+        QString id = qvariant_cast<QDBusVariant>(reply.arguments().first()).variant().toString();
+        if (id.endsWith(QStringLiteral(".desktop"))) id.chop(8);
+        if (!findAvailable(id)) return;
+        QDir().mkpath(QFileInfo(uiStatePath()).absolutePath());
+        QSettings state(uiStatePath(), QSettings::IniFormat);
+        if (state.value(QStringLiteral("MusicApp")).toString() == id) return;
+        state.setValue(QStringLiteral("MusicApp"), id); state.sync();
+        emit rememberedMusicChanged();
+    }
+    Q_INVOKABLE void restoreShellView() {
+        QSettings state(uiStatePath(), QSettings::IniFormat);
+        if (state.value(QStringLiteral("View")).toString() == QLatin1String("dashboard")) openDashboard();
+    }
     Q_INVOKABLE void openDashboard() {
         m_musicActive = false;
         if (!m_currentApp.isEmpty()) hideCurrent();
         writeCmd(QStringLiteral("H"));
         m_dashboardActive = true;
+        saveShellView(QStringLiteral("dashboard"));
         const QString map = dashboardMapApp();
         writeCmd(QStringLiteral("D %1 %2").arg(map.isEmpty() ? QStringLiteral("-") : appKey(map),
                                              QStringLiteral("-")));
@@ -559,8 +659,14 @@ public:
         emit currentAppChanged();
     }
     Q_INVOKABLE void startMusicOnPhone(const QString &requestedId = QString()) {
-        const QString id = requestedId.isEmpty() ? QStringLiteral("jolla-mediaplayer") : requestedId;
+        const QString id = requestedId.isEmpty() ? lastMusicApp() : requestedId;
         if (!findAvailable(id)) return;
+        QDir().mkpath(QFileInfo(uiStatePath()).absolutePath());
+        QSettings state(uiStatePath(), QSettings::IniFormat);
+        if (state.value(QStringLiteral("MusicApp")).toString() != id) {
+            state.setValue(QStringLiteral("MusicApp"), id); state.sync();
+            emit rememberedMusicChanged();
+        }
         QSettings entry(QStringLiteral("/usr/share/applications/") + id + QStringLiteral(".desktop"), QSettings::IniFormat);
         const QString service = entry.value(QStringLiteral("Desktop Entry/X-Maemo-Service")).toString();
         if (!service.isEmpty()) {
@@ -910,6 +1016,7 @@ public:
             writeCmd(QStringLiteral("H"));
             m_dashboardActive = false;
             m_musicActive = false;
+            saveShellView(QStringLiteral("apps"));
             emit currentAppChanged();
             return;
         }
@@ -919,12 +1026,15 @@ public:
         }
         const QString appId = m_currentApp;
         hideCurrent();
+        saveShellView(QStringLiteral("apps"));
         fprintf(stderr, "carui: home (hid %s)\n",
                 appId.toUtf8().constData());
         emit currentAppChanged();
     }
 
 signals:
+    void themeSettingsChanged();
+    void rememberedMusicChanged();
     void dashboardSettingsChanged();
     void artworkAvailable(const QString &key, const QUrl &localUrl);
     void projectionSettingsChanged();
@@ -1064,6 +1174,8 @@ private:
     }
     QVariantList m_rows;
     QString m_currentApp;
+    bool m_dayTheme = false;
+    QString m_themeSchedule;
     bool m_dashboardActive = false;
     bool m_musicActive = false;
     QNetworkAccessManager *m_artworkNetwork = nullptr;

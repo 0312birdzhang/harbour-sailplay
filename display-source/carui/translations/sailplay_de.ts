@@ -128,6 +128,10 @@ Musik auf dem Telefon starten</translation>
       <source>Unavailable</source>
       <translation>Nicht verfügbar</translation>
     </message>
+    <message>
+      <source>Set a location in Weather</source>
+      <translation>Ort in Wetter festlegen</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>
@@ -143,5 +147,14 @@ Musik auf dem Telefon starten</translation>
       <source>Could not open the music app on the phone</source>
       <translation>Die Musik-App konnte auf dem Telefon nicht geöffnet werden</translation>
     </message>
+    <message>
+      <source>Set a location in Weather</source>
+      <translation>Ort in Wetter festlegen</translation>
+    </message>
+    <message><source>Car display theme</source><translation>Design der Fahrzeuganzeige</translation></message>
+    <message><source>Day theme starts</source><translation>Tagdesign ab</translation></message>
+    <message><source>Night theme starts</source><translation>Nachtdesign ab</translation></message>
+    <message><source>Switches automatically using phone local time. Changes apply immediately to the car display.</source><translation>Automatischer Wechsel nach der Ortszeit des Telefons. Änderungen gelten sofort für die Fahrzeuganzeige.</translation></message>
+    <message><source>Choose different day and night times</source><translation>Verschiedene Startzeiten für Tag und Nacht wählen</translation></message>
   </context>
 </TS>

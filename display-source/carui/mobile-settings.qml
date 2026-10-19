@@ -3,6 +3,15 @@ import Sailfish.Silica 1.0
 
 ApplicationWindow {
     id: app
+    function chooseThemeTime(daytime, notice) {
+        var parts = (daytime ? carController.dayStart : carController.nightStart).split(":")
+        var dialog = pageStack.push("Sailfish.Silica.TimePickerDialog", {hour: Number(parts[0]), minute: Number(parts[1])})
+        dialog.accepted.connect(function() {
+            var time = (dialog.hour < 10 ? "0" : "") + dialog.hour + ":" + (dialog.minute < 10 ? "0" : "") + dialog.minute
+            if (!carController.setThemeTime(daytime, time))
+                notice.text = qsTranslate("Sailplay", "Choose different day and night times")
+        })
+    }
     function dashboardIndex(id) {
         var apps = carController.availableApps()
         for (var i = 0; i < apps.length; ++i) if (apps[i].id === id) return i + 1
@@ -83,6 +92,22 @@ ApplicationWindow {
                         wrapMode: Text.WordWrap
                         color: Theme.highlightColor
                         text: carController.serviceError
+                    }
+                    SectionHeader { text: qsTranslate("Sailplay", "Car display theme") }
+                    ValueButton {
+                        label: qsTranslate("Sailplay", "Day theme starts")
+                        value: carController.dayStart
+                        onClicked: app.chooseThemeTime(true, saveNotice)
+                    }
+                    ValueButton {
+                        label: qsTranslate("Sailplay", "Night theme starts")
+                        value: carController.nightStart
+                        onClicked: app.chooseThemeTime(false, saveNotice)
+                    }
+                    Label {
+                        x: Theme.horizontalPageMargin; width: parent.width - 2 * Theme.horizontalPageMargin
+                        wrapMode: Text.WordWrap; font.pixelSize: Theme.fontSizeSmall; color: Theme.secondaryColor
+                        text: qsTranslate("Sailplay", "Switches automatically using phone local time. Changes apply immediately to the car display.")
                     }
                     SectionHeader { text: qsTranslate("Sailplay", "Dashboard") }
                     ComboBox {
