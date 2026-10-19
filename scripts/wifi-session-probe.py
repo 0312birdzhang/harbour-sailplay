@@ -61,13 +61,14 @@ def main():
     from dbus.mainloop.glib import DBusGMainLoop
     from gi.repository import GLib
     DBusGMainLoop(set_as_default=True)
+    from carplay_proto.networkdbus import network_object, network_interface
     bus = dbus.SystemBus()
-    manager = dbus.Interface(bus.get_object('net.connman', '/'), 'net.connman.Manager')
+    manager = network_interface(network_object(bus, 'net.connman', '/'), 'net.connman.Manager')
     loop = GLib.MainLoop()
     from carplay_proto.wifiretry import ReassociationWindow
     wpa2_retry = ReassociationWindow()
     def service(path):
-        return dbus.Interface(bus.get_object('net.connman', path), 'net.connman.Service')
+        return network_interface(network_object(bus, 'net.connman', path), 'net.connman.Service')
     if args.restore:
         deadline = float('inf') if args.sustained else time.monotonic() + 300
         while True:
@@ -82,7 +83,7 @@ def main():
         print('RESTORE Wi-Fi safety timer expired at {:.3f}'.format(time.monotonic()), flush=True)
         old, target = args.restore
         if args.restore_debug:
-            dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1','/fi/w1/wpa_supplicant1'),
+            network_interface(network_object(bus, 'fi.w1.wpa_supplicant1','/fi/w1/wpa_supplicant1'),
                            'org.freedesktop.DBus.Properties').Set('fi.w1.wpa_supplicant1', 'DebugLevel', args.restore_debug)
         try:
             service(target).Disconnect()
@@ -99,16 +100,18 @@ def main():
         return
     with open(args.session) as stream:
         session = json.load(stream)
+    from carplay_proto.networktrace import NetworkTrace
+    network_trace = NetworkTrace(ssid=session['ssid'])
     phone_name = session.get('device_name')
     if not phone_name:
         from carplay_proto.bluezadapter import select_adapter, adapter_name
-        objects = dbus.Interface(bus.get_object('org.bluez', '/'),
+        objects = network_interface(bus.get_object('org.bluez', '/'),
                                  'org.freedesktop.DBus.ObjectManager').GetManagedObjects()
         adapter, _ = select_adapter(objects)
         phone_name = adapter_name(objects[adapter]['org.bluez.Adapter1'])
     if args.force_wpa2:
         def network_added(path, properties):
-            network = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', path), 'org.freedesktop.DBus.Properties')
+            network = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', path), 'org.freedesktop.DBus.Properties')
             configuration = network.Get('fi.w1.wpa_supplicant1.Network', 'Properties')
             if str(configuration.get('ssid', '')).strip('"') == session['ssid']:
                 wpa2_retry.arm()
@@ -122,9 +125,9 @@ def main():
                 # interpreted as SAE authentication failure and removed this
                 # network before the WPA2 attempt could complete.
                 interface_path = str(path).split('/Networks/')[0]
-                interface = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', interface_path),
+                interface = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', interface_path),
                                            'fi.w1.wpa_supplicant1.Interface')
-                properties = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', interface_path),
+                properties = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', interface_path),
                                             'org.freedesktop.DBus.Properties')
                 from carplay_proto.wifiretry import reassociate_target
                 selection_deadline=time.monotonic()+2
@@ -167,7 +170,7 @@ def main():
                 if safe:
                     print('Supplicant state: {}'.format(safe), flush=True)
         monitor.add_message_filter(message_received)
-        dbus.Interface(monitor.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus'),
+        network_interface(monitor.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus'),
                        'org.freedesktop.DBus.Monitoring').BecomeMonitor(
                            dbus.Array(["type='error',sender='{}'".format(owner),
                                        "type='method_return',sender='{}'".format(owner),
@@ -179,7 +182,7 @@ def main():
     wifi_path = None
     if args.connect:
         wifi_path = ensure_wifi_powered(manager,
-            lambda path, powered: dbus.Interface(bus.get_object('net.connman', path),
+            lambda path, powered: network_interface(network_object(bus, 'net.connman', path),
                 'net.connman.Technology').SetProperty('Powered', dbus.Boolean(powered, variant_level=1)),
             log=lambda message: print(message, flush=True))
     services = manager.GetServices()
@@ -190,13 +193,13 @@ def main():
         from carplay_proto.wifidiscovery import discover
         def cached_bss_visible(ssid):
             try:
-                props = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', '/fi/w1/wpa_supplicant1'),
+                props = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', '/fi/w1/wpa_supplicant1'),
                                        'org.freedesktop.DBus.Properties')
                 for interface in props.Get('fi.w1.wpa_supplicant1', 'Interfaces'):
-                    interface_props = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', interface),
+                    interface_props = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', interface),
                                                      'org.freedesktop.DBus.Properties')
                     for bss in interface_props.Get('fi.w1.wpa_supplicant1.Interface', 'BSSs'):
-                        bss_props = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1', bss),
+                        bss_props = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', bss),
                                                   'org.freedesktop.DBus.Properties')
                         if bytes(bss_props.Get('fi.w1.wpa_supplicant1.BSS', 'SSID')) == ssid.encode('utf-8'):
                             return True
@@ -205,10 +208,10 @@ def main():
             return False
         if wifi_path:
             target, services = discover(manager, wifi_path, session['ssid'],
-                scan=lambda path: dbus.Interface(bus.get_object('net.connman', path),
+                scan=lambda path: network_interface(network_object(bus, 'net.connman', path),
                     'net.connman.Technology').Scan(timeout=8),
                 cached_bss_visible=cached_bss_visible,
-                set_powered=lambda path, powered: dbus.Interface(bus.get_object('net.connman', path),
+                set_powered=lambda path, powered: network_interface(network_object(bus, 'net.connman', path),
                     'net.connman.Technology').SetProperty('Powered', dbus.Boolean(powered, variant_level=1)),
                 log=lambda message: print(message, flush=True), require_available=True)
     old = next((str(path) for path, props in services if props.get('Type') == 'wifi' and props.get('State') in ('ready', 'online')), None)
@@ -261,7 +264,7 @@ def main():
     if args.direct_passphrase and not target_props.get('Favorite'):
         restore_command.append('--forget-target')
     if args.trace_supplicant:
-        debug_properties = dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1','/fi/w1/wpa_supplicant1'),
+        debug_properties = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1','/fi/w1/wpa_supplicant1'),
                                            'org.freedesktop.DBus.Properties')
         previous_debug = str(debug_properties.Get('fi.w1.wpa_supplicant1', 'DebugLevel'))
         restore_command += ['--restore-debug', previous_debug]
@@ -393,7 +396,7 @@ def main():
         # A synchronous Scan inside a GLib callback stalls the deadline and
         # D-Bus handlers. Oct 16 retries took 64 seconds instead of 8 seconds.
         try:
-            technology = dbus.Interface(bus.get_object('net.connman', wifi_path, introspect=False),
+            technology = network_interface(network_object(bus, 'net.connman', wifi_path, introspect=False),
                                         'net.connman.Technology')
             technology.Scan(reply_handler=after_carrier_scan,
                             error_handler=carrier_scan_failed, timeout=8)
@@ -411,15 +414,15 @@ def main():
             props=service(target).GetProperties()
             iface=str(props.get('Ethernet',{}).get('Interface',''))
             associated=None
-            root=dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1','/fi/w1/wpa_supplicant1'),
+            root=network_interface(network_object(bus, 'fi.w1.wpa_supplicant1','/fi/w1/wpa_supplicant1'),
                                 'org.freedesktop.DBus.Properties')
             for path in root.Get('fi.w1.wpa_supplicant1','Interfaces'):
-                iprops=dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1',path),
+                iprops=network_interface(network_object(bus, 'fi.w1.wpa_supplicant1',path),
                                       'org.freedesktop.DBus.Properties')
                 if str(iprops.Get('fi.w1.wpa_supplicant1.Interface','Ifname'))!=iface:continue
                 if str(iprops.Get('fi.w1.wpa_supplicant1.Interface','State'))!='completed':continue
                 bss=iprops.Get('fi.w1.wpa_supplicant1.Interface','CurrentBSS')
-                bprops=dbus.Interface(bus.get_object('fi.w1.wpa_supplicant1',bss),
+                bprops=network_interface(network_object(bus, 'fi.w1.wpa_supplicant1',bss),
                                       'org.freedesktop.DBus.Properties')
                 associated=bytes(bprops.Get('fi.w1.wpa_supplicant1.BSS','SSID')).decode('utf-8')
             from carplay_proto.wifidiscovery import verify_local_carplay,probe_bound_endpoint
@@ -464,8 +467,7 @@ def main():
                 return False
         return True
     GLib.timeout_add_seconds(1, check_wpa2_retry)
-    from carplay_proto.networktrace import NetworkTrace
-    network_trace = NetworkTrace(target)
+    network_trace.target = target
     try:
         if already_connected:
             print('Reusing existing HU Wi-Fi; leaving network configuration unchanged', flush=True)
@@ -477,7 +479,10 @@ def main():
     finally:
         print('Wi-Fi/AirPlay handover worker exiting; releasing media lock', flush=True)
         network_trace.close()
-        manager.UnregisterAgent('/org/sailplay/WifiAgent')
+        try:
+            manager.UnregisterAgent('/org/sailplay/WifiAgent')
+        except dbus.DBusException as error:
+            print('ConnMan agent cleanup after daemon change: '+error.get_dbus_name(),flush=True)
         agent.remove_from_connection()
 
 

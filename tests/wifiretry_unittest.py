@@ -10,13 +10,13 @@ class RetryTests(unittest.TestCase):
         retry = HandoverRetry(lambda: False, launch, clock=lambda: now[0])
         self.assertFalse(retry.poll())
         retry.arm()
-        now[0] = 144
+        now[0] = 109
         self.assertFalse(retry.poll())
-        now[0] = 145
+        now[0] = 110
         self.assertTrue(retry.poll())
         self.assertFalse(retry.poll())
         launch.assert_called_once_with()
-        now[0] = 190
+        now[0] = 120
         self.assertTrue(retry.poll())
         self.assertEqual(launch.call_count, 2)
 
@@ -25,11 +25,11 @@ class RetryTests(unittest.TestCase):
         active, launch = Mock(return_value=True), Mock()
         retry = HandoverRetry(active, launch, clock=lambda: now[0])
         retry.arm()
-        now[0] = 145
+        now[0] = 110
         self.assertFalse(retry.poll())
         launch.assert_not_called()
         active.return_value = False
-        now[0] = 190
+        now[0] = 120
         self.assertTrue(retry.poll())
         launch.assert_called_once_with()
 

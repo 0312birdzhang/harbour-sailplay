@@ -70,3 +70,27 @@ class DiscoveryTests(unittest.TestCase):
         ensure_wifi_powered(manager,power)
         power.assert_not_called()
         manager.GetServices.assert_not_called()
+
+
+class RestartError(Exception):
+    def get_dbus_name(self):
+        return 'org.freedesktop.DBus.Error.ServiceUnknown'
+
+
+class RestartDiscoveryTests(unittest.TestCase):
+    def test_daemon_replacement_during_discovery_recovers_in_same_worker(self):
+        manager=Mock()
+        manager.GetServices.side_effect=[RestartError(), [('/new',{'Type':'wifi','Name':'HU','State':'ready'})]]
+        log=Mock()
+        target,_=discover(manager,'/wifi','HU',Mock(),Mock(),Mock(),log=log)
+        self.assertEqual(target,'/new')
+        self.assertTrue(any('waiting for ConnMan' in call.args[0] for call in log.call_args_list))
+
+    def test_absent_daemon_does_not_escape_discovery_deadline(self):
+        manager=Mock();manager.GetServices.side_effect=RestartError()
+        now=[0]
+        def scan(path): now[0]+=2
+        def sleep(seconds): now[0]+=seconds
+        target,_=discover(manager,'/wifi','HU',scan,Mock(),Mock(),log=Mock(),clock=lambda:now[0],sleep=sleep,timeout=6)
+        self.assertIsNone(target)
+        self.assertLessEqual(now[0],6)

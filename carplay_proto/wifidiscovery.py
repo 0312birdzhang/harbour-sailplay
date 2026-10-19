@@ -11,27 +11,39 @@ def find_service(services, ssid, require_available=False):
 
 def discover(manager, technology, ssid, scan, cached_bss_visible,
              set_powered, log=print, clock=time.monotonic, sleep=time.sleep,
-             timeout=60, require_available=False):
+             timeout=30, require_available=False):
+    from .networkdbus import transient_error
     deadline = clock() + timeout
+    services = []
+    def services_now():
+        try:
+            return manager.GetServices(timeout=max(.1, min(3, deadline-clock())))
+        except Exception as error:
+            if not transient_error(error): raise
+            log('HU discovery waiting for ConnMan: {}'.format(error.get_dbus_name()))
+            return []
     while clock() < deadline:
-        services = manager.GetServices()
+        services = services_now()
         target = find_service(services, ssid, require_available)
         if target:
             return target, services
+        started = clock()
         try:
             scan(technology)
         except Exception as error:
-            log('HU Wi-Fi scan failed: {}'.format(type(error).__name__))
-        services = manager.GetServices()
+            name = getattr(error, 'get_dbus_name', lambda: type(error).__name__)()
+            log('HU Wi-Fi scan failed: {}'.format(name))
+        log('HU scan completed elapsedMs={:.0f}'.format((clock()-started)*1000))
+        if clock() >= deadline: break
+        services = services_now()
         target = find_service(services, ssid, require_available)
         if target:
             return target, services
-        # Never cycle power to repair stale discovery. On the real phone,
-        # ConnMan disappeared during that transition, so re-enabling failed
-        # and its restart preserved Wi-Fi in the off state.
-        sleep(2)
-    services = manager.GetServices()
-    return find_service(services, ssid, require_available), services
+        log('HU discovery targetUnavailable remainingSeconds={:.1f}'.format(max(0,deadline-clock())))
+        # Never turn Wi-Fi off to repair a missing service list.
+        sleep(min(2,max(0,deadline-clock())))
+    return None, services
+
 
 
 def ensure_wifi_powered(manager, set_powered, log=print):

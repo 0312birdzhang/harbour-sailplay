@@ -156,3 +156,6 @@ Version 0.1.1-21 includes private compositor touch delivery, projected UI proces
 
 
 Version 0.1.1-25 adds automatic day/night projection themes using the phone local clock. The existing dark palette is retained for night; the default day interval is 07:00–19:00. Adjust both start times in the Sailplay app under Car display theme. Changes are saved in `~/.config/sailplay/theme.ini` and applied without reconnecting. Start times must differ, and intervals crossing midnight are supported. App surfaces keep their own application themes.
+
+
+Version 0.1.1-26 bounds network D-Bus calls and avoids introspection RPCs and stale ConnMan unique-owner proxies. Discovery retries transient daemon loss within a 30-second discovery round; authenticated Bluetooth retries a retired handover every 10 seconds while preserving the active-media lock. Persistent network sampling now starts before discovery, survives daemon replacement, and saves ConnMan exit/restart evidence before the system journal wraps. This does not restart ConnMan or toggle Wi-Fi power to repair scans. Real ignition-cycle recovery still requires vehicle validation.

@@ -4,7 +4,7 @@ import time
 
 class HandoverRetry:
     """Retry a failed Wi-Fi handover while its authenticated Bluetooth link lives."""
-    def __init__(self, active, launch, clock=time.monotonic, interval=45):
+    def __init__(self, active, launch, clock=time.monotonic, interval=10):
         self.active, self.launch, self.clock = active, launch, clock
         self.interval = interval
         self.deadline = None
