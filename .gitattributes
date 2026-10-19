@@ -1,2 +1,4 @@
 * text=auto eol=lf
 *.png binary
+# Unified diff context preserves source indentation and blank context markers.
+connman-patches/*.patch -whitespace

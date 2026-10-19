@@ -29,6 +29,7 @@ diagnostics/*
 !diagnostics/README.md
 scripts/*.sh
 !scripts/build-package-from-wsl.sh
+!scripts/build-connman-fix-from-wsl.sh
 !scripts/install-package-from-wsl.sh
 !scripts/check-wireless-env.sh
 WIRELESS.local.md

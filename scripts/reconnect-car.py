@@ -53,7 +53,8 @@ if __name__ == '__main__':
     from carplay_proto.runtime_logging import configure
     configure('reconnect')
     try:
-        main()
+        from carplay_proto.projectionpower import with_connection_power
+        with_connection_power(main)
     except Exception:
         logging.exception('head-unit reconnect failed')
         sys.exit(1)

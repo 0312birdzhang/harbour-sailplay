@@ -20,6 +20,7 @@ import fcntl
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from carplay_proto.bluezadapter import select_adapter, adapter_name, select_head_unit, previous_head_unit, remember_head_unit
+from carplay_proto.projectionpower import with_connection_power, ProfileConnectionPower
 from carplay_proto.iap2link import (ACK, DETECT, EAK, RST, SYN, Decoder,
                                    Packet, encode, parse_synchronization,
                                    synchronization)
@@ -335,6 +336,7 @@ def main():
                             'org.freedesktop.DBus.Properties').Get('org.bluez.Adapter1', 'Address'))
     loop = GLib.MainLoop()
     workers = {}
+    profile_power = ProfileConnectionPower()
 
     class Profile(dbus.service.Object):
         @dbus.service.method('org.bluez.Profile1', in_signature='', out_signature='')
@@ -358,7 +360,7 @@ def main():
             pin_path = certificate_path[:-4] + '.json' if device_props.get('Paired') else None
             adapter_props = dbus.Interface(bus.get_object('org.bluez', adapter),
                                           'org.freedesktop.DBus.Properties').GetAll('org.bluez.Adapter1')
-            thread = threading.Thread(target=probe, args=(sock, stop, args.seconds,
+            thread = threading.Thread(target=with_connection_power, args=(probe, sock, stop, args.seconds,
                                                          args.certificate_out or certificate_path, args.accessory_key,
                                                          args.announce_wireless, local_address, args.session_out, args.wifi_handover,args.sustained,
                                                          adapter_name(adapter_props), pin_path,
@@ -402,6 +404,8 @@ def main():
                 args.device = selected
             worker = workers.get(args.device)
             active = media_active()
+            if active:
+                profile_power.close()
             state = (args.device, bool(objects.get(args.device, {}).get('org.bluez.Device1', {}).get('Connected')),
                      connecting[0], bool(worker and worker[1].is_alive()), active)
             if state != last_state[0] or time.monotonic() - last_state[1] >= 60:
@@ -423,6 +427,7 @@ def main():
                 if not connected:
                     connecting[0] = False
                     return False
+                profile_power.open()
                 logging.info('requesting CarPlay RFCOMM profile target=%s', args.device)
                 device.ConnectProfile(ACCESSORY_UUID, reply_handler=done, error_handler=done, timeout=12)
             except dbus.DBusException as error:
@@ -443,9 +448,11 @@ def main():
                 GLib.timeout_add(1000, connect)
             if path == args.device and interface == 'org.bluez.Device1' and 'Connected' in changed:
                 if changed['Connected']:
+                    profile_power.open()
                     logging.info('HU Bluetooth connected; scheduling CarPlay profile handshake')
                     GLib.timeout_add(1000, connect)
                 else:
+                    profile_power.close()
                     logging.info('HU Bluetooth disconnected; retiring old RFCOMM channel')
                     retire_worker(workers.pop(args.device, None))
         bus.add_signal_receiver(device_changed, signal_name='PropertiesChanged',
@@ -462,6 +469,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        profile_power.close()
         for worker in workers.values():
             retire_worker(worker)
         for path in (PROFILE_PATH + '_client', PROFILE_PATH):

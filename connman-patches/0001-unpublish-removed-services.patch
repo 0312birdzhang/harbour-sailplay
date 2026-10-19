@@ -1,0 +1,164 @@
+--- a/src/service.c
++++ b/src/service.c
+@@ -7332,11 +7332,27 @@
+ 		g_timer_destroy(service->stats_timer);
+ }
+ 
++/* The public path belongs to the registry entry, not its last reference.
++ * Async users may retain a removed service while a new network reuses its
++ * identifier. Unpublish immediately, and prevent its finalizer from later
++ * unregistering the replacement's interface.
++ */
++static void service_unregister(struct connman_service *service)
++{
++	char *path = service->path;
++
++	if (path) {
++		service->path = NULL;
++		__connman_connection_update_gateway();
++		g_dbus_unregister_interface(connection, path,
++						CONNMAN_SERVICE_INTERFACE);
++		g_free(path);
++	}
++}
++
+ static void service_free(gpointer user_data)
+ {
+ 	struct connman_service *service = user_data;
+-	char *path = service->path;
+-
+ 	DBG("service %p", service);
+ 
+ 	reply_pending(service, ENOENT);
+@@ -7357,15 +7373,7 @@
+ 
+ 	__connman_wispr_stop(service);
+ 
+-	service->path = NULL;
+-
+-	if (path) {
+-		__connman_connection_update_gateway();
+-
+-		g_dbus_unregister_interface(connection, path,
+-						CONNMAN_SERVICE_INTERFACE);
+-		g_free(path);
+-	}
++	service_unregister(service);
+ 
+ 	g_hash_table_destroy(service->counter_table);
+ 
+@@ -9649,6 +9657,7 @@
+ 	struct connman_service *service = data;
+ 
+ 	service_schedule_removed(service);
++	service_unregister(service);
+ 	connman_service_unref(service);
+ }
+ 
+--- a/unit/test-service.c
++++ b/unit/test-service.c
+@@ -40,6 +40,12 @@
+ unsigned int *preferred_list = NULL;
+ 
+ /* Dummies */
++bool __connman_agent_is_request_pending(struct connman_service *service,
++                                       const char *dbus_sender)
++{
++    return false;
++}
++
+ const char *__connman_setting_get_fallback_device_type(const char *interface)
+ {
+ 	return NULL;
+@@ -76,6 +82,7 @@
+ 
+ unsigned int ptr = 0x12345678;
+ GHashTable *dbus_path_data = NULL;
++static GHashTable *service_registry = NULL;
+ 
+ dbus_bool_t dbus_connection_register_object_path(DBusConnection *connection,
+ 			const char *path, const DBusObjectPathVTable *vtable,
+@@ -120,13 +127,20 @@
+ 					void *user_data,
+ 					GDBusDestroyFunction destroy)
+ {
+-	return true;
++	if (service_registry && !strcmp(name, CONNMAN_SERVICE_INTERFACE)) {
++        if (g_hash_table_contains(service_registry, path))
++            return false;
++        g_hash_table_insert(service_registry, g_strdup(path), user_data);
++    }
++    return true;
+ }
+ 
+ gboolean g_dbus_unregister_interface(DBusConnection *connection,
+ 					const char *path, const char *name)
+ {
+-	return true;
++    if (service_registry && !strcmp(name, CONNMAN_SERVICE_INTERFACE))
++        g_hash_table_remove(service_registry, path);
++    return true;
+ }
+ 
+ gboolean g_dbus_send_reply(DBusConnection *connection,
+@@ -1787,6 +1801,42 @@
+ 	__connman_dbus_cleanup();
+ }
+ 
++/* A removed service can remain alive while an async operation holds it. */
++static void test_service_registry_retained_reference(void)
++{
++    const char *identifier = "wifi_001122334455_4855_managed_psk";
++    struct connman_service *old, *fresh;
++    char *path;
++    test_init();
++    g_hash_table_destroy(service_hash);
++    service_hash = g_hash_table_new_full(g_str_hash, g_str_equal, NULL,
++                                       service_removed);
++    service_registry = g_hash_table_new_full(g_str_hash, g_str_equal,
++                                           g_free, NULL);
++    old = service_get(identifier);
++    old->type = CONNMAN_SERVICE_TYPE_WIFI;
++    g_assert_cmpint(service_register(old), ==, 0);
++    path = g_strdup(old->path);
++    g_assert_true(g_hash_table_lookup(service_registry, path) == old);
++    connman_service_ref(old); /* Simulate an outstanding asynchronous owner. */
++    service_remove(old);
++    g_assert_null(g_hash_table_lookup(service_hash, identifier));
++    g_assert_null(g_hash_table_lookup(service_registry, path));
++    fresh = service_get(identifier);
++    fresh->type = CONNMAN_SERVICE_TYPE_WIFI;
++    g_assert_cmpint(service_register(fresh), ==, 0);
++    g_assert_true(g_hash_table_lookup(service_registry, path) == fresh);
++    connman_service_unref(old);
++    /* Finalizing the old object must not unregister the replacement. */
++    g_assert_true(g_hash_table_lookup(service_registry, path) == fresh);
++    service_remove(fresh);
++    g_assert_null(g_hash_table_lookup(service_registry, path));
++    g_hash_table_destroy(service_registry);
++    service_registry = NULL;
++    g_free(path);
++    test_cleanup();
++}
++
+ static void test_service_sort_full_positive()
+ {
+ 	test_init();
+@@ -2771,6 +2821,7 @@
+ 	char* test_dir = g_dir_make_tmp("connman_test_service_XXXXXX", NULL);
+ 
+ 	context = g_option_context_new(NULL);
++	g_option_context_set_ignore_unknown_options(context, TRUE);
+ 	g_option_context_add_main_entries(context, options, NULL);
+ 
+ 	if (!g_option_context_parse(context, &argc, &argv, &error)) {
+@@ -2832,6 +2883,9 @@
+ 				test_service_nameserver_route_refcount4);
+ 
+ 
++	g_test_add_func("/service/registry_retained_reference",
++                    test_service_registry_retained_reference);
++
+ 	ret = g_test_run();
+ 
+ 	__connman_notifier_cleanup();

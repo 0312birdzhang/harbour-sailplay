@@ -14,6 +14,21 @@ The installed service now has an Install section and is enabled by RPM installat
 
 Version 0.1.1-30 adds recovery for a distinct ConnMan registry inconsistency observed after head-unit restart: `GetServices` exposes a live Wi-Fi network with an interface, while `GetProperties` on the identical path exposes a detached saved object. `Connect` then returns `NoCarrier` immediately despite a fresh supplicant BSS. After two matching observations on an inactive target, Sailplay requests one ConnMan restart and lets the authenticated Bluetooth worker retry the handover. A boot-scoped marker limits recovery to once per daemon owner and at least five minutes between recoveries. Ordinary association failures, missing hotspots, active sessions and local-only connectivity do not trigger this restart. The mismatch, recovery request and subsequent network state are retained in the persistent Wi-Fi log. This handles the observed stale registry; the underlying ConnMan object lifecycle defect is not patched here.
 
+The underlying retained-object defect is addressed separately by the source
+patch and version-restricted system RPM documented in
+[connman-patches/README.md](connman-patches/README.md). It unregisters a removed
+service immediately, rather than waiting for its last asynchronous reference.
+The daemon restart above remains a fallback for unpatched systems.
+
+Version 0.1.1-32 keeps the CPU awake for at most 90 seconds during RFCOMM
+profile discovery/connection, a real RFCOMM worker, Wi-Fi/AirPlay handover or manual reconnect, including teardown of the
+old session. Idle Bluetooth listeners and Wi-Fi restoration timers do not
+acquire this lease. Retries on the same Bluetooth link cannot renew its profile
+wake window indefinitely. The setup deadline uses boot time so suspension cannot
+extend it; setup and media leases have distinct tokens even within one
+process. A setup lease expiring therefore cannot release the active video
+session's CPU lease. Display and lock state are only read, never changed.
+
 ## Screen ownership lifecycle
 
 The return tile sends modesChanged and shuts down the screen TCP socket before a screen-only TEARDOWN (type 110 and display UUID). Audio and control remain active. The native head-unit UI switch was confirmed in a device test. A subsequent head-unit requestUI caused fresh screen-only SETUP and RECORD, followed by IDR-started video transmission. Resume uses a new stream connection ID and encryption key. Earlier video-pause behavior only froze the picture and has been replaced. Version 0.1.0-17 was installed and the user confirmed the full tile return, head-unit CarPlay re-entry and restored-touch round trip.

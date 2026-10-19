@@ -503,4 +503,8 @@ if __name__ == '__main__':
     def terminate(signum, frame):
         raise KeyboardInterrupt()
     signal.signal(signal.SIGTERM,terminate)
-    main()
+    if '--restore' in sys.argv:
+        main()
+    else:
+        from carplay_proto.projectionpower import with_connection_power
+        with_connection_power(main)
