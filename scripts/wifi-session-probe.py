@@ -84,7 +84,7 @@ def main():
         old, target = args.restore
         if args.restore_debug:
             network_interface(network_object(bus, 'fi.w1.wpa_supplicant1','/fi/w1/wpa_supplicant1'),
-                           'org.freedesktop.DBus.Properties').Set('fi.w1.wpa_supplicant1', 'DebugLevel', args.restore_debug)
+                           'org.freedesktop.DBus.Properties').Set('fi.w1.wpa_supplicant1', 'DebugLevel', dbus.String(args.restore_debug, variant_level=1))
         try:
             service(target).Disconnect()
         except dbus.DBusException:
@@ -119,7 +119,7 @@ def main():
                     key:str(configuration.get(key)) for key in ('key_mgmt','proto','ieee80211w')}),flush=True)
                 network.Set('fi.w1.wpa_supplicant1.Network', 'Properties',
                             dbus.Dictionary({'key_mgmt': dbus.String('WPA-PSK'),
-                                             'proto': dbus.String('RSN')}, signature='sv'))
+                                             'proto': dbus.String('RSN')}, signature='sv', variant_level=1))
                 print('HU network only: selected WPA2-PSK instead of SAE', flush=True)
                 # Keep ConnMan's association alive. Explicit Disconnect was
                 # interpreted as SAE authentication failure and removed this
@@ -248,7 +248,7 @@ def main():
         def Cancel(self):
             pass
     agent = Agent(bus, '/org/sailplay/WifiAgent')
-    manager.RegisterAgent('/org/sailplay/WifiAgent')
+    manager.RegisterAgent(dbus.ObjectPath('/org/sailplay/WifiAgent'))
     # A separate systemd unit survives SSH logout AND the probe unit's teardown.
     restore_command = ['systemd-run', '--unit=sailplay-wifi-restore-{}'.format(os.getpid()),
                     sys.executable, os.path.abspath(__file__), '--restore', old, target,
@@ -274,7 +274,7 @@ def main():
     if args.trace_supplicant and not already_connected:
         if debug_properties.Get('fi.w1.wpa_supplicant1', 'DebugShowKeys'):
             raise RuntimeError('refusing diagnostic trace with secret-key logging enabled')
-        debug_properties.Set('fi.w1.wpa_supplicant1', 'DebugLevel', 'debug')
+        debug_properties.Set('fi.w1.wpa_supplicant1', 'DebugLevel', dbus.String('debug', variant_level=1))
     if args.direct_passphrase and not already_connected:
         if not target_props.get('Favorite') and str(target_props.get('IPv4.Configuration',{}).get('Method','')) in ('','off','unknown'):
             service(target).SetProperty('IPv4.Configuration',dbus.Dictionary(
@@ -480,7 +480,7 @@ def main():
         print('Wi-Fi/AirPlay handover worker exiting; releasing media lock', flush=True)
         network_trace.close()
         try:
-            manager.UnregisterAgent('/org/sailplay/WifiAgent')
+            manager.UnregisterAgent(dbus.ObjectPath('/org/sailplay/WifiAgent'))
         except dbus.DBusException as error:
             print('ConnMan agent cleanup after daemon change: '+error.get_dbus_name(),flush=True)
         agent.remove_from_connection()

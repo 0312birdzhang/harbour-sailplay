@@ -159,3 +159,6 @@ Version 0.1.1-25 adds automatic day/night projection themes using the phone loca
 
 
 Version 0.1.1-26 bounds network D-Bus calls and avoids introspection RPCs and stale ConnMan unique-owner proxies. Discovery retries transient daemon loss within a 30-second discovery round; authenticated Bluetooth retries a retired handover every 10 seconds while preserving the active-media lock. Persistent network sampling now starts before discovery, survives daemon replacement, and saves ConnMan exit/restart evidence before the system journal wraps. This does not restart ConnMan or toggle Wi-Fi power to repair scans. Real ignition-cycle recovery still requires vehicle validation.
+
+
+Version 0.1.1-27 fixes a 0.1.1-26 regression in non-introspected network calls: ConnMan agent registration and removal now pass explicit D-Bus object paths (`o`), and supplicant diagnostic property writes carry explicit variants (`v`). Without this, RegisterAgent was sent as a string and failed with UnknownMethod before Wi-Fi association. The targeted root-only check `python3 tests/connman_agent_integration.py` exercises temporary agent registration/removal on a real ConnMan without changing network connections.
