@@ -62,3 +62,20 @@ round trips without the observed uniform blank right-hand region. Forty
 consecutive static map samples showed no large-area pixel changes in the
 sampled map region. This is phone-side compositor validation; prolonged
 in-vehicle rendering still needs observation.
+
+
+Version 0.1.1-34 also handles the cold-start path which was still faulty in
+0.1.1-33: content output negotiation waits until the first surface is mapped.
+A newly started split-map client first receives a full-content configure;
+after its buffer acknowledges that size it receives the actual card size.
+These bootstrap buffers remain invisible. A client which already mapped a
+full-content buffer goes straight to the requested viewport. Apps that ignore
+configure remain fitted, with a one-second maximum initial visibility delay.
+This is a native map startup compatibility measure, not a CarPlay video
+resolution change. Both sizes derive from the actual negotiated output.
+
+The 0.1.1-34 candidate was checked in a live head-unit media session, including
+three complete Organic Maps process restarts through the normal launcher,
+five viewport-probe round trips, five real map round trips and forty static
+frame samples. Cold starts no longer showed the observed blank right-hand
+map region. This does not establish prolonged driving-session stability.

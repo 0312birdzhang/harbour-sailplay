@@ -703,10 +703,25 @@ public:
             viewport->setClip(true);
             item->setParentItem(viewport);
             item->setZ(m_nextContentZ++);
-            requestViewport(surface, initialContentSize(appKey));
+            item->setOpacity(0);
+            surface->setProperty("sailplayViewportReady", false);
+            surface->setProperty("sailplayRequestedSize", QSize());
             syncContent(item);
             QObject::connect(surface, &QWaylandSurface::sizeChanged,
-                             [this, item]() { syncContent(item); });
+                             [this, item]() {
+                QWaylandSurface *surface = item->surface();
+                const QSize full(m_width - kDockW, m_height);
+                if (surface->property("sailplayMapBootstrap").toBool()
+                        && surface->size() == full) {
+                    // Acknowledge the initialized full-content buffer before
+                    // the first split resize. Native map engines can otherwise
+                    // retain a portrait-sized GL target behind a wide QML page.
+                    surface->setProperty("sailplayMapBootstrap", false);
+                    QQuickItem *viewport = item->parentItem();
+                    requestViewport(surface, QSize(qRound(viewport->width()), qRound(viewport->height())));
+                }
+                syncContent(item);
+            });
             for (int i = 0; i < m_content.count(); ++i) {
                 if (!m_dashboard && m_content.at(i).visible) {
                     m_content[i].visible = false;
@@ -725,6 +740,34 @@ public:
             }
             m_content.append(ContentWin{item, title, appKey, true, 0});
             if (m_dashboard) layoutDashboard();
+            // Never change a client's output while it is constructing its
+            // first scene/GL engine. The first mapped buffer establishes the
+            // shell role and initial render target; configure the viewport
+            // after that transaction has settled.
+            QPointer<QWaylandSurfaceItem> pendingItem(item);
+            QPointer<QWaylandSurface> pendingSurface(surface);
+            QTimer::singleShot(120, m_window, [this, pendingItem, pendingSurface]() {
+                if (!pendingItem || !pendingSurface) return;
+                for (const ContentWin &c : m_content) {
+                    if (c.item != pendingItem.data()) continue;
+                    pendingSurface->setProperty("sailplayViewportReady", true);
+                    const bool bootstrap = m_dashboard && !m_dashboardMap.isEmpty()
+                        && c.appKey == m_dashboardMap
+                        && pendingSurface->size() != QSize(m_width - kDockW, m_height);
+                    pendingSurface->setProperty("sailplayMapBootstrap", bootstrap);
+                    const QQuickItem *viewport = pendingItem->parentItem();
+                    requestViewport(pendingSurface.data(), bootstrap
+                        ? QSize(m_width - kDockW, m_height)
+                        : QSize(qRound(viewport->width()), qRound(viewport->height())));
+                    syncContent(pendingItem.data());
+                    break;
+                }
+            });
+            // Apps which intentionally ignore configure still get a fitted
+            // view. Native resize-aware clients become visible on sizeChanged.
+            QTimer::singleShot(1000, m_window, [pendingItem]() {
+                if (pendingItem) pendingItem->setOpacity(1);
+            });
             QObject::connect(surface, &QWaylandSurface::unmapped,
                              [this, item]() { removeContent(item); });
             QObject::connect(surface, &QWaylandSurface::surfaceDestroyed,
@@ -737,11 +780,8 @@ public:
                     "imira-comp: carlife content '%s' %dx%d at x=%d\n",
                     qPrintable(title), m_width - kDockW, m_height, kDockW);
         });
-        // A desktop-sized window, not a phone screen: ask the client to lay
-        // itself out for the workspace (output minus dock and title bar).
-        const QString key = clientAppKey(surface);
-        if (!key.isEmpty()) requestViewport(surface, initialContentSize(key));
-        else surface->requestSize(QSize(m_width - kDockW, m_height));
+        // Content viewport negotiation is deferred until after mapping.
+        // The shell configures its own global size in the mapped branch.
     }
 
     // Topmost window under the cursor (stacking order = list order).
@@ -836,6 +876,9 @@ public:
     // continue to use the global 1920x720 mode despite a shell configure.
     void requestViewport(QWaylandSurface *surface, const QSize &size)
     {
+        if (!surface->property("sailplayViewportReady").toBool()) return;
+        if (surface->property("sailplayMapBootstrap").toBool()
+                && size != QSize(m_width - kDockW, m_height)) return;
         QWaylandClient *client = surface->client();
         if (client->property("sailplayViewportSize").toSize() != size) {
             struct Update { QWaylandOutput *output; QSize size; int sent; } update{primaryOutput(), size, 0};
@@ -871,17 +914,12 @@ public:
         wl_client_flush(client->client());
     }
 
-    QSize initialContentSize(const QString &key) const
-    {
-        const qreal scale = m_width / 1920.0;
-        if (m_dashboard && !key.isEmpty() && key == m_dashboardMap)
-            return QSize(qRound((m_width - kDockW - 48 * scale) * 0.65), qRound(m_height * (1.0 - 32.0 / 720.0)));
-        return QSize(m_width - kDockW, m_height);
-    }
-
     void syncContent(QWaylandSurfaceItem *item)
     {
         const QSize s = item->surface()->size();
+        const QSize requested = item->surface()->property("sailplayRequestedSize").toSize();
+        if (!item->surface()->property("sailplayMapBootstrap").toBool()
+                && !requested.isEmpty() && s == requested) item->setOpacity(1);
         if (s.isEmpty())
             return;
         item->setSize(QSizeF(s));
