@@ -1,0 +1,142 @@
+# Development status and source layout
+
+This document collects implementation status, source layout and the development
+notes previously embedded in the README. Version notes describe observations at
+the time of each change; older limitations and settings may have been superseded.
+See [WIRELESS.md](WIRELESS.md) for wireless implementation details and
+[connman-patches/README.md](connman-patches/README.md) for the separate ConnMan fix.
+
+## Current status
+
+Version 0.1.1-10 removes the music-app selector from phone settings. Both car music layouts follow the active MPRIS player, independent of any old music binding. Map selection remains. Audio/Music desktop categories identify phone-side music shortcuts; the old music ID is used only to recognize an existing shortcut for compatibility, not to choose the player or launch target.
+
+Version 0.1.1-9 renders artwork, metadata, playback buttons and progress from the same explicit Amber.Mpris controller. The car music page and dashboard no longer depend on the lock-screen loader's dynamically reparented item. A missing player hides both controls and progress; unavailable previous/next buttons remain dimmed. The configured music app is a launch shortcut, while playback data follows the current MPRIS player, including other compatible music apps.
+
+Version 0.1.1-8 keeps the configured dashboard music app and the built-in Media app on the phone's lipstick display. Vehicle tile/dock taps show Sailplay's independent now-playing page, sharing the existing MPRIS controls, artwork and seek bar with the split dashboard. The normal desktop entry launches through `gio launch`, retaining sailjail/invoker and single-instance behavior where the app supports it. Projection teardown does not own the phone player. Other apps keep the existing virtual-screen launch path. When no music app is configured, the launch button defaults to Media. Phone/car simultaneous windows still need live verification; apps without MPRIS cannot provide car playback controls.
+
+Version 0.1.1-7 localizes both the phone management app and the vehicle UI with Qt translation catalogs. English (fallback), Simplified Chinese, Traditional Chinese, German, French and Russian follow the system message locale at launch. Restart the app or reconnect projection after changing the system language. Service errors authored by Sailplay are localized; raw system D-Bus errors retain their original diagnostic text.
+
+Version 0.1.1-6 corrects audio diagnostics: `peak` now measures PCM after sender ownership/duck gain, while `capturePeak` measures the incoming PCM. Logs record resource transfer requests, applied sender gain and timing request/response counters. On 2026-10-13 LEVIN requested audio ownership at 10:28:57, setting the sender gain to zero; the old pre-gain peak incorrectly suggested non-silent transmitted audio afterward. This does not establish why the earlier 10:27 playback was silent. DiPlay-Legacy's HSAE support adapts proprietary Android Bluetooth services, not the native receiver's audio pipeline. Native HSAE type-100 jitter buffering aligns its first RTP packet with the output sample clock; missing legacy RTCP sync packets are not established as the cause.
+
+Version 0.1.1 includes Bluetooth RFCOMM/iAP2, accessory certificate pinning and challenge verification, ConnMan Wi-Fi handover, encrypted AirPlay control/video/audio, a virtual 1920x720 compositor and reverse touch input.
+
+Version 0.1.1-5 persists the declared audio compatibility build, AAD length and negotiated audio ports alongside existing route/gain/PCM-peak/RTP statistics. Automatic Wi-Fi handover now uses ConnMan's normal security negotiation; the explicit force-WPA2 diagnostic option remains. On the connected COROLLA bench, forced reassociation failed with invalid-key while a normal handover completed. A three-second reference tone reached RTP with peak 4000. The bench has no speakers: audible output and real LEVIN compatibility are still unverified.
+
+Version 0.1.1-4 declares the AirPlay audio compatibility build 13A344 (the product remains SailfishOS). The mounted HSAE libAirPlay.so compares 13A1 with the sender build at 0x1af74 and selects RTP AAD length in APSRTPPacketHandlerDecryptCurrentMessage at 0x252c0. The prior 5.2 value compares older, selecting the full 12-byte header, while Sailplay seals only timestamp/SSRC (8 bytes). The compatibility build selects the matching eight-byte path. This is separate from playback gain; live source PCM and outgoing UDP were verified before the change.
+
+Version 0.1.1-3 removes Wi-Fi power cycling during AP discovery and enables Wi-Fi before a requested handover or manual reconnect. October 12 logs show successful iAP2 handover after ignition, immediate NoCarrier, then a recovery power-off at 13:27:01. ConnMan lost its D-Bus name before re-enabling and restarted at 13:27:03, leaving Wi-Fi off. NoCarrier now triggers bounded scan retries. Tests verify stale discovery never disables Wi-Fi and an already-enabled connection remains untouched. An actual ignition-cycle repeat remains pending.
+
+Version 0.1.1-2 also advertises the iAP2 service UUID already declared in SDP. On October 12 the real LEVIN accepted RFCOMM then disconnected before sending any iAP2 data, and the user reported no CarPlay icon. The phone controller advertised CarPlay and phone-role UUIDs but lacked the iAP2 UUID. This closes an announcement gap; in-car acceptance remains unverified.
+
+Version 59 anchors each new touch gesture to the HID coordinates before pressing. Relative deltas during dragging remain unchanged. A second pointer (including an injected diagnostic pointer) previously moved the compositor cursor without updating TouchInput's cached position: the head unit reported (70,660), but the compositor received clicks around (0,700). The regression exercises an external cursor offset and verifies accurate press placement without recentering during a drag.
+
+Version 58 merges dashboard navigation into the bottom dock home button and removes the separate dashboard button. From the app list it opens the map/music dashboard; from the dashboard it returns to the app list. From an open app it first returns to the list. The button displays the destination's dashboard or app-grid symbol.
+
+Version 57 acquires a bounded MCE CPU keepalive lease only during a live projection session, renewing before expiry and releasing at teardown without waking/unlocking the phone. The idle event socket uses TCP keepalive; EOF or receiver-thread failure now marks the event channel ended and restarts the media session instead of leaving video running without touch. Persistent power snapshots include display/lock/inactivity and event thread/count/age. On the phone, video continued at 29 fps while off/locked, and a local virtual mouse still operated the shell; these observations do not prove suspend caused the reported touch failure. The lease was accepted and released with the display remaining off/locked. Long unplugged use still needs validation.
+
+Version 56 enables baseline-compatible small-block/sub-pixel prediction (superfast) and gradual intra refresh. Full IDR frames are sent at startup and explicitly requested after a screen-only resume, instead of periodically degrading the entire map under VBV pressure. A SIGUSR1 handler sets a lock-free flag consumed by the encoding thread; the pipeline signals only its validated capture child, never the su parent or an unrelated process. On the phone's map scene, the seven-second candidate sample maintained 29.5 fps / 19.7 ms encoding and 2.14 Mbps, versus 29.5 fps / 20.7 ms and 2.70 Mbps with version 55. The sample decoded successfully and contained only the initial and explicitly requested IDRs. Receiver compatibility still requires live observation.
+
+Version 55 uses capped CRF 20 encoding, adaptive quantization, deblocking and equal I/P quality, with a two-second closed GOP to reduce periodic background pumping. The four-frame VBV limit and baseline compatibility remain. An ARM read barrier also orders shared framebuffer copies before sequence validation. On the Jolla phone, a static background probe remained unchanged across 213 encoded frames, versus six colors in the preceding 119-frame sample; the candidate encoder sustained 29.5 fps / 18.4 ms encode time and a maximum sampled AU of 59,364 bytes. These measurements establish source-side improvement; receiver appearance and busy scenes still require in-car observation.
+
+- Continuous projection, application launching and touch have been confirmed on the head unit.
+- A standalone Sailplay tablet app selects the applications shown on the car display; changes save automatically.
+- The car launcher has network/battery indicators, a recent-app dock and horizontally paginated application grids. Devices with ofono Settings/EmptyConfig=true hide cellular indicators; battery readings prefer sysfs, with Statefs/UPower fallbacks.
+- Bluetooth adapter selection follows BlueZ-exported adapters, including hci1 phones; advertising, monitoring and target-device paths use the selected controller.
+- The management app shows live systemd state and offers start/stop plus Connect / reconnect to car with error reporting. Reconnect resets old Sailplay sessions and actively connects the configured Bluetooth head unit, triggering iAP2/Wi-Fi/AirPlay again. Its authorization is restricted to Sailplay units. Bluetooth power changes rebuild the phone profile and advertisement; silent iAP2 handshakes time out for retry.
+- Old RFCOMM channels are retired on reconnection; failed profile connections retry while Bluetooth is connected. Active media sessions are protected from unnecessary reconnect attempts.
+- The service is configured for boot startup. A full cold-boot connection cycle has not yet been verified.
+- Audio packet transmission and capture are implemented. A dedicated nopolicy capture group prevents Sailfish audio policy from selecting microphone input; the helper also verifies its private monitor. Audible head-unit output remains unverified.
+- Return to the original head-unit UI closes only the screen stream, keeping audio and control connected. Native UI switching was confirmed on the head unit; its requestUI event also re-established video. The packaged return tile, head-unit CarPlay re-entry and restored touch were confirmed on the tested head unit.
+
+## Source layout
+
+- `carplay_proto/`: protocol codecs, authentication, AirPlay transport, video, audio and HID input.
+- `scripts/`: runtime Bluetooth/Wi-Fi services, capture and build/deployment helpers.
+- `display-source/`: Qt Quick car launcher, tablet settings app, compositor and x264 capture source, derived from Sailife/Imira.
+- `rpm/`: standalone RPM packaging and systemd service.
+- `tests/`: protocol and connection-lifecycle tests.
+- `connman-patches/`: ConnMan source patch and version-restricted fix packaging.
+
+## Historical development notes
+
+The following notes were previously interleaved with the source layout.
+
+Version 54 replaces the explicit Disconnect/SelectNetwork WPA2 fallback with Reassociate, guarded by the currently selected network identity. October 11 logs showed that version 53 waited as intended, but ConnMan had already removed the association after the forced disconnect and reported invalid-key. The phone exposes Reassociate; regression tests protect unrelated network selection and forbid explicit disconnect in this fallback. Successful in-car association remains pending.
+
+Version 53 scans again when a saved HU profile has no signal, instead of treating its cached presence as AP availability. WPA2 reselection allows a bounded 15-second grace period for the retired attempt's failure and waits for the new connection to become ready. Network sampling now starts before association, retaining supplicant state/status evidence for failed connections. October 10 logs showed repeated NoCarrier, then invalid-key immediately after intentional WPA2 reselection; successful in-car connection after this change remains unverified.
+
+Version 52 treats dashboard app surfaces as previews: map taps open the full map, music title/artwork/background taps open the configured music app, and transport buttons and seeking retain their own input. MPRIS artwork URLs use a bounded local cache; local MP3 ID3 and FLAC embedded artwork provide a fallback when the player exports no artwork URL. Tracks without either source retain the text-only layout. Phone input injection verified map restoration and music launching; in-car verification remains pending.
+
+Version 51 persists capture-helper diagnostics in the private, rotating audio-capture log. Ten-second snapshots include playback routing, cork/mute/channel volume, capture routing and cast sink/monitor state, excluding song titles and filenames. The latest silent session sent zero PCM throughout; an offline native Media playback test captured nonzero audio. The intermittent silence cause remains unverified.
+
+Version 50 preserves playback stream volumes during casting and applies bounded, saturating gain only to outgoing PCM. Hardware channel volumes are saved for recovery and restored before unmuting; legacy records without volumes use a conservative 25 percent fallback. Multiple mixed streams use the loudest active media stream for compensation.
+
+Version 47 adds elapsed time, duration and seeking below the dashboard lock-screen controls. Version 46 supplies a private Jolla media QML compatibility import for Sailplay-launched players, keeping MPRIS controls available when the player panel is hidden. System QML files remain unchanged.
+
+Version 43 replaces the dashboard music application surface with the actual Sailfish.Media lock-screen MPRIS controls. The configured music application remains an explicit launch shortcut; only the map occupies a dashboard application surface.
+
+Version 42 subscribes to PulseAudio sink-input events to route new playback without waiting for the one-second maintenance interval. The private cast sink becomes the session default and hardware Droid outputs are muted during casting to prevent startup leakage from policy-selected device streams. Original hardware mute/default states are saved before mutation, restored on teardown, and recovered through the service stop hook or next startup after an abnormal helper exit. This is local audio routing integration; complete CarPlay feature conformance is not claimed. All 68 tests passed; live validation follows.
+
+Version 41 moves synchronous pactl routing/volume maintenance to a separate worker so it cannot block the PulseAudio capture loop. Commands have bounded timeouts and teardown joins the worker before restoring volume and routes. RTP diagnostics now report capture/send gaps, pacing resets and buffered frames. DiPlay reported receiver underruns and up to 447 ms gaps without decrypt failures; cause and improvement require live gap correlation. Live version 41 measured steady sender gaps about 15-21 ms with no pacing resets after startup, while DiPlay still showed roughly 400-487 ms receive gaps and playback underruns. Temporarily disabling sender Wi-Fi power save did not eliminate receiver gaps; the original power-save setting was restored. An OEM ownership diagnostic at 20:00:27 caused DiPlay to reset control and audio, and Sailplay automatically reconnected; that test did not isolate video bandwidth. Its feedback encoder also throws ArrayIndexOutOfBoundsException in BplistCodec.encodeUnsignedInt, producing feedback status 500. The 19:50:28 service restart coincided with the version 40 upgrade.
+
+Version 40 saves each playback stream channel volume, normalizes routed playback to 0 dB while casting, and restores the original values on teardown. Live diagnosis found the Media stream at 23722/65536 (-26.48 dB), while the capture monitor and null sink were at unity. Setting the stream to unity restored normal audible volume, confirmed by the user. No extra PCM amplification is applied.
+
+Version 39 disconnects the authenticated DiPlay peer A2DP source when starting CarPlay audio. The Android receiver otherwise routed decoded audio back to Jolla Phone (2026). Receiver logs confirmed successful decryption and Android A2DP routing; disconnecting only this profile switched output to the receiver speaker, and audible playback was confirmed by the user.
+
+Version 38 decodes repeated HID contact fields independently and selects an active contact for mouse injection, rather than allowing the second inactive contact to overwrite the first. DiPlay advertises two touch contacts. Bounded initial report/UUID diagnostics help verify actual input. The two-contact regression and 65 protocol tests passed; physical touch validation is pending.
+
+Version 37 fixes receivers exposing public AirPlay /info with status 200: pairing and initial SETUP now run before media initialization instead of using uninitialized session variables. Paired receivers with a verified accessory pin can be selected even without an iAP2 SDP UUID; successful inbound authentication remembers their target. DiPlay logs identified both issues. All 64 protocol tests passed; live validation is in progress.
+
+Version 36 adds startup adapter/device snapshots, BlueZ property transitions, periodic connection checkpoints and full profile errors. Wi-Fi/AirPlay and restoration output also persist across reboot, alongside Bluetooth logs. Each component retains six files of up to 4 MiB each under /var/lib/sailplay/logs (private directory 0700); credentials and packet bodies remain excluded. Startup records PID and boot ID. Existing journal and temporary Wi-Fi logs remain available.
+
+Version 35 retains private, bounded Bluetooth advertisement/session and reconnect logs under /var/lib/sailplay/logs, independent of journal rotation. LEVIN investigation currently confirms correct phone EIR and target selection, but a fresh connection failed with br-connection-page-timeout before iAP2; its earlier missing-icon cause remains unverified.
+
+Version 34 adds a dock dashboard button and configurable map/music application selectors in the management app. The compositor displays the selected native applications in independent 65/35 clipped viewports, requests panel-sized surfaces and routes touch to each panel. Home restores the app grid; opening a normal app restores the full content area. Application identity has a per-launch PID/start-time fallback when process environment cannot be read. Dashboard settings save under ~/.config/sailplay/dashboard.ini and update an open dashboard automatically.
+
+On JollaPhone2026, a captured virtual-screen frame confirmed Pure Maps and Jolla Media simultaneously visible in the two panels (1126x640 and 606x640 at 1920x720). The management page loaded without QML errors, and all 61 existing protocol tests passed. Dashboard behavior on the head unit, playback and the complete home/dashboard touch cycle still require verification.
+
+Version 33 uses Sailfish Silica SlideshowView for home-page drag and animated snapping. It removes the custom swipe handlers introduced in version 32; application tiles use normal MouseArea clicks and allow the slideshow to take over drag gestures. Page dots change the slideshow currentIndex. Version 33 was installed on JollaPhone2026; projection resumed, QML loaded without errors and capture remained about 29.5fps.
+
+Version 32 removes home-page drag, inertia and snap animations. Horizontal swipes switch one page immediately on release; tapping page indicators also jumps immediately. Swipe gestures over application tiles do not launch the application.
+
+Version 31 reads AirPlay display widthPixels, heightPixels and maxFPS. Resolution choices are native size, 5/6 and 2/3 encoder scaling, recalculated per head unit; they are hidden until display capabilities are known. Frame rate never exceeds the advertised maximum (HIGHLANDER reports 1920x720, 30fps). The software encoder and same-size RGBA-to-YUV conversion use AArch64 NEON, keep only the latest queued frame, avoid additional capture-interval delay after conversion and log measured encoding throughput. On-phone conversion checks matched the scalar implementation in 16 cases, including inverted frames, padded stride and I420/NV12 output.
+
+The shm reader retries a writer-busy sequence after 1ms instead of skipping a complete frame interval. On JollaPhone2026 with HIGHLANDER at native 1920x720, final capture throughput was 29.3–29.5fps and transmitted video about 30fps, up from about 10fps before these changes. Management QML loaded on-device without QML errors. The user confirmed clearly smoother swiping on the head unit.
+
+Version 30 re-selects the head-unit Wi-Fi network after applying WPA2-PSK. ConnMan had already started SAE association before the NetworkAdded callback could change its configuration, causing invalid-key on HIGHLANDER. The scoped re-selection connected JollaPhone2026 and sustained projection for more than six minutes; full cold-boot recovery remains to be verified.
+
+Version 28 prefers a currently connected paired CarPlay accessory for automatic and manual reconnect. Accessory keys are pinned per Bluetooth device after a successful first challenge; a changed certificate is rejected. First-use pinning proves key possession, not Apple CA trust. Startup also restores Bluetooth connectability where supported.
+
+Version 27 fixes management-app startup on Sailfish Silica by handling resolution/fps selection on MenuItem clicks instead of the unsupported ComboBox activated signal. QML loading was verified on JollaPhone2026.
+
+Version 26 adds management-app resolution presets (1920x720, 1600x600, 1280x480) and 30/60fps selection. Settings apply on reconnect to compositor output, capture, H.264 configuration and touch mapping. Default remains 1920x720 at 30fps; alternative modes require head-unit validation.
+
+Version 25 uses the current Bluetooth adapter Alias (or Name) for both iAP2 and AirPlay device names instead of the fixed SailfishOS Sailplay label. A name change is picked up by the next connection.
+
+Version 24 reads localized desktop-entry application names (for example Name[zh_CN] and Name[zh]) with language fallback. Only the Desktop Entry section is read; action labels cannot overwrite the application name. Sailfish translation catalogs remain supported.
+
+### Later updates
+
+Version 0.1.1-17 also includes AAC-LC media output (48 kHz stereo, stream type 102 when advertised), 21 ms PulseAudio capture fragments, pause-safe audio pacing, bounded delayed-feedback handling, and independent active-player music controls. AAC encoding requires `ffmpeg-tools`. Vehicle speaker output and long ignition/reconnection cycles should be checked on each head-unit model.
+
+Run the Linux protocol regression suite with `python3 -m unittest discover -s tests -p "*unittest.py"`.
+
+Version 0.1.1-18 adopts imira's less demanding PulseAudio recording latency request: a 250ms fragment with ADJUST_LATENCY, instead of forcing approximately21ms on the shared sink. AAC still emits1024-sample frames continuously. Its queue now tolerates250ms capture batches with a1second maximum backlog (not a mandatory1second playback delay). Validate long playback under load on the target phone/head unit.
+
+Version 0.1.1-21 includes private compositor touch delivery, projected UI process recovery, steering-wheel media controls, pause on disconnect and independent private audio volume. FM/MODE resource transfers now suspend the screen stream and mute vehicle audio while the head unit owns them; a subsequent requestUI reclaims both resources and recreates the screen stream from an IDR frame. Concurrent resource events are preserved while notifications are in flight. The 140-test Linux regression suite passed, and an installed-device protocol replay verified the FM-to-CarPlay sequence. Physical vehicle MODE round-trip validation remains pending.
+
+
+Version 0.1.1-25 adds automatic day/night projection themes using the phone local clock. The existing dark palette is retained for night; the default day interval is 07:00–19:00. Adjust both start times in the Sailplay app under Car display theme. Changes are saved in `~/.config/sailplay/theme.ini` and applied without reconnecting. Start times must differ, and intervals crossing midnight are supported. App surfaces keep their own application themes.
+
+
+Version 0.1.1-26 bounds network D-Bus calls and avoids introspection RPCs and stale ConnMan unique-owner proxies. Discovery retries transient daemon loss within a 30-second discovery round; authenticated Bluetooth retries a retired handover every 10 seconds while preserving the active-media lock. Persistent network sampling now starts before discovery, survives daemon replacement, and saves ConnMan exit/restart evidence before the system journal wraps. This does not restart ConnMan or toggle Wi-Fi power to repair scans. Real ignition-cycle recovery still requires vehicle validation.
+
+
+Version 0.1.1-27 fixes a 0.1.1-26 regression in non-introspected network calls: ConnMan agent registration and removal now pass explicit D-Bus object paths (`o`), and supplicant diagnostic property writes carry explicit variants (`v`). Without this, RegisterAgent was sent as a string and failed with UnknownMethod before Wi-Fi association. The targeted root-only check `python3 tests/connman_agent_integration.py` exercises temporary agent registration/removal on a real ConnMan without changing network connections.
+
+
+Version 0.1.1-28 gives projected apps a client-specific Wayland screen mode matching their viewport, without resizing the compositor framebuffer or the launcher. Dashboard maps request 1126×688 at 1920×720 projection; expansion requests 1780×720 (output minus dock). Content fitting no longer crops the left edge. A guarded, per-process Silica ApplicationWindow override follows the live window size because the system Screen singleton retains its startup dimensions. Only projected apps use this private QML tree; the phone UI and system files are unchanged. Hidden apps retain their own viewport and unmapped views are hidden to avoid stale black overlays. The live `tests/viewport_integration.py` check uses the supplied Qt/Silica probe to verify screen, window, and page bounds through split/full/split transitions.
+
+### Historical test snapshot
+
+The device uses system OpenSSL and PulseAudio; development tests use Python cryptography. The latest focused unittest run passed 61 tests. Version 22 adds bounded discovery and a single Wi-Fi power refresh when the HU is visible to supplicant but absent from ConnMan; this recovery still requires device validation.
