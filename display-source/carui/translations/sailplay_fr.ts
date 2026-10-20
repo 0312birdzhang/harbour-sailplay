@@ -132,6 +132,11 @@ Lancez la musique sur votre téléphone</translation>
       <source>Set a location in Weather</source>
       <translation>Définir un lieu dans Météo</translation>
     </message>
+    <message><source>Car display theme</source><translation>Thème de l’écran du véhicule</translation></message>
+    <message><source>Day theme starts</source><translation>Début du thème de jour</translation></message>
+    <message><source>Night theme starts</source><translation>Début du thème de nuit</translation></message>
+    <message><source>Switches automatically using phone local time. Changes apply immediately to the car display.</source><translation>Bascule selon l’heure locale du téléphone. Les modifications sont appliquées immédiatement.</translation></message>
+    <message><source>Choose different day and night times</source><translation>Choisissez des heures différentes pour le jour et la nuit</translation></message>
   </context>
   <context>
     <name>CarUiController</name>
@@ -151,10 +156,5 @@ Lancez la musique sur votre téléphone</translation>
       <source>Set a location in Weather</source>
       <translation>Définir un lieu dans Météo</translation>
     </message>
-    <message><source>Car display theme</source><translation>Thème de l’écran du véhicule</translation></message>
-    <message><source>Day theme starts</source><translation>Début du thème de jour</translation></message>
-    <message><source>Night theme starts</source><translation>Début du thème de nuit</translation></message>
-    <message><source>Switches automatically using phone local time. Changes apply immediately to the car display.</source><translation>Bascule selon l’heure locale du téléphone. Les modifications sont appliquées immédiatement.</translation></message>
-    <message><source>Choose different day and night times</source><translation>Choisissez des heures différentes pour le jour et la nuit</translation></message>
   </context>
 </TS>
