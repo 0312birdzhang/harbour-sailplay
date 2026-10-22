@@ -24,7 +24,7 @@ from carplay_proto.projectionpower import with_connection_power, ProfileConnecti
 from carplay_proto.iap2link import (ACK, DETECT, EAK, RST, SYN, Decoder,
                                    Packet, encode, parse_synchronization,
                                    synchronization)
-from carplay_proto.wire import Frame, Framer, encode_param
+from carplay_proto.wire import Frame, Framer, encode_param, parse_params
 from carplay_proto.accessoryauth import PinnedAccessory, paired_accessory
 from carplay_proto.wireless import (parse_wifi_configuration,
                                     peer_supports_wifi_configuration_request,
@@ -35,6 +35,48 @@ PHONE_UUID = '00000000-deca-fade-deca-deafdecacafe'
 ACCESSORY_UUID = '00000000-deca-fade-deca-deafdecacaff'
 IAP_V2_UUID = '02030302-1d19-415f-86f2-22a2106a0a77'
 PROFILE_PATH = '/org/sailplay/wireless_phone'
+
+
+def text_value(payload):
+    return payload.split(b'\x00', 1)[0].decode('utf-8', 'replace')
+
+
+def payload_hex(payload, limit=512):
+    suffix = '...' if len(payload) > limit else ''
+    return payload[:limit].hex() + suffix
+
+
+def parse_ea_protocols(frame):
+    protocols = []
+    for parameter in frame.parameters():
+        if parameter.id != 10:
+            continue
+        try:
+            nested = {item.id: item.payload for item in parse_params(parameter.payload)}
+        except ValueError:
+            logging.warning('invalid EA protocol group=%d payload=%s',
+                            parameter.id, payload_hex(parameter.payload))
+            continue
+        identifier = nested.get(0, b'')[:1]
+        if not identifier:
+            continue
+        name = text_value(nested.get(1, b''))
+        protocols.append((identifier[0], name))
+        logging.info('EA protocol id=%d name=%r', identifier[0], name)
+    return protocols
+
+
+def parse_component_ids(frame):
+    identifiers = []
+    for parameter in frame.parameters():
+        if parameter.id != 0:
+            continue
+        if len(parameter.payload) != 2:
+            logging.warning('invalid Bluetooth component identifier payload=%s',
+                            payload_hex(parameter.payload))
+            continue
+        identifiers.append(struct.unpack('>H', parameter.payload)[0])
+    return identifiers
 
 
 def service_record(channel):
@@ -159,6 +201,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
     authenticator = None
     authenticated = False
     peer_received_messages = set()
+    ea_protocols = []
     wifi_config = None
     sock.settimeout(0.2)
     try:
@@ -232,8 +275,11 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                 logging.info('CSM rx message=0x%04x body_bytes=%d',
                                              frame.message_id, len(frame.body))
                                 if frame.message_id == 0x1d01:
+                                    identity = {}
                                     for parameter in frame.parameters():
-                                        if parameter.id in (6, 7):
+                                        if parameter.id in (0, 1, 2):
+                                            identity[parameter.id] = text_value(parameter.payload)
+                                        elif parameter.id in (6, 7):
                                             if len(parameter.payload) % 2:
                                                 raise ValueError('invalid supported-message list')
                                             ids = list(struct.unpack('>' + 'H' * (len(parameter.payload) // 2), parameter.payload))
@@ -242,6 +288,12 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                                          ','.join('0x%04x' % value for value in ids))
                                             if parameter.id == 7:
                                                 peer_received_messages = set(ids)
+                                    logging.info('accessory identity name=%r model=%r manufacturer=%r',
+                                                 identity.get(0, ''), identity.get(1, ''), identity.get(2, ''))
+                                    logging.info('identification parameter ids=%s',
+                                                 [(parameter.id, len(parameter.payload))
+                                                  for parameter in frame.parameters()])
+                                    ea_protocols = parse_ea_protocols(frame)
                                     outgoing.extend([Frame(0x1d02, b''), Frame(0xaa00, b'')])
                                 elif frame.message_id == 0xaa01:
                                     parameters = frame.parameters()
@@ -294,6 +346,15 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                                                    encode_param(1, wireless)))
                                             logging.info('HU advertises 4300; diagnostic grouped CarPlayAvailability queued')
                                         logging.info('DIAGNOSTIC wireless capability notification queued; no media sender yet')
+                                    for protocol_id, protocol_name in ea_protocols:
+                                        if 0xea00 not in peer_received_messages:
+                                            logging.info('accessory does not receive 0xea00; skipping EA protocol=%d name=%r',
+                                                         protocol_id, protocol_name)
+                                            continue
+                                        outgoing.append(Frame(0xea00, encode_param(0, bytes([protocol_id])) +
+                                                              encode_param(1, struct.pack('>H', protocol_id))))
+                                        logging.info('EA session requested protocol=%d session=%d name=%r',
+                                                     protocol_id, protocol_id, protocol_name)
                                     if peer_supports_wifi_configuration_request(peer_received_messages):
                                         outgoing.append(request_wifi_configuration())
                                         logging.info('pinned accessory challenge signature VERIFIED; requesting Wi-Fi config')
@@ -301,6 +362,30 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                         logging.info('pinned accessory challenge signature VERIFIED; '
                                                      'waiting for notification-driven Wi-Fi handover '
                                                      '(peer does not advertise 0x5702)')
+                                elif frame.message_id == 0x4e01:
+                                    logging.info('Bluetooth component information body=%s', payload_hex(frame.body))
+                                elif frame.message_id == 0x4e03:
+                                    component_ids = parse_component_ids(frame)
+                                    logging.info('Bluetooth connection updates requested components=%s body=%s',
+                                                 component_ids, payload_hex(frame.body))
+                                    for component_id in component_ids:
+                                        profiles = encode_param(7, b'')
+                                        outgoing.append(Frame(0x4e04,
+                                                              encode_param(0, struct.pack('>H', component_id)) +
+                                                              encode_param(1, profiles)))
+                                        logging.info('Bluetooth connection update queued component=%d profiles=iAP2Link',
+                                                     component_id)
+                                elif frame.message_id == 0x4e05:
+                                    logging.info('Bluetooth connection updates stopped body=%s', payload_hex(frame.body))
+                                elif frame.message_id == 0xea02:
+                                    bundle = ''
+                                    for parameter in frame.parameters():
+                                        if parameter.id == 0:
+                                            bundle = text_value(parameter.payload)
+                                    logging.info('accessory app launch requested bundle=%r body=%s',
+                                                 bundle, payload_hex(frame.body))
+                                elif frame.message_id == 0xea03:
+                                    logging.info('EA session status body=%s', payload_hex(frame.body))
                                 elif frame.message_id == 0x5703:
                                     if not authenticated:
                                         raise ValueError('Wi-Fi credentials arrived before authentication')

@@ -110,5 +110,21 @@ class ProbeTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
 
 
+class IdentificationParsingTests(unittest.TestCase):
+    def test_ea_protocols_from_identification(self):
+        group = lambda ident, name: encode_param(10, encode_param(0, bytes([ident])) +
+                                                 encode_param(1, name + b'\x00'))
+        frame = Frame(0x1d01, encode_param(0, b'Honda CIVIC\x00') +
+                      group(1, b'com.honda.cp.allhonda') + group(3, b'com.honda.hondalink.hlc') +
+                      encode_param(10, b'\x00'))
+        self.assertEqual(module.parse_ea_protocols(frame),
+                         [(1, 'com.honda.cp.allhonda'), (3, 'com.honda.hondalink.hlc')])
+
+    def test_bluetooth_component_ids(self):
+        frame = Frame(0x4e03, encode_param(0, b'\x00\x01') + encode_param(0, b'\x01') +
+                      encode_param(0, b'\x00\x05'))
+        self.assertEqual(module.parse_component_ids(frame), [1, 5])
+
+
 if __name__ == '__main__':
     unittest.main()
