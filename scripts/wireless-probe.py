@@ -27,6 +27,7 @@ from carplay_proto.iap2link import (ACK, DETECT, EAK, RST, SYN, Decoder,
 from carplay_proto.wire import Frame, Framer, encode_param
 from carplay_proto.accessoryauth import PinnedAccessory, paired_accessory
 from carplay_proto.wireless import parse_wifi_configuration, request_wifi_configuration, parse_start_session
+from carplay_proto.navigation import NavigationSubscription, START as NAV_START, STOP as NAV_STOP
 
 PHONE_UUID = '00000000-deca-fade-deca-deafdecacafe'
 ACCESSORY_UUID = '00000000-deca-fade-deca-deafdecacaff'
@@ -115,6 +116,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
     authenticated = False
     peer_received_messages = set()
     wifi_config = None
+    navigation = NavigationSubscription()
     sock.settimeout(0.2)
     try:
         authenticator = PinnedAccessory(accessory_key) if accessory_key else None
@@ -249,6 +251,18 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                         logging.info('DIAGNOSTIC wireless capability notification queued; no media sender yet')
                                     outgoing.append(request_wifi_configuration())
                                     logging.info('pinned accessory challenge signature VERIFIED; requesting Wi-Fi config')
+                                elif frame.message_id in (NAV_START, NAV_STOP):
+                                    if not authenticated:
+                                        logging.warning('ignoring navigation subscription before authentication')
+                                        continue
+                                    try:
+                                        navigation.offer(frame)
+                                    except ValueError as error:
+                                        logging.warning('invalid navigation subscription: %s', error)
+                                        continue
+                                    logging.info('navigation subscription message=0x%04x component=%s options=%s; '
+                                                 'navigation sender not enabled', frame.message_id,
+                                                 navigation.component, sorted(navigation.options))
                                 elif frame.message_id == 0x5703:
                                     if not authenticated:
                                         raise ValueError('Wi-Fi credentials arrived before authentication')
