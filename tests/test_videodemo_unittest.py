@@ -1,7 +1,7 @@
 import struct
 import unittest
 from unittest.mock import Mock, mock_open, patch
-from carplay_proto.videodemo import ScreenEncoder, demo_frames
+from carplay_proto.videodemo import ScreenEncoder, demo_frames, describe_params
 from carplay_proto import crypto
 
 
@@ -61,3 +61,7 @@ class VideoDemoTests(unittest.TestCase):
     def test_non_idr_frame_is_not_flagged(self):
         packet = ScreenEncoder(bytes(32),1).frame([b'\x41\x9a'],0,1920,720)
         self.assertEqual(packet[4:6],b'\x00\x00')
+
+    def test_describe_params_shortens_binary_payloads(self):
+        summary = describe_params({'data': bytes(range(70)), 'n': [b'\x01', 2]}, limit=4)
+        self.assertEqual(summary, {'data': 'bytes[70]:00010203...', 'n': ['bytes[1]:01', 2]})

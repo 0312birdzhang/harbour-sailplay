@@ -13,6 +13,18 @@ from .controlcipher import ControlCipher
 from .rtspclient import EncryptedSocket, connect
 
 
+def describe_params(value, limit=64):
+    """Summarise a command plist for the log, shortening binary payloads."""
+    if isinstance(value, dict):
+        return {key: describe_params(item, limit) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [describe_params(item, limit) for item in value]
+    if isinstance(value, (bytes, bytearray)):
+        return 'bytes[{}]:{}{}'.format(len(value), bytes(value[:limit]).hex(),
+                                       '...' if len(value) > limit else '')
+    return value
+
+
 def demo_frames(data):
     nals = [n for n in re.split(b'\x00\x00\x00?\x01', data) if n]
     sps = next(n for n in nals if n[0] & 31 == 7)
@@ -138,6 +150,11 @@ class DemoEvents:
                         value = plistlib.loads(body)
                         print('Demo event keys={}'.format(sorted(value)),flush=True)
                         print('Event command type={}'.format(value.get('type')),flush=True)
+                        if value.get('type')=='iAPSendMessage':
+                            # iAP2 tunnelled over the AirPlay event channel;
+                            # not handled yet, so record what the HU sends.
+                            print('iAP tunnel params={}'.format(
+                                describe_params(value.get('params'))),flush=True)
                         if self.handler and lines[0].split()[1]=='/command':
                             result=self.handler(value)
                             if result is not None:
