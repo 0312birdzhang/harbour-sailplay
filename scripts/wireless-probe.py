@@ -28,6 +28,7 @@ from carplay_proto.wire import Frame, Framer, encode_param
 from carplay_proto.accessoryauth import PinnedAccessory, paired_accessory
 from carplay_proto.wireless import parse_wifi_configuration, request_wifi_configuration, parse_start_session
 from carplay_proto.navigation import NavigationSubscription, START as NAV_START, STOP as NAV_STOP
+from carplay_proto.navigationfeed import NavigationFeed
 
 PHONE_UUID = '00000000-deca-fade-deca-deafdecacafe'
 ACCESSORY_UUID = '00000000-deca-fade-deca-deafdecacaff'
@@ -117,12 +118,23 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
     peer_received_messages = set()
     wifi_config = None
     navigation = NavigationSubscription()
+    navigation_feed = NavigationFeed()
+    navigation_check_at = 0
+    navigation_status = None
     sock.settimeout(0.2)
     try:
         authenticator = PinnedAccessory(accessory_key) if accessory_key else None
         while not stop.is_set() and time.monotonic() < deadline:
             handover_retry.poll()
             now = time.monotonic()
+            if authenticated and now >= navigation_check_at:
+                navigation_check_at = now + 1
+                snapshot = navigation_feed.poll()
+                nav = snapshot['navigation'] if snapshot else {}
+                status = (navigation_feed.reason, nav.get('state'), nav.get('turn'), navigation.component)
+                if status != navigation_status:
+                    navigation_status = status
+                    logging.info('navigation feed=%s state=%s raw_turn=%s component=%s; sender disabled', *status)
             if not negotiated and now >= detection_deadline:
                 raise ValueError('iAP2 handshake timeout; release RFCOMM for retry')
             if sync_at and not local_syn_acked and now >= sync_at:

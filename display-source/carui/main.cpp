@@ -332,7 +332,7 @@ static qint64 launchApp(const QString &appId, const QString &exec)
 {
     QString cmd = QStringLiteral(
         "QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=imira-comp-0 "
-        "QT_IM_MODULE=none "
+        "QT_IM_MODULE=none SAILPLAY_NAVIGATION_EXPORT=1 "
         "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100000/dbus/"
         "user_bus_socket ");
     cmd += QStringLiteral("CARLIFE_APP_KEY=") + appKey(appId)

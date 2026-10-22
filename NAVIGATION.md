@@ -84,15 +84,61 @@ supplementary Unicode characters, then encode UTF-8 for iAP2. The receiver's
 meter module separately converts road text to at most 60 bytes of UTF-16LE;
 that is not the encoding to send over iAP2.
 
-## Next stages
+## Stage 2: projected Organic Maps snapshot bridge
+
+Implemented in the source patch under `map-patches/` and applied to the local
+Organic Maps checkout. A rebuilt map application is required; the installed map
+does not gain this interface just by upgrading Sailplay.
+
+`carui` sets `SAILPLAY_NAVIGATION_EXPORT=1` for projected child processes. The
+patched Organic Maps publishes only with that opt-in, under its user's
+`$XDG_RUNTIME_DIR/sailplay-navigation/organicmaps-PID.json`. It does not export
+normal phone launches by default. No route files are added to persistent logs.
+
+The exporter uses an atomic `QSaveFile`, a 0700 directory and 0600 snapshot. It
+includes schema version, PID, process start ticks, boot ID, app key, sequence,
+boot-time update timestamp and a separate heartbeat. A one-second heartbeat
+does not advance the navigation update timestamp. Normal destruction removes
+the snapshot; crashes leave an expired file, which the reader rejects.
+
+Raw active guidance includes:
+
+- Organic Maps `CarDirection` integer, router type and roundabout exit number;
+- `FollowingInfo.m_time` as integer remaining seconds;
+- current/next road and destination;
+- numeric next-turn and remaining distances, with explicit **Organic Maps**
+  distance-unit enums (`0=m`, `1=km`, `2=ft`, `3=mi`). These are not iAP2 enums.
+
+The source comes directly from `Routing::UpdateNavigation`, not QML text/icon
+parsing. Idle, stopped, arrived and unavailable snapshots replace rather than
+retain the previous guidance payload. This version does not distinguish every
+recalculation or GPS-loss reason: invalid following info is `unavailable`, and
+guidance without an update for ten seconds expires even if the app is alive.
+
+`NavigationFeed` reads at most 32 files in the private directory, checks the
+owning user, real executable and process start identity, rejects symlinks,
+non-regular files, oversized JSON, invalid data and ambiguous concurrent sources.
+Heartbeat age is limited to three seconds, and navigation age to ten seconds.
+The authenticated RFCOMM worker polls once a second and logs only availability,
+lifecycle state, raw turn enum and subscribed component. It still **does not
+send navigation frames**: the iAP2 enum/component mapping remains a separate gate.
+
+Validation on 2026-10-22:
+
+- Nine Linux snapshot/reader tests and four existing RFCOMM tests passed.
+- The new exporter and its standalone QtCore probe compiled for Sailfish aarch64.
+- The standalone probe ran successfully as the phone session user, verifying
+  opt-in, Unicode snapshot writing, heartbeat/update separation, file permissions,
+  terminal-state replacement and cleanup. It did not start a map or alter services.
+- The full Organic Maps application has not been rebuilt or installed; actual
+  route/GPS-to-snapshot behavior and instrument navigation are not yet verified.
+
+## Remaining stages
 
 1. Recover the enum meanings and remaining component/index requirements;
    compare with an iPhone navigation start/turn/recalculation/arrival trace.
-2. Export a versioned local navigation snapshot from Organic Maps
-   `sailfish/routing.cpp::UpdateNavigation`, using `routing::FollowingInfo`.
-   Include raw turn enum, distances with explicit units, integer seconds,
-   current/next road, destination and lifecycle state. Do not infer navigation
-   from rendered icons or parse localized UI labels.
+2. Rebuild/install the patched Organic Maps and validate route start, live
+   position updates, recalculation, cancellation and arrival snapshots.
 3. Connect the snapshot to the authenticated, subscribed RFCOMM worker.
    Serialize sends through its existing acknowledged outgoing queue. Bound and
    coalesce pending updates; preserve turn-before-route ordering where required
@@ -111,6 +157,7 @@ affect the displayed arrival time independently of route data.
 
 ```
 python3 -m unittest discover -s tests -p 'test_navigation_unittest.py' -v
+python3 -m unittest discover -s tests -p 'test_navigationfeed_unittest.py' -v
 ```
 
 These are offline codec/subscription tests, not a real navigation session.

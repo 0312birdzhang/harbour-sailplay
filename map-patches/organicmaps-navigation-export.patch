@@ -1,0 +1,213 @@
+diff --git a/sailfish/CMakeLists.txt b/sailfish/CMakeLists.txt
+index e976b1a..8b23ed0 100644
+--- a/sailfish/CMakeLists.txt
++++ b/sailfish/CMakeLists.txt
+@@ -50,6 +50,8 @@ set(SRC
+   maps_storage.hpp
+   media_pause.cpp
+   media_pause.hpp
++  navigation_export.cpp
++  navigation_export.hpp
+   opening_hours_editor.cpp
+   opening_hours_editor.hpp
+   osm_account.cpp
+diff --git a/sailfish/navigation_export.cpp b/sailfish/navigation_export.cpp
+new file mode 100644
+index 0000000..34e1315
+--- /dev/null
++++ b/sailfish/navigation_export.cpp
+@@ -0,0 +1,95 @@
++#include "sailfish/navigation_export.hpp"
++
++#include <QCoreApplication>
++#include <QDir>
++#include <QFile>
++#include <QFileInfo>
++#include <QJsonDocument>
++#include <QSaveFile>
++#include <QStandardPaths>
++
++#include <ctime>
++#include <unistd.h>
++
++namespace sailfish
++{
++namespace
++{
++qint64 BootMilliseconds()
++{
++  timespec value{};
++  if (clock_gettime(CLOCK_BOOTTIME, &value) != 0)
++    return -1;
++  return value.tv_sec * 1000LL + value.tv_nsec / 1000000;
++}
++
++QByteArray ReadFile(QString const & path)
++{
++  QFile file(path);
++  return file.open(QIODevice::ReadOnly) ? file.readAll().trimmed() : QByteArray();
++}
++}  // namespace
++
++NavigationExport::NavigationExport()
++{
++  if (qgetenv("SAILPLAY_NAVIGATION_EXPORT") != "1")
++    return;
++  auto const runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
++  if (runtime.isEmpty())
++    return;
++  auto const directory = runtime + QStringLiteral("/sailplay-navigation");
++  if (!QDir().mkpath(directory))
++    return;
++  QFileInfo const info(directory);
++  if (info.isSymLink() || info.ownerId() != geteuid() ||
++      !QFile::setPermissions(directory, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner))
++    return;
++  auto const stat = ReadFile(QStringLiteral("/proc/self/stat"));
++  auto const fields = stat.mid(stat.lastIndexOf(')') + 2).simplified().split(' ');
++  auto const boot = ReadFile(QStringLiteral("/proc/sys/kernel/random/boot_id"));
++  if (fields.size() <= 19 || boot.isEmpty() || BootMilliseconds() < 0)
++    return;
++  m_path = directory + QStringLiteral("/organicmaps-%1.json").arg(QCoreApplication::applicationPid());
++  m_snapshot = {{"schema", 1}, {"source", "organicmaps"},
++                {"pid", static_cast<double>(QCoreApplication::applicationPid())},
++                {"startTicks", QString::fromLatin1(fields[19])}, {"bootId", QString::fromLatin1(boot)},
++                {"appKey", QString::fromLocal8Bit(qgetenv("CARLIFE_APP_KEY"))}};
++  Publish({{"state", "idle"}});
++  m_heartbeat.setInterval(1000);
++  QObject::connect(&m_heartbeat, &QTimer::timeout, &m_heartbeat, [this] { Write(); });
++  m_heartbeat.start();
++}
++
++NavigationExport::~NavigationExport()
++{
++  m_heartbeat.stop();
++  if (!m_path.isEmpty())
++    QFile::remove(m_path);
++}
++
++void NavigationExport::Publish(QJsonObject const & navigation)
++{
++  if (m_path.isEmpty())
++    return;
++  m_snapshot["navigation"] = navigation;
++  m_snapshot["updatedMs"] = static_cast<double>(BootMilliseconds());
++  m_snapshot["sequence"] = static_cast<double>(++m_sequence);
++  Write();
++}
++
++void NavigationExport::Write()
++{
++  if (m_path.isEmpty())
++    return;
++  m_snapshot["heartbeatMs"] = static_cast<double>(BootMilliseconds());
++  QSaveFile file(m_path);
++  file.setDirectWriteFallback(false);
++  if (!file.open(QIODevice::WriteOnly))
++    return;
++  if (!file.setPermissions(QFile::ReadOwner | QFile::WriteOwner))
++    return;
++  auto const data = QJsonDocument(m_snapshot).toJson(QJsonDocument::Compact);
++  if (file.write(data) == data.size())
++    file.commit();
++}
++}  // namespace sailfish
+diff --git a/sailfish/navigation_export.hpp b/sailfish/navigation_export.hpp
+new file mode 100644
+index 0000000..cc86b3c
+--- /dev/null
++++ b/sailfish/navigation_export.hpp
+@@ -0,0 +1,24 @@
++#pragma once
++
++#include <QJsonObject>
++#include <QString>
++#include <QTimer>
++
++namespace sailfish
++{
++// Opt-in, process-local snapshots for a projected navigation consumer.
++class NavigationExport
++{
++public:
++  NavigationExport();
++  ~NavigationExport();
++  void Publish(QJsonObject const & navigation);
++
++private:
++  void Write();
++  QString m_path;
++  QJsonObject m_snapshot;
++  QTimer m_heartbeat;
++  qint64 m_sequence = 0;
++};
++}  // namespace sailfish
+diff --git a/sailfish/routing.cpp b/sailfish/routing.cpp
+index 594cf60..1f8ea50 100644
+--- a/sailfish/routing.cpp
++++ b/sailfish/routing.cpp
+@@ -40,6 +40,7 @@
+ #include <QColor>
+ #include <QDateTime>
+ #include <QGuiApplication>
++#include <QJsonObject>
+ #include <QVariantMap>
+ 
+ #include <algorithm>
+@@ -622,6 +623,7 @@ void Routing::EndNavigation()
+ void Routing::LeaveNavigation()
+ {
+   m_navigating = false;
++  m_navigationExport.Publish({{"state", "stopped"}});
+   m_navigation.clear();
+   SetNavigationStyle(false);
+   emit navigatingChanged();
+@@ -876,13 +878,29 @@ void Routing::UpdateNavigation(double speedMps)
+   {
+     // Without stopping the voice, so that the arrival is heard.
+     EndNavigation();
++    m_navigationExport.Publish({{"state", "arrived"}});
+     return;
+   }
+ 
+   routing::FollowingInfo info;
+   manager.GetRouteFollowingInfo(info);
+   if (!info.IsValid())
++  {
++    m_navigationExport.Publish({{"state", "unavailable"}});
+     return;
++  }
++
++  auto const points = manager.GetRoutePoints();
++  m_navigationExport.Publish(
++      {{"state", "active"}, {"routerType", routerType()}, {"turn", static_cast<int>(info.m_turn)},
++       {"exitNumber", static_cast<int>(info.m_exitNum)}, {"remainingSeconds", std::max(0, info.m_time)},
++       {"currentRoad", QString::fromStdString(info.m_currentStreetName)},
++       {"nextRoad", QString::fromStdString(info.m_nextStreetName)},
++       {"destination", points.empty() ? QString() : QString::fromStdString(points.back().m_title)},
++       {"nextDistance", info.m_distToTurn.GetDistance()},
++       {"nextDistanceUnit", static_cast<int>(info.m_distToTurn.GetUnits())},
++       {"remainingDistance", info.m_distToTarget.GetDistance()},
++       {"remainingDistanceUnit", static_cast<int>(info.m_distToTarget.GetUnits())}});
+ 
+   m_navigation = MakeNavigation(info, speedMps);
+   emit navigationChanged();
+diff --git a/sailfish/routing.hpp b/sailfish/routing.hpp
+index 64e4de1..83e97de 100644
+--- a/sailfish/routing.hpp
++++ b/sailfish/routing.hpp
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include "sailfish/navigation_export.hpp"
+ #include "sailfish/prompt_player.hpp"
+ 
+ #include <QObject>
+@@ -277,6 +278,7 @@ private:
+   std::string WantedVoiceLanguage() const;
+ 
+   Framework & m_framework;
++  NavigationExport m_navigationExport;
+   bool m_building = false;
+   bool m_buildCancelled = false;
+   // Changes on every build and close, so that a queued result of an earlier one is dropped.
