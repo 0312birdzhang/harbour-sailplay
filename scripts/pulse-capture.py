@@ -88,6 +88,44 @@ def hardware_volumes(output):
     return result
 
 
+def main_volume_properties():
+    import dbus
+    bus=dbus.bus.BusConnection(os.environ.get('DBUS_SESSION_BUS_ADDRESS') or
+                               'unix:path=/run/user/{}/dbus/user_bus_socket'.format(os.getuid()))
+    lookup=dbus.Interface(bus.get_object('org.PulseAudio1','/org/pulseaudio/server_lookup1'),
+                          'org.freedesktop.DBus.Properties')
+    address=lookup.Get('org.PulseAudio.ServerLookup1','Address')
+    connection=dbus.connection.Connection(str(address))
+    return dbus.Interface(connection.get_object(object_path='/com/meego/mainvolume2'),
+                          'org.freedesktop.DBus.Properties')
+
+
+def save_main_volume():
+    try:
+        props=main_volume_properties().GetAll('com.Meego.MainVolume2')
+        state={key:int(props[key]) for key in ('CurrentStep','StepCount')}
+        state['CallState']=str(props['CallState'])
+        print('Audio saved system volume step={}/{}'.format(state['CurrentStep'],state['StepCount']),file=sys.stderr,flush=True)
+        return state
+    except Exception as error:
+        print('Audio system volume snapshot unavailable: '+str(error),file=sys.stderr,flush=True)
+        return None
+
+
+def restore_main_volume(state):
+    old=state.get('mainVolume')
+    if old is None:return
+    import dbus
+    props=main_volume_properties()
+    current=props.GetAll('com.Meego.MainVolume2')
+    if (int(current['StepCount'])!=old['StepCount'] or str(current['CallState'])!=old['CallState']):
+        raise RuntimeError('system volume context changed; restoration retained for retry')
+    props.Set('com.Meego.MainVolume2','CurrentStep',dbus.UInt32(old['CurrentStep']))
+    actual=int(props.Get('com.Meego.MainVolume2','CurrentStep'))
+    if actual!=old['CurrentStep']:raise RuntimeError('system volume restoration not confirmed')
+    print('Audio restored system volume step={}/{}'.format(actual,old['StepCount']),file=sys.stderr,flush=True)
+
+
 def save_recovery(state):
     fd=os.open(ROUTE_STATE+'.tmp',os.O_WRONLY|os.O_CREAT|os.O_TRUNC|os.O_NOFOLLOW,0o600)
     with os.fdopen(fd,'w') as saved:json.dump(state,saved)
@@ -98,6 +136,11 @@ def private_playback(output,sink_index):
     volumes=playback_volumes(output)
     return [(item,volumes.get(item['id'],[])) for item in stream_diagnostics(output)
             if item.get('sink')==str(sink_index) and item.get('corked')=='no']
+
+
+def private_playback_all(output):
+    volumes=playback_volumes(output)
+    return [(item,volumes.get(item['id'],[])) for item in stream_diagnostics(output)]
 
 
 def restore_private_inputs(state):
@@ -138,6 +181,7 @@ def restore_outputs():
     for sink in state['mutes']:
         values=state.get('volumes',{}).get(sink)
         pactl('set-sink-volume',sink,*(values or ['25%']))
+    restore_main_volume(state)
     for sink,muted in state['mutes'].items():
         pactl('set-sink-mute',sink,str(int(muted)))
     os.unlink(ROUTE_STATE)
@@ -198,12 +242,18 @@ def main():
             lib.pa_mainloop_iterate(loop,0,None);time.sleep(.01)
         raise RuntimeError('capture stopped')
     def route():
+        before={item['id']:(item,volumes) for item,volumes in private_playback_all(pactl('list','sink-inputs'))}
         for line in pactl('list','short','sink-inputs').splitlines():
             fields=line.split()
             if len(fields)<2:continue
             index,sink=fields[:2]
             if sink!=sink_index:
                 moved.setdefault(index,sink)
+                if index not in recovery['streams'] and index in before:
+                    item,volumes=before[index]
+                    recovery['streams'][index]={'binary':item.get('application.process.binary'),
+                        'mute':item.get('mute')=='yes','volumes':volumes}
+                    save_recovery(recovery)
                 try:pactl('move-sink-input',index,name)
                 except subprocess.SubprocessError:continue
         inputs=pactl('list','sink-inputs')
@@ -243,6 +293,7 @@ def main():
                 print('Audio routing maintenance failed: '+type(error).__name__,file=sys.stderr,flush=True)
             route_wake.wait(1);route_wake.clear()
     try:
+        main_volume=save_main_volume()
         module=load_private_sink(name)
         sink_index=next(l.split()[0] for l in pactl('list','short','sinks').splitlines() if l.split()[1]==name)
         default_sink=pactl('get-default-sink').strip()
@@ -256,7 +307,7 @@ def main():
         os.makedirs(os.path.dirname(ROUTE_STATE),exist_ok=True)
         all_volumes=hardware_volumes(pactl('list','sinks'))
         recovery={'default':default_sink,'cast':name,'mutes':sink_mutes,
-                  'volumes':{sink:all_volumes[sink] for sink in sink_mutes if sink in all_volumes},'streams':{}}
+                  'volumes':{sink:all_volumes[sink] for sink in sink_mutes if sink in all_volumes},'streams':{},'mainVolume':main_volume}
         save_recovery(recovery)
         pactl('set-default-sink',name)
         for sink in sink_mutes:pactl('set-sink-mute',sink,'1')
@@ -329,7 +380,7 @@ def main():
                 if pactl('get-default-sink').strip()==name:pactl('set-default-sink',default_sink)
             except subprocess.SubprocessError:pass
         try:restore_outputs()
-        except (subprocess.SubprocessError,OSError) as error:
+        except Exception as error:
             print('Audio output restoration pending: '+type(error).__name__,file=sys.stderr,flush=True)
         if module:
             try:pactl('unload-module',module)

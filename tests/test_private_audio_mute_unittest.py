@@ -38,3 +38,35 @@ class PrivateMuteTests(unittest.TestCase):
             self.assertIn(call('set-sink-input-volume','1','15246'),mocked.call_args_list)
             self.assertIn(call('set-sink-input-mute','1','0'),mocked.call_args_list)
             self.assertFalse(any('2' in c.args for c in mocked.call_args_list))
+
+    def test_system_volume_restores_exact_step_and_checks_result(self):
+        from unittest.mock import Mock, patch
+        import types
+        props=Mock()
+        props.GetAll.return_value={'StepCount':16,'CurrentStep':15,'CallState':'inactive'}
+        props.Get.return_value=4
+        old={'mainVolume':{'CurrentStep':4,'StepCount':16,'CallState':'inactive'}}
+        with patch.object(pulse,'main_volume_properties',return_value=props), patch.dict('sys.modules',{'dbus':types.SimpleNamespace(UInt32=int)}):
+            pulse.restore_main_volume(old)
+            props.Set.assert_called_once_with('com.Meego.MainVolume2','CurrentStep',4)
+            props.Get.return_value=15
+            with self.assertRaises(RuntimeError):pulse.restore_main_volume(old)
+
+    def test_system_volume_restored_before_hardware_unmute_and_record_removal(self):
+        import json,tempfile
+        from unittest.mock import patch
+        from pathlib import Path
+        calls=[]
+        state={'mutes':{'sink.primary_output':False},'volumes':{'sink.primary_output':['12000','12000']},'streams':{},'mainVolume':{}}
+        with tempfile.TemporaryDirectory() as directory:
+            record=Path(directory)/'recovery.json';record.write_text(json.dumps(state))
+            def pactl(*args):
+                calls.append(args)
+                return ''
+            def restore(state):
+                self.assertTrue(record.exists())
+                calls.append(('restore-system-step',))
+            with patch.object(pulse,'ROUTE_STATE',str(record)),patch.object(pulse,'pactl',side_effect=pactl),patch.object(pulse,'restore_main_volume',side_effect=restore):
+                pulse.restore_outputs()
+            self.assertLess(calls.index(('restore-system-step',)),calls.index(('set-sink-mute','sink.primary_output','0')))
+            self.assertFalse(record.exists())
