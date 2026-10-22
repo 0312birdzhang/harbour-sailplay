@@ -45,19 +45,40 @@ class ScreenEncoder:
         from .nativecrypto import NativeChaCha
         self.native = NativeChaCha(self.key)
 
-    def config(self, avcc, width, height):
+    @staticmethod
+    def _timestamp(timestamp_ns):
+        seconds, fraction = divmod(timestamp_ns,1000000000)
+        return (seconds << 32) | ((fraction << 32)//1000000000)
+
+    def _header(self,size,payload_type,timestamp_ns,width,height,idr=False):
+        # AirPlay screen packets: little-endian size, 2-byte type, 2-byte
+        # option, then a fixed-point NTP timestamp. IDR slices are flagged in
+        # the second type byte; receivers that ignore the flag still parse the
+        # VCL NAL type, but strict head units need it.
         header = bytearray(128)
-        struct.pack_into('<I',header,0,len(avcc))
-        header[4], header[6] = 1,4
-        struct.pack_into('<ff',header,16,width,height)
+        struct.pack_into('<I',header,0,size)
+        header[4] = payload_type
+        header[5] = 0x10 if idr else 0
+        struct.pack_into('<H',header,6,6)
+        struct.pack_into('<Q',header,8,self._timestamp(timestamp_ns))
+        if payload_type == 1:
+            struct.pack_into('<ff',header,16,width,height)
+        struct.pack_into('<ff',header,40,width,height)
+        struct.pack_into('<ff',header,56,max(0,width-1),max(0,height-1))
+        return header
+
+    def config(self, avcc, width, height, timestamp_ns=None):
+        if timestamp_ns is None:
+            timestamp_ns = time.monotonic_ns()
+        header = self._header(len(avcc),1,timestamp_ns,width,height)
+        # Unencrypted H.264 SPS/PPS packet option used by iOS senders.
+        header[6:8] = b'\x16\x01'
         return bytes(header)+avcc
 
-    def frame(self, nals, timestamp_ns):
+    def frame(self, nals, timestamp_ns, width, height):
         body = b''.join(struct.pack('>I',len(n))+n for n in nals)
-        header = bytearray(128)
-        struct.pack_into('<I',header,0,len(body)+16)
-        seconds, fraction = divmod(timestamp_ns,1000000000)
-        struct.pack_into('<Q',header,8,(seconds << 32) | (fraction << 32)//1000000000)
+        idr = any(n and (n[0] & 31) == 5 for n in nals)
+        header = self._header(len(body)+16,0,timestamp_ns,width,height,idr)
         encrypted = self.native.seal(crypto.nonce64(self.counter),body,bytes(header))
         self.counter += 1
         return bytes(header)+encrypted
@@ -293,7 +314,18 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
     modes={'appStates':[{'appStateID':1,'entity':0,'speechMode':-1},
                         {'appStateID':2,'entity':0},{'appStateID':3,'entity':0}],
            'resources':[{'resourceID':r,'entity':1,'permanentEntity':1} for r in (1,2)]}
+    keyframe_request=[0.0]
     def event_command(value):
+        if value.get('type')=='forceKeyFrame':
+            now=time.monotonic()
+            if pipeline is not None and now-keyframe_request[0]>=0.5:
+                keyframe_request[0]=now
+                try:
+                    pipeline.request_keyframe()
+                    print('HU requested keyframe; capture IDR requested',flush=True)
+                except Exception as error:
+                    print('Keyframe request failed: '+type(error).__name__,flush=True)
+            return {'status':0}
         handled=media.command(value) if media else False
         if touch and not handled:
             touch.command(value)
@@ -436,7 +468,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                     sample.write(b'\x00\x00\x00\x01'+sps+b'\x00\x00\x00\x01'+config[pps_pos+2:pps_pos+2+pps_size])
                     sample.flush()
                 if not live:
-                    video.sendall(encoder.config(config,width,height))
+                    video.sendall(encoder.config(config,width,height,time.monotonic_ns()))
                 previous_config=config
                 print('Screen configuration sent: {} bytes'.format(len(config)),flush=True)
             delay = 0 if live else start+count/30-time.monotonic()
@@ -445,7 +477,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             if sample and count<60:
                 sample.write(b''.join(b'\x00\x00\x00\x01'+n for n in nals))
                 sample.flush()
-            packet=encoder.frame(nals,time.monotonic_ns()) if not live else None
+            packet=encoder.frame(nals,time.monotonic_ns(),width,height) if not live else None
             before=time.monotonic()
             try:
                 if not live:

@@ -41,15 +41,23 @@ class VideoDemoTests(unittest.TestCase):
         encoder = ScreenEncoder(shared,42)
         nal = b'\x65\x80'+bytes(range(256))*100
         for counter in range(2):
-            packet = encoder.frame([nal],1500000000)
+            packet = encoder.frame([nal],1500000000,1920,720)
             self.assertEqual(len(packet),struct.unpack_from('<I',packet)[0]+128)
+            self.assertEqual(packet[4:6],b'\x00\x10')
+            self.assertEqual(struct.unpack_from('<ff',packet,40),(1920,720))
             plain = ChaCha20Poly1305(key).decrypt(crypto.nonce64(counter),packet[128:],packet[:128])
             self.assertEqual(plain,struct.pack('>I',len(nal))+nal)
             self.assertEqual(struct.unpack_from('<Q',packet,8)[0],(1<<32)+(1<<31))
 
     def test_configuration_is_plaintext_and_dimensions_are_float(self):
-        packet = ScreenEncoder(bytes(32),1).config(b'abcd',1920,720)
+        packet = ScreenEncoder(bytes(32),1).config(b'abcd',1920,720,1500000000)
         self.assertEqual(packet[4],1)
-        self.assertEqual(packet[6],4)
+        self.assertEqual(packet[6:8],b'\x16\x01')
+        self.assertEqual(struct.unpack_from('<Q',packet,8)[0],(1<<32)+(1<<31))
         self.assertEqual(struct.unpack_from('<ff',packet,16),(1920,720))
+        self.assertEqual(struct.unpack_from('<ff',packet,56),(1919,719))
         self.assertEqual(packet[128:],b'abcd')
+
+    def test_non_idr_frame_is_not_flagged(self):
+        packet = ScreenEncoder(bytes(32),1).frame([b'\x41\x9a'],0,1920,720)
+        self.assertEqual(packet[4:6],b'\x00\x00')

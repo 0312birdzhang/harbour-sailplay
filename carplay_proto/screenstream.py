@@ -96,9 +96,9 @@ class ScreenStream:
             if self.need_idr and not any(n and n[0] & 31 == 5 for n in nals):
                 return False
             if config != self.config:
-                self.video.sendall(self.encoder.config(config, self.width, self.height))
+                self.video.sendall(self.encoder.config(config, self.width, self.height, timestamp))
                 self.config = config
-            self.video.sendall(self.encoder.frame(nals, timestamp))
+            self.video.sendall(self.encoder.frame(nals, timestamp, self.width, self.height))
             if self.need_idr:
                 print('Screen stream starts from IDR', flush=True)
                 self.need_idr = False
