@@ -10,7 +10,47 @@ import ctypes.util
 import hashlib
 import hmac
 import json
+import logging
 import os
+
+
+P256_SPKI_PREFIX = bytes.fromhex(
+    '3059301306072a8648ce3d020106082a8648ce3d03010703420004')
+RSA_ALGORITHM_IDENTIFIER = bytes.fromhex('300d06092a864886f70d0101010500')
+RSA_ALGORITHMS = ('rsa-pkcs1-sha1', 'rsa-pkcs1-sha256')
+
+
+def _read_tlv(data, offset):
+    tag = data[offset]
+    offset += 1
+    length = data[offset]
+    offset += 1
+    if length & 0x80:
+        count = length & 0x7f
+        length = int.from_bytes(data[offset:offset + count], 'big')
+        offset += count
+    return tag, data[offset:offset + length], offset + length
+
+
+def rsa_bits(encoded):
+    """Return the RSA modulus size from a SubjectPublicKeyInfo."""
+    _, spki, _ = _read_tlv(encoded, 0)
+    _, _, offset = _read_tlv(spki, 0)
+    _, bits, _ = _read_tlv(spki, offset)
+    _, rsa_key, _ = _read_tlv(bits[1:], 0)
+    _, modulus, _ = _read_tlv(rsa_key, 0)
+    if modulus[:1] == b'\x00':
+        modulus = modulus[1:]
+    return len(modulus) * 8
+
+
+def key_algorithm(encoded):
+    """Identify a supported SubjectPublicKeyInfo encoding."""
+    if len(encoded) == 91 and encoded.startswith(P256_SPKI_PREFIX):
+        return 'ecdsa-p256-sha256'
+    if len(encoded) >= 128 and RSA_ALGORITHM_IDENTIFIER in encoded[:40]:
+        return 'rsa-pkcs1-sha1' if rsa_bits(encoded) <= 1024 else 'rsa-pkcs1-sha256'
+    raise ValueError('unsupported accessory key algorithm')
 
 
 def raw_ecdsa_to_der(signature):
@@ -32,8 +72,10 @@ class PinnedAccessory:
             with open(filename) as source:
                 pin = json.load(source)
         self.pending_pin = None
-        if pin['algorithm'] != 'ecdsa-p256-sha256':
+        self.algorithm = pin['algorithm']
+        if self.algorithm != 'ecdsa-p256-sha256' and self.algorithm not in RSA_ALGORITHMS:
             raise ValueError('unsupported accessory key algorithm')
+        self.rsa = self.algorithm.startswith('rsa-')
         self.certificate_hash = pin['certificate_sha256']
         if len(self.certificate_hash) != 64:
             raise ValueError('invalid certificate pin')
@@ -52,6 +94,9 @@ class PinnedAccessory:
             'EVP_PKEY_verify_init': ([vp], ctypes.c_int),
             'EVP_PKEY_CTX_set_signature_md': ([vp, vp], ctypes.c_int),
             'EVP_PKEY_verify': ([vp, vp, size, vp, size], ctypes.c_int),
+            'EVP_PKEY_CTX_set_rsa_padding': ([vp, ctypes.c_int], ctypes.c_int),
+            'EVP_PKEY_CTX_set_rsa_pss_saltlen': ([vp, ctypes.c_int], ctypes.c_int),
+            'EVP_sha1': ([], vp),
             'EVP_sha256': ([], vp),
         }
         for name, (arguments, result) in functions.items():
@@ -61,14 +106,17 @@ class PinnedAccessory:
     def begin(self, certificate):
         if not hmac.compare_digest(hashlib.sha256(certificate).hexdigest(), self.certificate_hash):
             raise ValueError('accessory certificate differs from the observed pin')
-        self.challenge = os.urandom(32)
+        self.challenge = os.urandom(20 if self.rsa else 32)
         return self.challenge
 
     def verify(self, signature):
         if self.challenge is None:
             raise ValueError('no pending accessory challenge')
         challenge, self.challenge = self.challenge, None
-        if len(signature) == 64:
+        if self.rsa:
+            if not 128 <= len(signature) <= 1024:
+                raise ValueError('invalid RSA signature encoding')
+        elif len(signature) == 64:
             signature = raw_ecdsa_to_der(signature)
         elif not 8 <= len(signature) <= 72 or signature[:1] != b'\x30':
             raise ValueError('invalid P256 signature encoding')
@@ -77,17 +125,50 @@ class PinnedAccessory:
         key = self.crypto.d2i_PUBKEY(None, ctypes.byref(cursor), len(self.public_key))
         if not key:
             raise ValueError('invalid pinned public key')
-        context = None
-        try:
+        signature_buffer = ctypes.create_string_buffer(signature)
+
+        def attempt(md, data, padding=1, salt_length=None):
             context = self.crypto.EVP_PKEY_CTX_new(key, None)
-            if not context or self.crypto.EVP_PKEY_verify_init(context) <= 0:
+            if not context:
                 raise OSError('OpenSSL verifier initialization failed')
-            if self.crypto.EVP_PKEY_CTX_set_signature_md(context, self.crypto.EVP_sha256()) <= 0:
-                raise OSError('OpenSSL digest selection failed')
-            signature_buffer = ctypes.create_string_buffer(signature)
-            digest_buffer = ctypes.create_string_buffer(challenge)
-            result = self.crypto.EVP_PKEY_verify(context, signature_buffer, len(signature),
-                                                  digest_buffer, len(challenge))
+            try:
+                if self.crypto.EVP_PKEY_verify_init(context) <= 0:
+                    raise OSError('OpenSSL verifier initialization failed')
+                if self.crypto.EVP_PKEY_CTX_set_signature_md(context, md()) <= 0:
+                    raise OSError('OpenSSL digest selection failed')
+                if self.rsa:
+                    if self.crypto.EVP_PKEY_CTX_set_rsa_padding(context, padding) <= 0:
+                        raise OSError('OpenSSL RSA padding selection failed')
+                    if salt_length is not None and self.crypto.EVP_PKEY_CTX_set_rsa_pss_saltlen(context, salt_length) <= 0:
+                        raise OSError('OpenSSL RSA-PSS salt selection failed')
+                data_buffer = ctypes.create_string_buffer(data)
+                return self.crypto.EVP_PKEY_verify(context, signature_buffer, len(signature),
+                                                    data_buffer, len(data))
+            finally:
+                self.crypto.EVP_PKEY_CTX_free(context)
+
+        try:
+            if self.rsa:
+                # MFi 1.0 coprocessors (RSA-1024) sign the 20-byte challenge,
+                # which is already a SHA-1 digest, with PKCS#1 v1.5; other
+                # receivers hash it first or use SHA-256. Try the common
+                # encodings; every candidate is a full signature check.
+                candidates = [
+                    ('rsa-sha1-challenge-pkcs1', self.crypto.EVP_sha1, challenge, 1),
+                    ('rsa-sha1-digest-pkcs1', self.crypto.EVP_sha1, hashlib.sha1(challenge).digest(), 1),
+                    ('rsa-sha256-digest-pkcs1', self.crypto.EVP_sha256, hashlib.sha256(challenge).digest(), 1),
+                    ('rsa-sha256-challenge-pkcs1', self.crypto.EVP_sha256, challenge, 1),
+                    ('rsa-sha1-digest-pss', self.crypto.EVP_sha1, hashlib.sha1(challenge).digest(), 6),
+                    ('rsa-sha256-digest-pss', self.crypto.EVP_sha256, hashlib.sha256(challenge).digest(), 6),
+                ]
+                result = 0
+                for name, md, data, padding in candidates:
+                    result = attempt(md, data, padding, len(data) if padding == 6 else None)
+                    if result == 1:
+                        logging.info('accessory signature verified scheme=%s', name)
+                        break
+            else:
+                result = attempt(self.crypto.EVP_sha256, challenge)
             if result != 1:
                 raise ValueError('accessory challenge signature rejected')
             if self.pending_pin:
@@ -97,13 +178,11 @@ class PinnedAccessory:
                     json.dump(pin, output)
                 self.pending_pin = None
         finally:
-            if context:
-                self.crypto.EVP_PKEY_CTX_free(context)
             self.crypto.EVP_PKEY_free(key)
 
 
 def certificate_key(certificate):
-    """Extract exactly one P256 certificate key through system libcrypto."""
+    """Extract exactly one supported certificate key through system libcrypto."""
     crypto = ctypes.CDLL(ctypes.util.find_library('crypto'))
     vp = ctypes.c_void_p
     signatures = {
@@ -138,9 +217,7 @@ def certificate_key(certificate):
         if crypto.i2d_PUBKEY(key, ctypes.byref(pointer)) != length:
             raise ValueError('accessory key encoding failed')
         encoded = output.raw
-        prefix = bytes.fromhex('3059301306072a8648ce3d020106082a8648ce3d03010703420004')
-        if len(encoded) != 91 or not encoded.startswith(prefix):
-            raise ValueError('only P256 accessory certificates are supported')
+        key_algorithm(encoded)
         return encoded
     finally:
         if key: crypto.EVP_PKEY_free(key)
@@ -162,8 +239,9 @@ def paired_accessory(certificate, path, fallback=None):
     digest = hashlib.sha256(certificate).hexdigest()
     if fallback and hmac.compare_digest(digest, fallback.certificate_hash):
         return fallback
-    pin = {'algorithm': 'ecdsa-p256-sha256', 'certificate_sha256': digest,
-           'public_key_der': base64.b64encode(certificate_key(certificate)).decode('ascii')}
+    key = certificate_key(certificate)
+    pin = {'algorithm': key_algorithm(key), 'certificate_sha256': digest,
+           'public_key_der': base64.b64encode(key).decode('ascii')}
     authenticator = PinnedAccessory(pin=pin)
     authenticator.pending_pin = (path, pin)
     return authenticator
