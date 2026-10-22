@@ -125,6 +125,7 @@ class DemoEvents:
                 while b'\r\n\r\n' not in buf:
                     block = self.sock.recv(16384)
                     if not block:
+                        print('Demo event channel closed by head unit (received={})'.format(self.received),flush=True)
                         return
                     buf += block
                     if len(buf)>65536:
@@ -138,6 +139,7 @@ class DemoEvents:
                 while len(buf)<size:
                     block = self.sock.recv(16384)
                     if not block:
+                        print('Demo event channel closed by head unit (received={})'.format(self.received),flush=True)
                         return
                     buf += block
                 body,buf = buf[:size],buf[size:]
@@ -151,6 +153,8 @@ class DemoEvents:
                         value = plistlib.loads(body)
                         print('Demo event keys={}'.format(sorted(value)),flush=True)
                         print('Event command type={}'.format(value.get('type')),flush=True)
+                        if value.get('type') not in ('hidSendReport','forceKeyFrame','iAPSendMessage'):
+                            print('Event command detail={}'.format(describe_params(value)),flush=True)
                         if value.get('type')=='iAPSendMessage':
                             # iAP2 tunnelled over the AirPlay event channel;
                             # not handled yet, so record what the HU sends.
@@ -161,13 +165,13 @@ class DemoEvents:
                             if result is not None:
                                 reply=plistlib.dumps(result,fmt=plistlib.FMT_BINARY)
                     except Exception as error:
-                        print('Event handler failed: {}'.format(type(error).__name__),flush=True)
+                        print('Event handler failed: {}: {}'.format(type(error).__name__,error),flush=True)
                         code=400
                 self.sock.sendall(('RTSP/1.0 {} {}\r\nCSeq: {}\r\nContent-Type: application/x-apple-binary-plist\r\nContent-Length: {}\r\n\r\n'.format(
                     code,'OK' if code==200 else 'Bad Request',headers.get('cseq','0').strip(),len(reply))).encode()+reply)
         except Exception as error:
             if not self.stop.is_set():
-                print('Demo event channel: {}'.format(type(error).__name__),flush=True)
+                print('Demo event channel: {}: {}'.format(type(error).__name__,error),flush=True)
         finally:
             self.stop.set()
 
@@ -290,7 +294,7 @@ class ScreenFeedback:
                 next_feedback=time.monotonic()+2
                 print('Screen feedback status={} bytes={}'.format(status,len(body)),flush=True)
             except Exception as error:
-                print('Screen feedback failed: {}'.format(type(error).__name__),flush=True)
+                print('Screen feedback failed: {}: {}'.format(type(error).__name__,error),flush=True)
                 self.stop.set()
                 return
 
@@ -308,7 +312,8 @@ class ScreenFeedback:
                 {'type':'iAPSendMessage','params':{'data':data}},fmt=plistlib.FMT_BINARY),
                 {'Content-Type':'application/x-apple-binary-plist'})
             result=plistlib.loads(body).get('status',0) if body else 0
-            print('iAP tunnel sent bytes={} HTTP={} status={}'.format(len(data),status,result),flush=True)
+            print('iAP tunnel sent bytes={} HTTP={} status={} data={}'.format(
+                len(data),status,result,describe_params(data,128)),flush=True)
 
     def close(self):
         self.stop.set()

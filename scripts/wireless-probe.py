@@ -219,7 +219,9 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                 sync_at = now + 1
             if negotiated and pending is None and outgoing:
                 sequence = (sequence + 1) & 255
-                pending = Packet(ACK, sequence, last_rx, session, outgoing.pop(0).encoded())
+                frame = outgoing.pop(0)
+                logging.info('CSM tx message=0x%04x body_bytes=%d', frame.message_id, len(frame.body))
+                pending = Packet(ACK, sequence, last_rx, session, frame.encoded())
                 retries = 0
                 retry_at = 0
             if pending is not None and now >= retry_at:
@@ -235,6 +237,13 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
             if not raw:
                 break
             for packet in decoder.feed(raw):
+                if transport == 'airplay':
+                    if packet == DETECT:
+                        logging.info('link rx DETECT')
+                    else:
+                        logging.info('link rx control=0x%02x seq=%d ack=%d session=%s bytes=%d',
+                                     packet.control, packet.sequence, packet.acknowledgement,
+                                     packet.session, len(packet.payload or b''))
                 if packet == DETECT:
                     if not sync_at:
                         logging.info('peer iAP2 detection confirmed')
@@ -275,6 +284,11 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                 # Never log Wi-Fi credentials or authentication bodies.
                                 logging.info('CSM rx message=0x%04x body_bytes=%d',
                                              frame.message_id, len(frame.body))
+                                if transport == 'airplay' and frame.message_id not in (
+                                        0xaa01, 0xaa03, 0x5703, 0x4301):
+                                    # Bodies identify what the head unit expects
+                                    # next; credentials and auth are never logged.
+                                    logging.info('CSM rx body=%s', payload_hex(frame.body))
                                 if frame.message_id == 0x1d01:
                                     identity = {}
                                     for parameter in frame.parameters():
