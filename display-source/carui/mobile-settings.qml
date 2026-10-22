@@ -65,6 +65,13 @@ ApplicationWindow {
             SilicaFlickable {
                 anchors.fill: parent
                 contentHeight: content.height
+                PullDownMenu {
+                    MenuItem {
+                        objectName: "aboutMenuItem"
+                        text: qsTranslate("Sailplay", "About")
+                        onClicked: pageStack.push(Qt.resolvedUrl("AboutPage.qml"))
+                    }
+                }
                 Column {
                     id: content
                     width: page.width

@@ -1,6 +1,6 @@
 Name: harbour-sailplay
 Version: 0.1.1
-Release: 35
+Release: 47
 Summary: SailfishOS wireless CarPlay phone and virtual vehicle display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
@@ -37,6 +37,8 @@ install -m 0644 display-source/carui/CarPalette.qml %{buildroot}/opt/sailplay/ca
 install -m 0644 display-source/carui/WeatherCard.qml %{buildroot}/opt/sailplay/carui/WeatherCard.qml
 install -m 0644 display-source/carui/MusicPlayer.qml %{buildroot}/opt/sailplay/carui/MusicPlayer.qml
 install -m 0644 display-source/carui/mobile-settings.qml %{buildroot}/opt/sailplay/carui/mobile-settings.qml
+install -m 0644 display-source/carui/AboutPage.qml %{buildroot}/opt/sailplay/carui/AboutPage.qml
+printf '%s\n' '%{version}-%{release}' > %{buildroot}/opt/sailplay/version
 mkdir -p %{buildroot}/opt/sailplay/carui/translations
 install -m 0644 rpm/payload/translations/*.qm %{buildroot}/opt/sailplay/carui/translations/
 install -m 0644 display-source/carui/harbour-sailplay.png %{buildroot}/opt/sailplay/carui/harbour-sailplay.png
@@ -69,6 +71,7 @@ systemctl daemon-reload || :
 /opt/sailplay/diagnostics
 /opt/sailplay/carui
 /opt/sailplay/carui-apps.conf
+/opt/sailplay/version
 %attr(2755,root,privileged) /opt/sailplay/imira-comp
 %attr(2755,root,privileged) /opt/sailplay/carlife-capture
 /usr/lib/systemd/system/sailplay.service

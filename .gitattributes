@@ -2,3 +2,4 @@
 *.png binary
 # Unified diff context preserves source indentation and blank context markers.
 connman-patches/*.patch -whitespace
+map-patches/*.patch -whitespace

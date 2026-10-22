@@ -9,6 +9,8 @@ Item {
     property alias mprisController: player
     property url albumArtSource
     property bool compact: false
+    readonly property bool playing: player.playbackStatus === Mpris.Playing
+    readonly property bool idleCard: compact && !playing && player.playbackStatus !== Mpris.Paused
     readonly property real _squareSize: compact ? 72 : 88
     readonly property real headerHeight: compact ? 120 : 164
     signal clicked()
@@ -21,10 +23,24 @@ Item {
         onTriggered: if (player.currentService && (player.playbackStatus === Mpris.Playing || !carController.hasRememberedMusic))
             carController.rememberMusicPlayer(player.currentService)
     }
+    function resumeMusic() {
+        var service = carController.preferredMusicService(player.availableServices)
+        if (service) player.currentService = service
+        if (service && player.canPlay) {
+            player.play()
+            return
+        }
+        controls.pendingApp = carController.lastMusicApp
+        controls.pendingTicks = 0
+        if (carController.ensureMusicBackend(controls.pendingApp))
+            pendingPlay.restart()
+    }
     Timer {
         id: pendingPlay; interval: 250; repeat: true
         onTriggered: {
-            if (++controls.pendingTicks > 40) { stop(); controls.pendingApp = ""; return }
+            if (++controls.pendingTicks > 60) { stop(); controls.pendingApp = ""; return }
+            var service = carController.preferredMusicService(player.availableServices)
+            if (service) player.currentService = service
             var desktop = String(player.desktopEntry || "").replace(/\.desktop$/, "")
             if (desktop === controls.pendingApp && player.canPlay) {
                 stop(); controls.pendingApp = ""; player.play()
@@ -53,26 +69,27 @@ Item {
         width: controls.compact ? 112 : 148; height: width; radius: 16; color: carPalette.button
         Image {
             anchors.fill: parent; anchors.margins: 4
-            source: controls.albumArtSource
+            source: controls.idleCard ? "" : controls.albumArtSource
             fillMode: Image.PreserveAspectFit
         }
-        Text { anchors.centerIn: parent; text: "♫"; color: carPalette.secondary; font.pixelSize: 64; visible: !controls.albumArtSource }
+        Text { anchors.centerIn: parent; text: "♫"; color: carPalette.secondary; font.pixelSize: 64; visible: controls.idleCard || !controls.albumArtSource }
     }
     Column {
         x: controls.compact ? 132 : 172; width: Math.max(0, parent.width - x); spacing: controls.compact ? 6 : 12
         Text {
             width: parent.width; color: carPalette.text; font.pixelSize: controls.compact ? 28 : 34
             elide: Text.ElideRight
-            text: player.metaData.title || player.identity || carController.lastMusicName
+            text: controls.idleCard ? qsTranslate("Sailplay", "Not Playing")
+                                  : player.metaData.title || player.identity || carController.lastMusicName
         }
         Text {
             width: parent.width; color: carPalette.secondary; font.pixelSize: 26
             elide: Text.ElideRight
-            text: (player.metaData.contributingArtist || "").toString()
+            text: controls.idleCard ? (carController.musicError || carController.lastMusicName) : (player.metaData.contributingArtist || "").toString()
         }
         Text {
             width: parent.width; color: carPalette.secondary; font.pixelSize: 22
-            elide: Text.ElideRight; text: player.identity || ""
+            elide: Text.ElideRight; text: controls.idleCard ? "" : player.identity || ""
         }
     }
     MouseArea { width: parent.width; height: controls.headerHeight; onClicked: controls.clicked() }
@@ -84,8 +101,8 @@ Item {
                 width: controls.width / 3; height: controls._squareSize
                 Silica.IconButton {
                     anchors.centerIn: parent; width: controls._squareSize; height: width
-                    enabled: index === 0 ? player.canGoPrevious : index === 2 ? player.canGoNext
-                              : player.playbackStatus === Mpris.Playing ? player.canPause : (!player.currentService || player.canPlay)
+                    enabled: index === 0 ? (!controls.idleCard && player.canGoPrevious) : index === 2 ? (!controls.idleCard && player.canGoNext)
+                              : player.playbackStatus === Mpris.Playing ? player.canPause : !pendingPlay.running
                     opacity: enabled ? 1 : 0.35
                     icon.color: carPalette.text
                     icon.source: index === 0 ? "image://theme/icon-m-simple-previous"
@@ -95,13 +112,8 @@ Item {
                     onClicked: {
                         if (index === 0) player.previous()
                         else if (index === 2) player.next()
-                        else if (player.currentService) player.playPause()
-                        else {
-                            controls.pendingApp = carController.lastMusicApp
-                            controls.pendingTicks = 0
-                            carController.startMusicOnPhone()
-                            pendingPlay.restart()
-                        }
+                        else if (controls.playing) player.pause()
+                        else controls.resumeMusic()
                     }
                 }
             }

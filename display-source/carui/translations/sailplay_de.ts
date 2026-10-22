@@ -139,6 +139,82 @@ Musik auf dem Telefon starten</translation>
     <message><source>Night theme starts</source><translation>Nachtdesign ab</translation></message>
     <message><source>Switches automatically using phone local time. Changes apply immediately to the car display.</source><translation>Automatischer Wechsel nach der Ortszeit des Telefons. Änderungen gelten sofort für die Fahrzeuganzeige.</translation></message>
     <message><source>Choose different day and night times</source><translation>Verschiedene Startzeiten für Tag und Nacht wählen</translation></message>
+    <message>
+      <source>Not Playing</source>
+      <translation>Keine Wiedergabe</translation>
+    </message>
+    <message>
+      <source>About</source>
+      <translation>Über</translation>
+    </message>
+    <message>
+      <source>Version %1</source>
+      <translation>Version %1</translation>
+    </message>
+    <message>
+      <source>Wireless CarPlay for SailfishOS. Projects a dedicated car interface over Bluetooth and Wi-Fi, with touch input, app launching and a map, weather and music dashboard.</source>
+      <translation>Kabelloses CarPlay für SailfishOS. Überträgt eine eigene Fahrzeugoberfläche über Bluetooth und WLAN, mit Touch-Steuerung, App-Start sowie einem Dashboard für Karte, Wetter und Musik.</translation>
+    </message>
+    <message>
+      <source>Source code</source>
+      <translation>Quellcode</translation>
+    </message>
+    <message>
+      <source>License: %1</source>
+      <translation>Lizenz: %1</translation>
+    </message>
+    <message>
+      <source>Acknowledgements</source>
+      <translation>Danksagungen</translation>
+    </message>
+    <message>
+      <source>Thanks to the projects that made Sailplay possible. Upstream components retain their respective licenses and copyright notices.</source>
+      <translation>Vielen Dank an die Projekte, die Sailplay ermöglicht haben. Für die verwendeten Komponenten gelten weiterhin ihre jeweiligen Lizenzen und Urheberrechtshinweise.</translation>
+    </message>
+    <message>
+      <source>Car launcher and projection pipeline</source>
+      <translation>Fahrzeug-Launcher und Bildübertragung</translation>
+    </message>
+    <message>
+      <source>Virtual display, capture and audio latency</source>
+      <translation>Virtuelle Anzeige, Bildschirmaufnahme und Audiolatenz</translation>
+    </message>
+    <message>
+      <source>Weather components and Events view reference</source>
+      <translation>Wetterkomponenten und Vorlage der Ereignisansicht</translation>
+    </message>
+    <message>
+      <source>Music artwork handling</source>
+      <translation>Verarbeitung von Musikcovern</translation>
+    </message>
+    <message>
+      <source>CarPlay receiver and interoperability testing</source>
+      <translation>CarPlay-Empfänger und Kompatibilitätstests</translation>
+    </message>
+    <message>
+      <source>Application UI and music controls</source>
+      <translation>Anwendungsoberfläche und Musiksteuerung</translation>
+    </message>
+    <message>
+      <source>H.264 video encoding</source>
+      <translation>H.264-Videokodierung</translation>
+    </message>
+    <message>
+      <source>AAC audio encoding</source>
+      <translation>AAC-Audiokodierung</translation>
+    </message>
+    <message>
+      <source>Audio routing and monitor capture</source>
+      <translation>Audiorouting und Aufnahme der Wiedergabe</translation>
+    </message>
+    <message>
+      <source>Bluetooth and Wi-Fi integration</source>
+      <translation>Bluetooth- und WLAN-Integration</translation>
+    </message>
+    <message>
+      <source>Cryptography and development tests</source>
+      <translation>Kryptografie und Entwicklungstests</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>
@@ -157,6 +233,14 @@ Musik auf dem Telefon starten</translation>
     <message>
       <source>Set a location in Weather</source>
       <translation>Ort in Wetter festlegen</translation>
+    </message>
+    <message>
+      <source>This player needs to be started on the phone once</source>
+      <translation>Diesen Player einmal auf dem Telefon starten</translation>
+    </message>
+    <message>
+      <source>Could not start the background player</source>
+      <translation>Hintergrundplayer konnte nicht gestartet werden</translation>
     </message>
   </context>
 </TS>

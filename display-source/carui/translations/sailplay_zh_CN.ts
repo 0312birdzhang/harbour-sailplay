@@ -139,6 +139,82 @@ Start music on your phone</source>
     <message><source>Night theme starts</source><translation>夜间主题开始时间</translation></message>
     <message><source>Switches automatically using phone local time. Changes apply immediately to the car display.</source><translation>按手机本地时间自动切换，修改后立即应用于车机界面。</translation></message>
     <message><source>Choose different day and night times</source><translation>白天和夜间的开始时间不能相同</translation></message>
+    <message>
+      <source>Not Playing</source>
+      <translation>未在播放</translation>
+    </message>
+    <message>
+      <source>About</source>
+      <translation>关于</translation>
+    </message>
+    <message>
+      <source>Version %1</source>
+      <translation>版本 %1</translation>
+    </message>
+    <message>
+      <source>Wireless CarPlay for SailfishOS. Projects a dedicated car interface over Bluetooth and Wi-Fi, with touch input, app launching and a map, weather and music dashboard.</source>
+      <translation>适用于 SailfishOS 的无线 CarPlay。通过蓝牙和 Wi-Fi 投屏独立的车机界面，支持触摸控制、应用启动，以及地图、天气和音乐分屏。</translation>
+    </message>
+    <message>
+      <source>Source code</source>
+      <translation>源代码</translation>
+    </message>
+    <message>
+      <source>License: %1</source>
+      <translation>许可证：%1</translation>
+    </message>
+    <message>
+      <source>Acknowledgements</source>
+      <translation>感谢</translation>
+    </message>
+    <message>
+      <source>Thanks to the projects that made Sailplay possible. Upstream components retain their respective licenses and copyright notices.</source>
+      <translation>感谢为 Sailplay 提供基础与参考的项目。上游组件保留各自的许可证和版权声明。</translation>
+    </message>
+    <message>
+      <source>Car launcher and projection pipeline</source>
+      <translation>车机启动器与投屏链路</translation>
+    </message>
+    <message>
+      <source>Virtual display, capture and audio latency</source>
+      <translation>虚拟显示、画面采集与音频延迟策略</translation>
+    </message>
+    <message>
+      <source>Weather components and Events view reference</source>
+      <translation>天气组件与 Events 页面实现参考</translation>
+    </message>
+    <message>
+      <source>Music artwork handling</source>
+      <translation>音乐封面处理参考</translation>
+    </message>
+    <message>
+      <source>CarPlay receiver and interoperability testing</source>
+      <translation>CarPlay 接收端与互操作测试</translation>
+    </message>
+    <message>
+      <source>Application UI and music controls</source>
+      <translation>应用界面与音乐控制</translation>
+    </message>
+    <message>
+      <source>H.264 video encoding</source>
+      <translation>H.264 视频编码</translation>
+    </message>
+    <message>
+      <source>AAC audio encoding</source>
+      <translation>AAC 音频编码</translation>
+    </message>
+    <message>
+      <source>Audio routing and monitor capture</source>
+      <translation>音频路由与播放监视器采集</translation>
+    </message>
+    <message>
+      <source>Bluetooth and Wi-Fi integration</source>
+      <translation>蓝牙与 Wi-Fi 集成</translation>
+    </message>
+    <message>
+      <source>Cryptography and development tests</source>
+      <translation>密码学实现与开发测试</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>
@@ -157,6 +233,14 @@ Start music on your phone</source>
     <message>
       <source>Set a location in Weather</source>
       <translation>请在天气中设置位置</translation>
+    </message>
+    <message>
+      <source>This player needs to be started on the phone once</source>
+      <translation>此播放器需要先在手机上启动一次</translation>
+    </message>
+    <message>
+      <source>Could not start the background player</source>
+      <translation>无法启动后台播放器</translation>
     </message>
   </context>
 </TS>

@@ -30,6 +30,10 @@ from carplay_proto.wireless import (parse_wifi_configuration,
                                     peer_supports_wifi_configuration_request,
                                     request_wifi_configuration,
                                     parse_start_session, StartSession)
+from carplay_proto.navigation import NavigationSubscription, START as NAV_START, STOP as NAV_STOP
+from carplay_proto.navigationfeed import NavigationFeed
+from carplay_proto.navigationsender import NavigationSender
+from carplay_proto.navigationsender import NavigationSender
 
 PHONE_UUID = '00000000-deca-fade-deca-deafdecacafe'
 ACCESSORY_UUID = '00000000-deca-fade-deca-deafdecacaff'
@@ -204,6 +208,16 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
     peer_received_messages = set()
     ea_protocols = []
     wifi_config = None
+    navigation = NavigationSubscription()
+    navigation_feed = NavigationFeed()
+    navigation_check_at = 0
+    navigation_status = None
+    navigation_sender = NavigationSender()
+    navigation_batch = []
+    snapshot = None
+    navigation_sender = NavigationSender()
+    navigation_batch = []
+    snapshot = None
     sock.settimeout(0.2)
     try:
         authenticator = PinnedAccessory(accessory_key) if accessory_key else None
@@ -212,11 +226,29 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
             if handover_started:
                 touch_handover_heartbeat()
             now = time.monotonic()
+            if authenticated and now >= navigation_check_at:
+                navigation_check_at = now + 1
+                snapshot = navigation_feed.poll()
+                nav = snapshot['navigation'] if snapshot else {}
+                status = (navigation_feed.reason, nav.get('state'), nav.get('turn'), navigation.component)
+                if status != navigation_status:
+                    navigation_status = status
+                    logging.info('navigation feed=%s state=%s raw_turn=%s component=%s', *status)
             if not negotiated and now >= detection_deadline:
                 raise ValueError('iAP2 handshake timeout; release RFCOMM for retry')
             if sync_at and not local_syn_acked and now >= sync_at:
                 sock.sendall(encode(Packet(SYN | ACK, 0, last_rx, 0, sync_payload)))
                 sync_at = now + 1
+            if authenticated and pending is None and not outgoing:
+                if not navigation_batch:
+                    navigation_batch = navigation_sender.frames(snapshot, navigation, peer_received_messages)
+                if navigation_batch:
+                    outgoing.append(navigation_batch.pop(0))
+            if authenticated and pending is None and not outgoing:
+                if not navigation_batch:
+                    navigation_batch = navigation_sender.frames(snapshot, navigation, peer_received_messages)
+                if navigation_batch:
+                    outgoing.append(navigation_batch.pop(0))
             if negotiated and pending is None and outgoing:
                 sequence = (sequence + 1) & 255
                 frame = outgoing.pop(0)
@@ -398,6 +430,23 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                             logging.info('pinned accessory challenge signature VERIFIED; '
                                                          'waiting for notification-driven Wi-Fi handover '
                                                          '(peer does not advertise 0x5702)')
+                                elif frame.message_id in (NAV_START, NAV_STOP):
+                                    if not authenticated:
+                                        logging.warning('ignoring navigation subscription before authentication')
+                                        continue
+                                    try:
+                                        navigation.offer(frame)
+                                    except ValueError as error:
+                                        logging.warning('invalid navigation subscription: %s', error)
+                                        continue
+                                    navigation_batch = []
+                                    navigation_sender.reset()
+                                    navigation_check_at = 0
+                                    navigation_batch = []
+                                    navigation_sender.reset()
+                                    navigation_check_at = 0
+                                    logging.info('navigation subscription message=0x%04x component=%s options=%s', frame.message_id,
+                                                 navigation.component, sorted(navigation.options))
                                 elif authenticated and frame.message_id in INITIAL_UPDATES:
                                     reply = initial_update(frame, peer_received_messages)
                                     if reply is not None:
