@@ -188,7 +188,9 @@ class AirPlayLinkTests(unittest.TestCase):
                     signature = key.sign(nonce, padding.PKCS1v15(), utils.Prehashed(hashes.SHA1()))
                     tunnel.feed(encode(Packet(ACK, 0x43, challenge_packet.sequence, 10,
                                               Frame(0xaa03, encode_param(0, signature)).encoded())))
-                    self.assertEqual(receive().acknowledgement, 0x43)
+                    ack = receive()
+                    self.assertEqual((ack.acknowledgement, ack.sequence),
+                                     (0x43, challenge_packet.sequence))
                     succeeded = receive()
                     self.assertEqual(frame_of(succeeded).message_id, 0xaa05)
                     tunnel.feed(encode(Packet(ACK, 0x43, succeeded.sequence, 0, None)))

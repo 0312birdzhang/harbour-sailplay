@@ -440,7 +440,9 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                         # A stale window means this RFCOMM link is poisoned;
                         # exit and let the advertiser relaunch a clean probe.
                         raise ValueError('out-of-order packet; restarting probe')
-                    sock.sendall(encode(Packet(ACK, 0, last_rx, 0, None)))
+                    # An ACK-only packet carries our last sent sequence number;
+                    # head units ignore one numbered 0 and keep retransmitting.
+                    sock.sendall(encode(Packet(ACK, sequence, last_rx, 0, None)))
         logging.info('probe ended; checksum errors=%d', decoder.errors)
     except (OSError, ValueError):
         logging.exception('probe failed')

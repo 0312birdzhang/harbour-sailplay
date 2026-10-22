@@ -90,7 +90,10 @@ class ProbeTests(unittest.TestCase):
             self.assertEqual(receive(), ident)
             car.sendall(encode(Packet(ACK, 0x21, ident.sequence, 10,
                                       Frame(0x1d01, b'').encoded())))
-            self.assertEqual(receive().acknowledgement, 0x21)
+            ack = receive()
+            self.assertEqual(ack.acknowledgement, 0x21)
+            # ACK-only packets carry the last sequence number sent, not 0.
+            self.assertEqual(ack.sequence, ident.sequence)
             accepted = receive()
             self.assertEqual(accepted.payload, Frame(0x1d02, b'').encoded())
             car.sendall(encode(Packet(ACK, 0x21, accepted.sequence, 0, None)))
