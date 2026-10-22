@@ -141,6 +141,78 @@ Lancez la musique sur votre téléphone</translation>
       <source>Not Playing</source>
       <translation>Aucune lecture en cours</translation>
     </message>
+    <message>
+      <source>About</source>
+      <translation>À propos</translation>
+    </message>
+    <message>
+      <source>Version %1</source>
+      <translation>Version %1</translation>
+    </message>
+    <message>
+      <source>Wireless CarPlay for SailfishOS. Projects a dedicated car interface over Bluetooth and Wi-Fi, with touch input, app launching and a map, weather and music dashboard.</source>
+      <translation>CarPlay sans fil pour SailfishOS. Projette une interface dédiée au véhicule via Bluetooth et Wi-Fi, avec commandes tactiles, lancement des applications et tableau de bord avec carte, météo et musique.</translation>
+    </message>
+    <message>
+      <source>Source code</source>
+      <translation>Code source</translation>
+    </message>
+    <message>
+      <source>License: %1</source>
+      <translation>Licence : %1</translation>
+    </message>
+    <message>
+      <source>Acknowledgements</source>
+      <translation>Remerciements</translation>
+    </message>
+    <message>
+      <source>Thanks to the projects that made Sailplay possible. Upstream components retain their respective licenses and copyright notices.</source>
+      <translation>Merci aux projets qui ont rendu Sailplay possible. Les composants tiers conservent leurs licences et mentions de droits respectives.</translation>
+    </message>
+    <message>
+      <source>Car launcher and projection pipeline</source>
+      <translation>Lanceur automobile et chaîne de projection</translation>
+    </message>
+    <message>
+      <source>Virtual display, capture and audio latency</source>
+      <translation>Écran virtuel, capture et latence audio</translation>
+    </message>
+    <message>
+      <source>Weather components and Events view reference</source>
+      <translation>Composants météo et référence de la vue Événements</translation>
+    </message>
+    <message>
+      <source>Music artwork handling</source>
+      <translation>Gestion des pochettes musicales</translation>
+    </message>
+    <message>
+      <source>CarPlay receiver and interoperability testing</source>
+      <translation>Récepteur CarPlay et tests de compatibilité</translation>
+    </message>
+    <message>
+      <source>Application UI and music controls</source>
+      <translation>Interface et commandes musicales</translation>
+    </message>
+    <message>
+      <source>H.264 video encoding</source>
+      <translation>Encodage vidéo H.264</translation>
+    </message>
+    <message>
+      <source>AAC audio encoding</source>
+      <translation>Encodage audio AAC</translation>
+    </message>
+    <message>
+      <source>Audio routing and monitor capture</source>
+      <translation>Routage audio et capture de la lecture</translation>
+    </message>
+    <message>
+      <source>Bluetooth and Wi-Fi integration</source>
+      <translation>Intégration Bluetooth et Wi-Fi</translation>
+    </message>
+    <message>
+      <source>Cryptography and development tests</source>
+      <translation>Cryptographie et tests de développement</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

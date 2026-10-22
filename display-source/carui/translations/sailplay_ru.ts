@@ -141,6 +141,78 @@ Start music on your phone</source>
       <source>Not Playing</source>
       <translation>Не воспроизводится</translation>
     </message>
+    <message>
+      <source>About</source>
+      <translation>О приложении</translation>
+    </message>
+    <message>
+      <source>Version %1</source>
+      <translation>Версия %1</translation>
+    </message>
+    <message>
+      <source>Wireless CarPlay for SailfishOS. Projects a dedicated car interface over Bluetooth and Wi-Fi, with touch input, app launching and a map, weather and music dashboard.</source>
+      <translation>Беспроводной CarPlay для SailfishOS. Передаёт отдельный автомобильный интерфейс по Bluetooth и Wi-Fi: сенсорное управление, запуск приложений и панель с картой, погодой и музыкой.</translation>
+    </message>
+    <message>
+      <source>Source code</source>
+      <translation>Исходный код</translation>
+    </message>
+    <message>
+      <source>License: %1</source>
+      <translation>Лицензия: %1</translation>
+    </message>
+    <message>
+      <source>Acknowledgements</source>
+      <translation>Благодарности</translation>
+    </message>
+    <message>
+      <source>Thanks to the projects that made Sailplay possible. Upstream components retain their respective licenses and copyright notices.</source>
+      <translation>Спасибо проектам, благодаря которым появился Sailplay. Сторонние компоненты сохраняют свои лицензии и уведомления об авторских правах.</translation>
+    </message>
+    <message>
+      <source>Car launcher and projection pipeline</source>
+      <translation>Автомобильная оболочка и передача изображения</translation>
+    </message>
+    <message>
+      <source>Virtual display, capture and audio latency</source>
+      <translation>Виртуальный дисплей, захват изображения и задержка звука</translation>
+    </message>
+    <message>
+      <source>Weather components and Events view reference</source>
+      <translation>Компоненты погоды и пример экрана событий</translation>
+    </message>
+    <message>
+      <source>Music artwork handling</source>
+      <translation>Обработка обложек музыки</translation>
+    </message>
+    <message>
+      <source>CarPlay receiver and interoperability testing</source>
+      <translation>Приёмник CarPlay и проверка совместимости</translation>
+    </message>
+    <message>
+      <source>Application UI and music controls</source>
+      <translation>Интерфейс приложения и управление музыкой</translation>
+    </message>
+    <message>
+      <source>H.264 video encoding</source>
+      <translation>Кодирование видео H.264</translation>
+    </message>
+    <message>
+      <source>AAC audio encoding</source>
+      <translation>Кодирование звука AAC</translation>
+    </message>
+    <message>
+      <source>Audio routing and monitor capture</source>
+      <translation>Маршрутизация звука и захват воспроизведения</translation>
+    </message>
+    <message>
+      <source>Bluetooth and Wi-Fi integration</source>
+      <translation>Интеграция Bluetooth и Wi-Fi</translation>
+    </message>
+    <message>
+      <source>Cryptography and development tests</source>
+      <translation>Криптография и тестирование при разработке</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

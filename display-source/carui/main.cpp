@@ -419,6 +419,7 @@ class CarUiController : public QObject
     Q_PROPERTY(QStringList selectedApps READ selectedApps NOTIFY rowsChanged)
     Q_PROPERTY(QVariantList dockApps READ dockApps NOTIFY dockChanged)
     Q_PROPERTY(QString currentApp READ currentApp NOTIFY currentAppChanged)
+    Q_PROPERTY(QString packageVersion READ packageVersion CONSTANT)
     Q_PROPERTY(bool serviceRunning READ serviceRunning NOTIFY serviceRunningChanged)
     Q_PROPERTY(QString serviceState READ serviceState NOTIFY serviceRunningChanged)
     Q_PROPERTY(QString serviceError READ serviceError NOTIFY serviceRunningChanged)
@@ -518,6 +519,11 @@ public:
 
     // appId of the app currently on screen ("" = home grid visible)
     QString currentApp() const { return m_currentApp; }
+    QString packageVersion() const {
+        QFile version(QStringLiteral("/opt/sailplay/version"));
+        return version.open(QIODevice::ReadOnly | QIODevice::Text)
+            ? QString::fromUtf8(version.readAll()).trimmed() : QStringLiteral("—");
+    }
     bool dashboardActive() const { return m_dashboardActive; }
     bool musicActive() const { return m_musicActive; }
     bool returnToDashboard() const { return m_returnToDashboard; }
