@@ -1,3 +1,44 @@
+# Enabled sender: Sailplay 0.1.1-37
+
+Authenticated RFCOMM workers now send 0x5202 followed by 0x5201 when the
+receiver subscribes with 0x5200 and advertises both messages in identification.
+The existing acknowledged/retried iAP2 queue serializes navigation with control
+traffic; at most one maneuver/route pair is queued, with no per-position backlog.
+0x5203 cancels the subscription. A fresh subscription resends current guidance.
+Stopped, arrived, lost, ambiguous or expired sources clear the receiver once
+using state 2: HSAE suppresses state 0 before the instrument bridge.
+
+The route includes component ID, maneuver index/list, raw distances in meters,
+metric display strings, remaining seconds and road names. Apple turn values
+are mapped from Organic Maps using DiPlay's BydManeuverCodes and iPhone fixture
+parser. Right-hand traffic is the current default; automatic country-specific
+driving side is not implemented. Unknown maneuvers use type 0, not an invented
+arrow. The driving-side parameter is **8**: the event bridge's decimal offset
+404 from maneuver base 0x380 is 0x514, correcting the earlier parameter-7 note.
+
+Persistent logs record subscription, source state, sequence, turn and frame IDs;
+road names and destinations are never recorded. The installed map exporter is
+opt-in for apps launched by Sailplay. Real vehicle instrument output still
+requires a subscribed session with an active Organic Maps driving route.
+No head-unit system files or MCU configuration are changed.
+
+## Deployment verification (2026-10-22)
+
+Installed `harbour-sailplay-0.1.1-37.aarch64` on JollaPhone2026 at
+192.168.3.240. `sailplay.service` is active/running; installed sender SHA256:
+`e3640961fb8d0d815fb2f31288d158a93e55101fe068e0d80efc7ae057795a8e`.
+Organic Maps `2026.10.22-1` remains installed. Runtime imports and feed reader
+pass; feed is absent because no projected navigation is active. Bluetooth is
+powered off and all head units are disconnected at verification time, so no
+live subscription, navigation packet ACK or instrument display is claimed.
+
+21 navigation codec/feed/sender tests plus 4 RFCOMM transport tests passed on
+Linux. RPM was extracted and sender, compositor and translation payloads
+matched the source/build outputs. Package SHA256:
+`ec22c49631099f8547169b32aa7ab8577b904210d53f7a7fa1c7de26e4af99a7`.
+
+The sections below preserve the earlier implementation stages as history.
+
 # Instrument navigation integration
 
 ## Stage 1: receiver field codecs and subscription diagnostics
@@ -74,7 +115,7 @@ register to copy those bytes does **not** make this an IEEE floating-point field
 | --- | --- | --- |
 | 3 | Maneuver type | One-byte enum, `0x404` |
 | 4 | After-maneuver road | NUL-terminated UTF-8, `0x408` |
-| 7 | Driving side | One-byte enum, `0x510` |
+| 8 | Driving side | One-byte enum, `0x514` |
 
 `AppleCarPlay` at `0x40a988..0x40a9a0` forwards these three fields. Parameter
 1 is a different field and must not be used as the maneuver type.

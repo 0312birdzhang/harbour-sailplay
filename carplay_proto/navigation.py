@@ -43,7 +43,8 @@ def _text(value, max_code_units=30):
 
 def route_update(state, maneuver_state, current_road, destination,
                  remaining_seconds, remaining_display, remaining_units,
-                 next_display, next_units):
+                 next_display, next_units, component=None, index=None,
+                 next_meters=None, remaining_meters=None):
     """Build the fields consumed by HSAE's handleRouteGuidanceUpdate.
 
     State and unit enums are raw iAP2 values, not Organic Maps enums.
@@ -54,13 +55,25 @@ def route_update(state, maneuver_state, current_road, destination,
               (6, _integer(remaining_seconds, 8)),
               (8, _text(remaining_display)), (9, _integer(remaining_units, 1)),
               (11, _text(next_display)), (12, _integer(next_units, 1))]
+    if component is not None:
+        fields.insert(0, (0, _integer(component, 2)))
+    if next_meters is not None:
+        fields.append((10, _integer(next_meters, 4)))
+    if remaining_meters is not None:
+        fields.append((7, _integer(remaining_meters, 4)))
+    if index is not None:
+        fields.append((13, _integer(index, 2)))
     return Frame(ROUTE, b"".join(encode_param(key, value) for key, value in fields))
 
 
-def maneuver_information(maneuver_type, after_road, driving_side):
+def maneuver_information(maneuver_type, after_road, driving_side, component=None, index=None):
     """Build the fields forwarded to the meter; enums are raw iAP2 values."""
     fields = [(3, _integer(maneuver_type, 1)), (4, _text(after_road)),
-              (7, _integer(driving_side, 1))]
+              (8, _integer(driving_side, 1))]
+    if component is not None:
+        fields.insert(0, (0, _integer(component, 2)))
+    if index is not None:
+        fields.insert(1 if component is not None else 0, (1, _integer(index, 2)))
     return Frame(MANEUVER, b"".join(encode_param(key, value) for key, value in fields))
 
 

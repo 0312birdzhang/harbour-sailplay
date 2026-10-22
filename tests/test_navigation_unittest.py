@@ -23,7 +23,7 @@ class NavigationTests(unittest.TestCase):
         frame = maneuver_information(7, "右转道路", 0)
         self.assertEqual(frame.message_id, MANEUVER)
         fields = {p.id: p.payload for p in frame.parameters()}
-        self.assertEqual(fields, {3: b"\x07", 4: "右转道路\0".encode(), 7: b"\0"})
+        self.assertEqual(fields, {3: b"\x07", 4: "右转道路\0".encode(), 8: b"\0"})
 
     def test_unicode_limit_does_not_split_surrogate_pairs(self):
         frame = maneuver_information(1, "路" * 29 + "🚗", 0)
