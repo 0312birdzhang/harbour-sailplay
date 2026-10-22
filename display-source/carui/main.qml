@@ -211,8 +211,8 @@ Window {
                 y: lockscreenMusic.y + lockscreenMusic.height + 4
                 visible: lockscreenMusic.visible
                 property var player: lockscreenMusic.mprisController
-                // Amber.Mpris exposes position in milliseconds, duration in seconds.
-                property real durationSeconds: player ? Math.max(0, Number(player.metaData.duration || 0)) : 0
+                // Amber.Mpris exposes both position and metadata duration in milliseconds.
+                property real durationSeconds: player ? Math.max(0, Number(player.metaData.duration || 0) / 1000) : 0
                 property real positionSeconds: 0
                 property var seekTrackId
                 property string seekService

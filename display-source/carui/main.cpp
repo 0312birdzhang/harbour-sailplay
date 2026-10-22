@@ -768,9 +768,9 @@ public:
                 || !(seconds >= 0 && seconds < 86400000)) return;
         const QDBusObjectPath trackId = track.value<QDBusObjectPath>();
         if (trackId.path().isEmpty()) return;
-        // Older Amber clients compare millisecond positions with durations in
-        // seconds and reject valid seeks. Send the standard microsecond request
-        // directly, retaining the drag's track id so a track change is safe.
+        // Send the standard microsecond request directly; the car UI uses
+        // seconds after converting Amber millisecond metadata and positions.
+        // Retain the drag's track id so a track change is safe.
         QDBusMessage call = QDBusMessage::createMethodCall(service,
             QStringLiteral("/org/mpris/MediaPlayer2"),
             QStringLiteral("org.mpris.MediaPlayer2.Player"), QStringLiteral("SetPosition"));
