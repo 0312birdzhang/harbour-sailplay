@@ -529,7 +529,8 @@ public:
     bool isMusicApp(const QString &id) const {
         if (id == QLatin1String("jolla-mediaplayer")) return true;
         QSettings desktop(QStringLiteral("/usr/share/applications/") + id + QStringLiteral(".desktop"), QSettings::IniFormat);
-        const QStringList categories = desktop.value(QStringLiteral("Desktop Entry/Categories")).toString().split(QLatin1Char(';'));
+        if (!desktop.value(QStringLiteral("Desktop Entry/X-Sailplay-BackgroundService")).toString().isEmpty()) return true;
+        const QStringList categories = desktop.value(QStringLiteral("Desktop Entry/Categories")).toStringList().join(QLatin1Char(';')).split(QLatin1Char(';'));
         if (categories.contains(QStringLiteral("Music"))
                 || (categories.contains(QStringLiteral("Player")) && !categories.contains(QStringLiteral("Video"))
                     && (categories.contains(QStringLiteral("Audio")) || categories.contains(QStringLiteral("AudioVideo"))))) return true;

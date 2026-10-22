@@ -1,6 +1,6 @@
 # Background music integration
 
-Sailplay 0.1.1-41 activates the selected player's declared background service
+Sailplay 0.1.1-42 activates the selected player's declared background service
 instead of launching its desktop UI. Already-running MPRIS players are reused.
 Opening the car music view prepares playback but never implicitly plays music;
 the play button sends MPRIS Play after the remembered player becomes ready.
@@ -8,7 +8,7 @@ the play button sends MPRIS Play after the remembered player becomes ready.
 ## Mconnect adapter
 
 Source: `sfos-music/flutter-sailfishos/apps/mconnect`.
-Package: `harbour-mconnect-1.5.0-8.aarch64.rpm`.
+Package: `harbour-mconnect-1.5.0-9.aarch64.rpm`.
 
 The desktop declares:
 
@@ -45,7 +45,7 @@ closing the app. This release does not claim the complete iOS lifecycle model.
 
 ## Verified deployment — 2026-10-22
 
-Mconnect 1.5.0-8 and Sailplay 0.1.1-41 are installed on JollaPhone2026. Both
+Mconnect 1.5.0-9 and Sailplay 0.1.1-42 are installed on JollaPhone2026. Both
 pass rpm -V and sailplay.service is active. Background cold start restores the
 remembered track paused, repeat activation reuses the PID, and muted hardware
 playback testing confirms advancing audio position. Hardware mutes were restored.
@@ -57,9 +57,24 @@ after Show, while preserving the playback process. An unlocked-phone visual
 check is pending because automatic approval rejected changing the lock state.
 No lock settings were changed. Final state is background/paused, ready for use.
 
-Mconnect RPM SHA256: 36e8f6dbfedd04ed8825c7f8e52afdea40862c464ce04a178fa5c4cf8ab55f76
+Mconnect RPM SHA256: c2346ab180d6df6bc7efe8bc6405711132902de511978ac0184139bb27aa4077
 
 
 Mconnect source is committed locally in the flutter-sailfishos checkout on
-branch `sailplay-background-mconnect-20261022`, commit `136846d`. That checkout
+branch `sailplay-background-mconnect-20261022`, commits `136846d` and `82f09c4`. That checkout
 still points to its third-party upstream remote; it was not pushed there.
+
+## Music shortcut classification
+
+Mconnect now declares `Categories=AudioVideo;Audio;Music;Player;`.
+Sailplay also recognizes a desktop with its background-music declaration and
+parses both scalar and list-valued Categories from QSettings. Previously the
+missing classification sent Mconnect through the ordinary projected-app path,
+which could leave the map visible instead of opening the native music view.
+The device controller test switches from the dashboard using dockClicked and
+confirms musicActive=true, dashboardActive=false and an empty currentApp.
+
+Separate open issue: the pre-existing Mconnect native audio startup can select
+maximum system volume on this phone (also reproduced using digital silence).
+Experimental volume guards did not pass device checks and are not shipped.
+The original audio implementation and packaged library were preserved exactly.
