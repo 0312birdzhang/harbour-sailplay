@@ -79,3 +79,25 @@ three complete Organic Maps process restarts through the normal launcher,
 five viewport-probe round trips, five real map round trips and forty static
 frame samples. Cold starts no longer showed the observed blank right-hand
 map region. This does not establish prolonged driving-session stability.
+
+## Honda Civic head unit
+
+Observed with a Samsung Galaxy Note 10+ running Sailfish OS 5.2 against a
+Honda Civic head unit. These are field notes, not a specification.
+
+- The head unit has an RSA-1024 authentication certificate; the challenge
+  signature verifies as PKCS#1 v1.5 over the 20-byte challenge with SHA-1.
+- It alternates between two iAP2 identifications. The wireless CarPlay one
+  sends only 0xaa06, 0x5703 and 0xea02, so CarPlayStartSession never arrives:
+  the handover starts from the Wi-Fi credentials and AirPlay is found on the
+  access point's gateway at port 7000. The other one offers Bluetooth
+  component updates (0x4e01/0x4e03/0x4e05) and no Wi-Fi.
+- Within seconds of the Wi-Fi handover starting it resets the RFCOMM iAP2
+  link and drops Bluetooth. The advertiser relaunches the probe in place so
+  the running projection survives.
+- Video only shows with iOS-style screen packet headers (timestamp, display
+  size and IDR flag on every packet).
+- Open issue: during projection the head unit sends an iAPSendMessage event
+  about once a second, which Sailplay does not answer. It then ends every
+  session about 26 s after the first video frame. The payloads are now logged
+  so the tunnelled iAP2 traffic can be identified.
