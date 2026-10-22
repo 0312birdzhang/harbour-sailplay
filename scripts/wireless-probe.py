@@ -29,7 +29,7 @@ from carplay_proto.accessoryauth import PinnedAccessory, paired_accessory
 from carplay_proto.wireless import (parse_wifi_configuration,
                                     peer_supports_wifi_configuration_request,
                                     request_wifi_configuration,
-                                    parse_start_session)
+                                    parse_start_session, StartSession)
 
 PHONE_UUID = '00000000-deca-fade-deca-deafdecacafe'
 ACCESSORY_UUID = '00000000-deca-fade-deca-deafdecacaff'
@@ -85,6 +85,19 @@ def media_active(path='/run/sailplay-media.lock'):
         os.close(fd)
 
 
+HANDOVER_HEARTBEAT = '/tmp/sailplay-handover-heartbeat'
+
+
+def touch_handover_heartbeat():
+    """Keep the independent restore worker from reviving the old network."""
+    try:
+        os.utime(HANDOVER_HEARTBEAT, None)
+    except FileNotFoundError:
+        descriptor = os.open(HANDOVER_HEARTBEAT, os.O_WRONLY | os.O_CREAT |
+                             os.O_NOFOLLOW, 0o600)
+        os.close(descriptor)
+
+
 def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
           announce_wireless=False, local_address=None, session_out=None, wifi_handover=False,sustained=False,
           local_name='SailfishOS', paired_pin_path=None, on_authenticated=None):
@@ -100,6 +113,35 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
             logging.exception('Wi-Fi/AirPlay handover retry launch failed')
     from carplay_proto.wifiretry import HandoverRetry
     handover_retry = HandoverRetry(media_active, retry_handover)
+
+    def write_session(start):
+        descriptor = os.open(session_out, os.O_WRONLY | os.O_CREAT |
+                             os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, 'w') as output:
+            session_data = start.as_dict()
+            session_data['device_name'] = local_name
+            session_data['bluetooth_address'] = local_address
+            json.dump(session_data, output)
+
+    def start_handover(trigger):
+        nonlocal handover_started, handover_command
+        if not wifi_handover or handover_started:
+            return
+        handover_command=['systemd-run', '--unit=sailplay-handover-{}-{}'.format(os.getpid(),time.monotonic_ns()),
+            sys.executable, os.path.join(os.path.dirname(__file__), 'wifi-session-probe.py'),
+            '--connect', '--direct-passphrase',
+            '--restore-after', '90', '--log-file', '/tmp/sailplay-wifi-probe.log']
+        if sustained:
+            handover_command.append('--sustained')
+        else:
+            handover_command.append('--trace-supplicant')
+        subprocess.run(handover_command,check=True)
+        handover_started = True
+        touch_handover_heartbeat()
+        handover_retry.arm()
+        logging.info('%s triggered independent Wi-Fi/AirPlay handover', trigger)
+
     decoder, csm = Decoder(), Framer()
     deadline = time.monotonic() + duration if duration else float('inf')
     sync_at = 0
@@ -123,6 +165,8 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
         authenticator = PinnedAccessory(accessory_key) if accessory_key else None
         while not stop.is_set() and time.monotonic() < deadline:
             handover_retry.poll()
+            if handover_started:
+                touch_handover_heartbeat()
             now = time.monotonic()
             if not negotiated and now >= detection_deadline:
                 raise ValueError('iAP2 handshake timeout; release RFCOMM for retry')
@@ -263,33 +307,21 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                     config = parse_wifi_configuration(frame)
                                     wifi_config = config
                                     logging.info('accessory Wi-Fi configuration received: %r', config)
+                                    # Some head units (Honda) never send
+                                    # CarPlayStartSession over Bluetooth; they
+                                    # expect the phone to join their access point
+                                    # and find AirPlay on the default port.
+                                    if session_out:
+                                        write_session(StartSession(config, [], 7000, {}))
+                                        start_handover('Wi-Fi configuration')
                                 elif frame.message_id == 0x4301:
                                     if not authenticated:
                                         raise ValueError('StartSession before authentication')
                                     start = parse_start_session(frame, wifi_config)
                                     logging.info('parsed CarPlay StartSession: %r', start)
                                     if session_out:
-                                        descriptor = os.open(session_out, os.O_WRONLY | os.O_CREAT |
-                                                             os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-                                        os.fchmod(descriptor, 0o600)
-                                        with os.fdopen(descriptor, 'w') as output:
-                                            session_data = start.as_dict()
-                                            session_data['device_name'] = local_name
-                                            session_data['bluetooth_address'] = local_address
-                                            json.dump(session_data, output)
-                                        if wifi_handover and not handover_started:
-                                            handover_command=['systemd-run', '--unit=sailplay-handover-{}-{}'.format(os.getpid(),time.monotonic_ns()),
-                                                sys.executable, os.path.join(os.path.dirname(__file__), 'wifi-session-probe.py'),
-                                                '--connect', '--direct-passphrase',
-                                                '--restore-after', '90', '--log-file', '/tmp/sailplay-wifi-probe.log']
-                                            if sustained:
-                                                handover_command.append('--sustained')
-                                            else:
-                                                handover_command.append('--trace-supplicant')
-                                            subprocess.run(handover_command,check=True)
-                                            handover_started = True
-                                            handover_retry.arm()
-                                            logging.info('StartSession triggered independent Wi-Fi/AirPlay handover')
+                                        write_session(start)
+                                        start_handover('StartSession')
                     elif packet.sequence != last_rx:
                         raise ValueError('out-of-order packet; probe stops rather than losing data')
                     sock.sendall(encode(Packet(ACK, 0, last_rx, 0, None)))

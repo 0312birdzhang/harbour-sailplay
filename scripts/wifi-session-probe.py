@@ -71,12 +71,22 @@ def main():
         return network_interface(network_object(bus, 'net.connman', path), 'net.connman.Service')
     if args.restore:
         deadline = float('inf') if args.sustained else time.monotonic() + 300
+        heartbeat = '/tmp/sailplay-handover-heartbeat'
+        def modified(path):
+            try:
+                return os.path.getmtime(path)
+            except OSError:
+                return 0.0
         while True:
-            updated = os.path.getmtime(args.restore_clock) if args.restore_clock and os.path.exists(args.restore_clock) else time.time() - args.restore_after
-            remaining = args.restore_after - (time.time() - updated)
             if not args.restore_clock:
                 time.sleep(args.restore_after)
                 break
+            # The authenticated probe touches the heartbeat while it is still
+            # retrying. Without this a single failed AirPlay attempt would
+            # restore the old network and flap Wi-Fi between the HU and the
+            # previous AP every retry cycle.
+            updated = max(modified(args.restore_clock), modified(heartbeat))
+            remaining = args.restore_after - (time.time() - updated)
             if remaining <= 0 or time.monotonic() >= deadline:
                 break
             time.sleep(min(remaining, 1))
