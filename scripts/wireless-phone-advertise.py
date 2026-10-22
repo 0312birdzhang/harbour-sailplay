@@ -44,6 +44,26 @@ def command(sock, opcode, payload, adapter_index=0):
     raise TimeoutError('Bluetooth MGMT command did not complete')
 
 
+def run_probe(probe):
+    """Keep the profile registered across iAP2 link resets.
+
+    The head unit drops the Bluetooth/iAP2 link as part of the Wi-Fi
+    handover.  Exiting here makes systemd restart this unit, and its
+    ExecStopPost would then stop the handover worker that is actively
+    projecting.  Relaunch the probe in place instead.
+    """
+    delay = 1
+    while True:
+        result = subprocess.call([sys.executable, probe] + sys.argv[1:])
+        logging.info('CarPlay profile process exited status=%d', result)
+        if result == 0:
+            delay = 1
+            time.sleep(1)
+        else:
+            time.sleep(delay)
+            delay = min(10, delay * 2)
+
+
 def main():
     import dbus
     bus = dbus.SystemBus()
@@ -68,9 +88,8 @@ def main():
     missing = missing_advertisements(existing)
     if not missing:
         logging.info('CarPlay and iAP2 EIR already present; preserving existing registrations')
-        result = subprocess.call([sys.executable, probe] + sys.argv[1:])
-        logging.info('CarPlay profile process exited status=%d', result)
-        return result
+        run_probe(probe)
+        return 0
     # Sailfish Python omits AF_BLUETOOTH even though the Linux kernel supports it.
     bluetooth_family = getattr(socket, 'AF_BLUETOOTH', 31)
     sock = socket.socket(bluetooth_family, socket.SOCK_RAW, 1)
@@ -101,9 +120,8 @@ def main():
             monitor = module.Monitor(adapter_index)
         except (OSError, ImportError, AttributeError):
             logging.exception('passive HCI monitoring unavailable')
-        result = subprocess.call([sys.executable, probe] + sys.argv[1:])
-        logging.info('CarPlay profile process exited status=%d', result)
-        return result
+        run_probe(probe)
+        return 0
     finally:
         try:
             if monitor:

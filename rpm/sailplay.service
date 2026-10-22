@@ -1,6 +1,7 @@
 [Unit]
 Description=Sailplay wireless CarPlay
 After=bluetooth.service connman.service
+StartLimitIntervalSec=0
 Wants=bluetooth.service connman.service
 
 [Service]
@@ -9,9 +10,9 @@ Restart=always
 RestartSec=2
 ExecStart=/usr/bin/python3 /opt/sailplay/scripts/wireless-phone-advertise.py --seconds 0 --device /org/bluez/hci0/dev_EC_A7_AD_81_EA_86 --accessory-key /opt/sailplay/diagnostics/corolla-accessory-key.json --session-out /tmp/sailplay-session.json --announce-wireless --wifi-handover --sustained
 KillMode=control-group
-ExecStopPost=-/usr/bin/systemctl stop sailplay-handover-*.service
-ExecStopPost=-/usr/bin/python3 /opt/sailplay/scripts/media-control.py --session-stop
-ExecStopPost=-/usr/bin/su defaultuser -s /bin/sh -c "env XDG_RUNTIME_DIR=/run/user/100000 python3 /opt/sailplay/scripts/pulse-capture.py --restore-routing"
+ExecStopPost=-/bin/sh -c '[ "$SERVICE_RESULT" = success ] && systemctl stop sailplay-handover-*.service || true'
+ExecStopPost=-/bin/sh -c '[ "$SERVICE_RESULT" = success ] && /usr/bin/python3 /opt/sailplay/scripts/media-control.py --session-stop || true'
+ExecStopPost=-/bin/sh -c '[ "$SERVICE_RESULT" = success ] && /usr/bin/su defaultuser -s /bin/sh -c "env XDG_RUNTIME_DIR=/run/user/100000 python3 /opt/sailplay/scripts/pulse-capture.py --restore-routing" || true'
 TimeoutStopSec=10
 StandardOutput=journal
 StandardError=journal
