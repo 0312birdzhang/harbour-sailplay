@@ -8,6 +8,14 @@ See [WIRELESS.md](WIRELESS.md) for wireless implementation details and
 
 ## Current status
 
+Version 0.1.1-48 replaces fixed-length P-256 public-key recognition with
+OpenSSL type/domain-parameter inspection, accepts compressed/explicit P-256,
+and adds legacy RSA/SHA-1 challenge verification without relaxing signature or
+pin checks. Public certificate inspection and authentication-profile logging
+help diagnose the reported Honda failure. Generated-key and phone OpenSSL
+checks passed; the Honda certificate and real handshake remain unverified.
+See [accessory authentication](ACCESSORY_AUTH.md).
+
 Version 0.1.1-46 adds an About page to the phone app's pull-down menu. It shows
 the installed RPM version/release, project description, source link, license,
 and links to the 15 acknowledged projects/components listed in the README.
