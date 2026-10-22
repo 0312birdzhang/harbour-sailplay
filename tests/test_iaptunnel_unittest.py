@@ -105,6 +105,15 @@ class SendTests(unittest.TestCase):
 
 
 class NotificationTests(unittest.TestCase):
+    def test_initial_updates(self):
+        with mock.patch.object(probe_module, 'battery_charge_level', return_value=32767):
+            power = probe_module.initial_update(Frame(0xae00, encode_param(6, b'')), set())
+        self.assertEqual(power.encoded(), Frame(0xae01, encode_param(6, b'\x7f\xff')).encoded())
+        self.assertEqual(probe_module.initial_update(Frame(0x5000, b''), {0x5001}).encoded(),
+                         Frame(0x5001, b'').encoded())
+        self.assertIsNone(probe_module.initial_update(Frame(0x4c00, b''), {0x5001}))
+        self.assertIsNone(probe_module.initial_update(Frame(0x4154, b''), set()))
+
     def test_only_messages_the_accessory_receives(self):
         frames = probe_module.device_notifications('Phone', 'AA:BB:CC:DD:EE:FF', {0x4e09, 0x4e0d})
         self.assertEqual([f.message_id for f in frames], [0x4e09, 0x4e0d])
@@ -196,12 +205,19 @@ class AirPlayLinkTests(unittest.TestCase):
                     tunnel.feed(encode(Packet(ACK, 0x43, succeeded.sequence, 0, None)))
                     # Then the device updates an iPhone sends, in order...
                     notified = []
-                    for _ in range(4):
+                    for _ in range(5):
                         packet = receive()
                         frame = frame_of(packet)
                         notified.append(frame.message_id)
                         tunnel.feed(encode(Packet(ACK, 0x43, packet.sequence, 0, None)))
-                    self.assertEqual(notified, [0x4e0c, 0x4e09, 0x4e0e, 0x4e0d])
+                    self.assertEqual(notified, [0x4e0c, 0x4e09, 0x4e0e, 0x4e0a, 0x4e0d])
+                    # A Start... request is answered with its first update.
+                    tunnel.feed(encode(Packet(ACK, 0x44, packet.sequence, 10,
+                                              Frame(0xae00, encode_param(6, b'')).encoded())))
+                    self.assertEqual(receive().acknowledgement, 0x44)
+                    power = receive()
+                    self.assertEqual(frame_of(power).message_id, 0xae01)
+                    tunnel.feed(encode(Packet(ACK, 0x44, power.sequence, 0, None)))
                     # ...and no Wi-Fi configuration request: Wi-Fi is already up.
                     with self.assertRaises(queue.Empty):
                         to_car.get(timeout=1.2)

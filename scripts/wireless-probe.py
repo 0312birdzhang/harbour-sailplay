@@ -391,6 +391,14 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                             logging.info('pinned accessory challenge signature VERIFIED; '
                                                          'waiting for notification-driven Wi-Fi handover '
                                                          '(peer does not advertise 0x5702)')
+                                elif authenticated and frame.message_id in INITIAL_UPDATES:
+                                    reply = initial_update(frame, peer_received_messages)
+                                    if reply is not None:
+                                        outgoing.append(reply)
+                                        logging.info('initial update queued message=0x%04x for request=0x%04x body=%s',
+                                                     reply.message_id, frame.message_id, payload_hex(reply.body))
+                                    else:
+                                        logging.info('no initial update for request=0x%04x', frame.message_id)
                                 elif frame.message_id == 0x4e01:
                                     logging.info('Bluetooth component information body=%s', payload_hex(frame.body))
                                 elif frame.message_id == 0x4e03:
@@ -450,6 +458,48 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
         sock.close()
 
 
+# Start... request -> the update an iPhone sends straight away in reply.
+INITIAL_UPDATES = {
+    0xae00: 0xae01,  # StartPowerUpdates -> PowerUpdate
+    0x4157: 0x4158,  # StartCommunicationsUpdates -> CommunicationsUpdate
+    0x5000: 0x5001,  # StartNowPlayingUpdates -> NowPlayingUpdate
+    0x4c00: 0x4c01,  # StartMediaLibraryInformation -> MediaLibraryInformation
+}
+
+
+def battery_charge_level(path='/sys/class/power_supply/battery/capacity'):
+    """Battery level scaled to iAP2's 0..65535 range, or None."""
+    try:
+        with open(path) as source:
+            percent = max(0, min(100, int(source.read().strip())))
+    except (OSError, ValueError):
+        return None
+    return percent * 65535 // 100
+
+
+def initial_update(request, received_message_ids):
+    """Minimal first update for a Start... request, or None.
+
+    Only the battery level is filled in (PowerUpdate parameter 6, the only
+    one the Honda asks for). The other updates are sent empty, meaning
+    nothing to report: no call data, nothing playing, no media library.
+    """
+    reply_id = INITIAL_UPDATES.get(request.message_id)
+    if reply_id is None or (received_message_ids and reply_id not in received_message_ids):
+        return None
+    if reply_id == 0xae01:
+        requested = {parameter.id for parameter in request.parameters()}
+        level = battery_charge_level()
+        body = encode_param(6, struct.pack('>H', level)) if 6 in requested and level is not None else b''
+        return Frame(0xae01, body)
+    return Frame(reply_id, b'')
+
+
+def device_language():
+    language = (os.environ.get('LANG') or 'en').split('_')[0].split('.')[0].lower()
+    return language if language.isalpha() and 2 <= len(language) <= 3 else 'en'
+
+
 def device_notifications(local_name, local_address, received_message_ids):
     """Device updates an iPhone sends once the accessory is authenticated.
 
@@ -461,6 +511,7 @@ def device_notifications(local_name, local_address, received_message_ids):
         device_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, 'org.sailplay:' + local_address)).upper()
         frames[:0] = [Frame(0x4e0c, encode_param(0, device_id.encode('ascii') + b'\x00'))]
         frames.append(Frame(0x4e0e, encode_param(0, local_address.encode('ascii') + b'\x00')))
+    frames.append(Frame(0x4e0a, encode_param(0, device_language().encode('ascii') + b'\x00')))
     frames.append(Frame(0x4e0d, encode_param(0, b'\x01')))
     if received_message_ids:
         frames = [frame for frame in frames if frame.message_id in received_message_ids]
