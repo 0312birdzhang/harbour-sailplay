@@ -94,13 +94,22 @@ ApplicationWindow {
                         text: carController.serviceError
                     }
                     SectionHeader { text: qsTranslate("Sailplay", "Car display theme") }
+                    TextSwitch {
+                        text: qsTranslate("Sailplay", "Follow phone ambience")
+                        description: qsTranslate("Sailplay", "Uses the light or dark car theme of the current ambience, so projected apps stay readable. Turn off to switch by time of day.")
+                        checked: carController.followAmbience
+                        automaticCheck: false
+                        onClicked: carController.setFollowAmbience(!checked)
+                    }
                     ValueButton {
                         label: qsTranslate("Sailplay", "Day theme starts")
+                        visible: !carController.followAmbience
                         value: carController.dayStart
                         onClicked: app.chooseThemeTime(true, saveNotice)
                     }
                     ValueButton {
                         label: qsTranslate("Sailplay", "Night theme starts")
+                        visible: !carController.followAmbience
                         value: carController.nightStart
                         onClicked: app.chooseThemeTime(false, saveNotice)
                     }
@@ -108,6 +117,7 @@ ApplicationWindow {
                         x: Theme.horizontalPageMargin; width: parent.width - 2 * Theme.horizontalPageMargin
                         wrapMode: Text.WordWrap; font.pixelSize: Theme.fontSizeSmall; color: Theme.secondaryColor
                         text: qsTranslate("Sailplay", "Switches automatically using phone local time. Changes apply immediately to the car display.")
+                        visible: !carController.followAmbience
                     }
                     SectionHeader { text: qsTranslate("Sailplay", "Dashboard") }
                     ComboBox {
