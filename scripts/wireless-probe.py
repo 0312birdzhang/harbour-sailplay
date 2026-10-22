@@ -374,6 +374,13 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                             outgoing.append(frame)
                                             logging.info('device notification queued message=0x%04x',
                                                          frame.message_id)
+                                        # A CarPlay accessory's wireless control sequence
+                                        # expects the device to request the Wi-Fi
+                                        # configuration on this link too (it lists 0x5702
+                                        # as received and answers with 0x5703).
+                                        if peer_supports_wifi_configuration_request(peer_received_messages):
+                                            outgoing.append(request_wifi_configuration())
+                                            logging.info('Wi-Fi configuration requested over AirPlay link')
                                     else:
                                         for protocol_id, protocol_name in ea_protocols:
                                             if 0xea00 not in peer_received_messages:
