@@ -85,7 +85,7 @@ Page {
                         wrapMode: Text.Wrap
                         textFormat: Text.RichText
                         text: "<a href=\"" + modelData.url + "\">" + modelData.name + "</a>"
-                        linkColor: Theme.highlightColor
+                        linkColor: Theme.secondaryColor
                         onLinkActivated: Qt.openUrlExternally(link)
                     }
                     Label {
