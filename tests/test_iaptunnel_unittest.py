@@ -151,7 +151,7 @@ class AirPlayLinkTests(unittest.TestCase):
             der = key.public_key().public_bytes(serialization.Encoding.DER,
                                                 serialization.PublicFormat.SubjectPublicKeyInfo)
             with open(os.path.join(directory, 'dev_74_D7_CA_65_F7_1B.json'), 'w') as pin:
-                json.dump({'algorithm': 'rsa-pkcs1-sha1',
+                json.dump({'algorithm': 'rsa-pkcs1v15-sha1',
                            'certificate_sha256': hashlib.sha256(certificate).hexdigest(),
                            'public_key_der': base64.b64encode(der).decode()}, pin)
             to_car = queue.Queue()

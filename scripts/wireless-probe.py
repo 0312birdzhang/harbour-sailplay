@@ -362,6 +362,9 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                     if paired_pin_path:
                                         authenticator = paired_accessory(certificate, paired_pin_path, authenticator)
                                     if authenticator:
+                                        logging.info('accessory authentication algorithm=%s key_bits=%d public_key_bytes=%d challenge_bytes=%d',
+                                                     authenticator.algorithm, authenticator.key_info['key_bits'],
+                                                     len(authenticator.public_key), authenticator.key_info['challenge_bytes'])
                                         challenge = authenticator.begin(certificate)
                                         outgoing.append(Frame(0xaa02, encode_param(0, challenge)))
                                         logging.info('accessory certificate selected; random challenge queued')
@@ -373,6 +376,8 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                     signatures = [p.payload for p in frame.parameters() if p.id == 0]
                                     if len(signatures) != 1:
                                         raise ValueError('invalid authentication response')
+                                    logging.info('accessory challenge response algorithm=%s signature_bytes=%d',
+                                                 authenticator.algorithm, len(signatures[0]))
                                     authenticator.verify(signatures[0])
                                     authenticated = True
                                     if on_authenticated:

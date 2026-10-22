@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
-"""Offline public certificate -> explicitly pinned P256 verification key."""
+"""Offline public certificate -> explicitly pinned accessory verification key."""
 import argparse
 import base64
-import hashlib
 import json
 from pathlib import Path
-from cryptography.hazmat.primitives.serialization import pkcs7, Encoding, PublicFormat
-from cryptography.hazmat.primitives.asymmetric import ec
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from carplay_proto.accessoryauth import certificate_info, certificate_key
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('certificate')
 parser.add_argument('output')
 args = parser.parse_args()
 certificate = Path(args.certificate).read_bytes()
-certificates = pkcs7.load_der_pkcs7_certificates(certificate)
-if len(certificates) != 1:
-    parser.error('expected exactly one accessory certificate')
-key = certificates[0].public_key()
-if not isinstance(key, ec.EllipticCurvePublicKey) or not isinstance(key.curve, ec.SECP256R1):
-    parser.error('only P256 accessory keys are supported')
-pin = {'algorithm': 'ecdsa-p256-sha256',
-       'certificate_sha256': hashlib.sha256(certificate).hexdigest(),
-       'public_key_der': base64.b64encode(key.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)).decode('ascii')}
+try:
+    info, encoded = certificate_info(certificate), certificate_key(certificate)
+except (ValueError, OSError) as error:
+    parser.error(str(error))
+pin = {'algorithm': info['algorithm'],
+       'certificate_sha256': info['certificate_sha256'],
+       'public_key_der': base64.b64encode(encoded).decode('ascii')}
 Path(args.output).write_text(json.dumps(pin, indent=2) + '\n', encoding='utf-8')

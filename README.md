@@ -11,6 +11,7 @@ connection, visible applications and display settings.
 
 - [Development status and source layout](DEVELOPMENT.md): implementation status, repository structure and historical version notes.
 - [Wireless implementation notes](WIRELESS.md): connection, media and display lifecycle details.
+- [Accessory authentication](ACCESSORY_AUTH.md): legacy RSA and alternate P-256 certificate encodings, Honda investigation and validation limits.
 - [Instrument navigation](NAVIGATION.md): receiver fields, implementation stages and validation limits.
 - [ConnMan fix](connman-patches/README.md): the separate, version-restricted ConnMan patch.
 - [USB history](USB_HISTORY.md): earlier USB transport work.

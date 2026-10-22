@@ -82,12 +82,15 @@ Page {
                     spacing: Theme.paddingSmall
                     Label {
                         width: parent.width
-                        wrapMode: Text.Wrap
-                        textFormat: Text.RichText
+                        textFormat: Text.StyledText
+                        font.pixelSize: Theme.fontSizeExtraSmall
+                        wrapMode: Text.WordWrap
+                        linkColor: Theme.highlightColor
+                        font.letterSpacing: 2;
                         text: "<a href=\"" + modelData.url + "\">" + modelData.name + "</a>"
-                        linkColor: Theme.secondaryColor
                         onLinkActivated: Qt.openUrlExternally(link)
                     }
+
                     Label {
                         width: parent.width
                         text: modelData.detail
