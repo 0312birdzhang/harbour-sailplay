@@ -160,5 +160,13 @@ Musik auf dem Telefon starten</translation>
       <source>Set a location in Weather</source>
       <translation>Ort in Wetter festlegen</translation>
     </message>
+    <message>
+      <source>This player needs to be started on the phone once</source>
+      <translation>Diesen Player einmal auf dem Telefon starten</translation>
+    </message>
+    <message>
+      <source>Could not start the background player</source>
+      <translation>Hintergrundplayer konnte nicht gestartet werden</translation>
+    </message>
   </context>
 </TS>

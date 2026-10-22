@@ -290,7 +290,7 @@ Window {
                 width: parent.width - 64; height: 56; radius: 16; color: carPalette.button
                 visible: !lockscreenMusic.visible
                 Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Open music app"); font.pixelSize: 24; color: carPalette.text }
-                MouseArea { anchors.fill: parent; onClicked: carController.startMusicOnPhone() }
+                MouseArea { anchors.fill: parent; onClicked: carController.ensureMusicBackend() }
             }
         }
     }

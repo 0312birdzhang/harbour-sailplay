@@ -160,5 +160,13 @@ Start music on your phone</source>
       <source>Set a location in Weather</source>
       <translation>Выберите место в приложении «Погода»</translation>
     </message>
+    <message>
+      <source>This player needs to be started on the phone once</source>
+      <translation>Сначала запустите этот плеер на телефоне</translation>
+    </message>
+    <message>
+      <source>Could not start the background player</source>
+      <translation>Не удалось запустить фоновый плеер</translation>
+    </message>
   </context>
 </TS>

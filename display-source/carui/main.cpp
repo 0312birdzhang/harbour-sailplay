@@ -18,6 +18,7 @@
 #include <QDir>
 #include <QDateTime>
 #include <QDBusConnection>
+#include <QDBusConnectionInterface>
 #include <QDBusMessage>
 #include <QDBusPendingCall>
 #include <QDBusVariant>
@@ -434,6 +435,7 @@ class CarUiController : public QObject
     Q_PROPERTY(bool musicActive READ musicActive NOTIFY currentAppChanged)
     Q_PROPERTY(bool hasRememberedMusic READ hasRememberedMusic NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString lastMusicApp READ lastMusicApp NOTIFY rememberedMusicChanged)
+    Q_PROPERTY(QString musicError READ musicError NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString lastMusicName READ lastMusicName NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString dashboardMapApp READ dashboardMapApp NOTIFY dashboardSettingsChanged)
 
@@ -659,59 +661,41 @@ public:
         m_musicActive = true;
         emit currentAppChanged();
     }
-    Q_INVOKABLE void startMusicOnPhone(const QString &requestedId = QString()) {
+    QString musicError() const { return m_musicError; }
+    Q_INVOKABLE bool ensureMusicBackend(const QString &requestedId = QString()) {
         const QString id = requestedId.isEmpty() ? lastMusicApp() : requestedId;
-        if (!findAvailable(id)) return;
-        QDir().mkpath(QFileInfo(uiStatePath()).absolutePath());
+        if (!findAvailable(id)) return false;
+        m_musicError.clear();
         QSettings state(uiStatePath(), QSettings::IniFormat);
         if (state.value(QStringLiteral("MusicApp")).toString() != id) {
             state.setValue(QStringLiteral("MusicApp"), id); state.sync();
+        }
+        emit rememberedMusicChanged();
+        const auto names = QDBusConnection::sessionBus().interface()->registeredServiceNames();
+        if (names.isValid() && !preferredMusicService(names.value()).isEmpty()) return true;
+        QSettings desktop(QStringLiteral("/usr/share/applications/") + id + QStringLiteral(".desktop"), QSettings::IniFormat);
+        const QString backend = desktop.value(QStringLiteral("Desktop Entry/X-Sailplay-BackgroundService")).toString();
+        if (!backend.startsWith(QStringLiteral("org.")) || backend.contains(QLatin1Char('/'))) {
+            m_musicError = tr("This player needs to be started on the phone once");
             emit rememberedMusicChanged();
+            return false;
         }
-        QSettings entry(QStringLiteral("/usr/share/applications/") + id + QStringLiteral(".desktop"), QSettings::IniFormat);
-        const QString service = entry.value(QStringLiteral("Desktop Entry/X-Maemo-Service")).toString();
-        if (!service.isEmpty()) {
-            QDBusMessage owner = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.DBus"),
-                QStringLiteral("/org/freedesktop/DBus"), QStringLiteral("org.freedesktop.DBus"), QStringLiteral("NameHasOwner"));
-            owner << service;
-            const QDBusMessage reply = QDBusConnection::sessionBus().call(owner, QDBus::Block, 500);
-            if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()
-                    && reply.arguments().first().toBool()) {
-                fprintf(stderr, "carui: sharing existing phone music service %s\n", service.toUtf8().constData());
-                return;
+        QDBusMessage activate = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.DBus"),
+            QStringLiteral("/org/freedesktop/DBus"), QStringLiteral("org.freedesktop.DBus"),
+            QStringLiteral("StartServiceByName"));
+        activate << backend << quint32(0);
+        auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(activate), this);
+        connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher]() {
+            const auto reply = watcher->reply();
+            if (reply.type() == QDBusMessage::ErrorMessage) {
+                m_musicError = tr("Could not start the background player");
+                fprintf(stderr, "carui: background music activation failed: %s\n", reply.errorMessage().toUtf8().constData());
+                emit rememberedMusicChanged();
             }
-        }
-        QDBusMessage names = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.DBus"),
-            QStringLiteral("/org/freedesktop/DBus"), QStringLiteral("org.freedesktop.DBus"), QStringLiteral("ListNames"));
-        const QDBusMessage listed = QDBusConnection::sessionBus().call(names, QDBus::Block, 500);
-        if (listed.type() == QDBusMessage::ReplyMessage && !listed.arguments().isEmpty()) {
-            for (const QString &player : listed.arguments().first().toStringList()) {
-                if (!player.startsWith(QStringLiteral("org.mpris.MediaPlayer2."))) continue;
-                QDBusMessage get = QDBusMessage::createMethodCall(player, QStringLiteral("/org/mpris/MediaPlayer2"),
-                    QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
-                get << QStringLiteral("org.mpris.MediaPlayer2") << QStringLiteral("DesktopEntry");
-                const QDBusMessage reply = QDBusConnection::sessionBus().call(get, QDBus::Block, 500);
-                if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()
-                        && qvariant_cast<QDBusVariant>(reply.arguments().first()).variant().toString() == id) {
-                    fprintf(stderr, "carui: sharing existing phone MPRIS %s\n", player.toUtf8().constData());
-                    return;
-                }
-            }
-        }
-        // Use the desktop's normal sailjail/invoker entry rather than the
-        // stripped projection binary. The player stays on lipstick, outside
-        // projection's process group and its disconnect teardown.
-        QString desktop = QStringLiteral("/usr/share/applications/") + id + QStringLiteral(".desktop");
-        desktop.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
-        const QString command = QStringLiteral(
-            "exec env -u CARLIFE_APP_KEY -u QT_IM_MODULE -u QML2_IMPORT_PATH "
-            "XDG_RUNTIME_DIR=/run/user/100000 WAYLAND_DISPLAY=../../display/wayland-0 "
-            "QT_QPA_PLATFORM=wayland /usr/bin/gio launch '") + desktop + QLatin1Char('\'');
-        if (!QProcess::startDetached(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), command})) {
-            m_serviceError = tr("Could not open the music app on the phone");
-            emit serviceRunningChanged();
-        }
-        fprintf(stderr, "carui: music phone desktop launch %s\n", id.toUtf8().constData());
+            watcher->deleteLater();
+        });
+        fprintf(stderr, "carui: activating background music %s without phone window\n", id.toUtf8().constData());
+        return true;
     }
     Q_INVOKABLE QUrl artworkSource(const QUrl &remote, const QUrl &track) {
         if (remote.isLocalFile()) return remote;
@@ -1191,6 +1175,7 @@ private:
     bool m_serviceBusy = false;
     QString m_serviceState = QStringLiteral("unknown");
     QString m_serviceError;
+    QString m_musicError;
     bool m_serviceQueryPending = false;
     bool m_reconnectPending = false;
     bool m_reconnectQueryPending = false;
@@ -1263,7 +1248,7 @@ private:
                   const QString &name)
     {
         if (isMusicApp(appId)) {
-            startMusicOnPhone(appId);
+            ensureMusicBackend(appId);
             moveToFront(appId);
             openMusic();
             emit dockChanged();

@@ -32,8 +32,8 @@ Item {
         }
         controls.pendingApp = carController.lastMusicApp
         controls.pendingTicks = 0
-        carController.startMusicOnPhone(controls.pendingApp)
-        pendingPlay.restart()
+        if (carController.ensureMusicBackend(controls.pendingApp))
+            pendingPlay.restart()
     }
     Timer {
         id: pendingPlay; interval: 250; repeat: true
@@ -85,7 +85,7 @@ Item {
         Text {
             width: parent.width; color: carPalette.secondary; font.pixelSize: 26
             elide: Text.ElideRight
-            text: controls.idleCard ? carController.lastMusicName : (player.metaData.contributingArtist || "").toString()
+            text: controls.idleCard ? (carController.musicError || carController.lastMusicName) : (player.metaData.contributingArtist || "").toString()
         }
         Text {
             width: parent.width; color: carPalette.secondary; font.pixelSize: 22

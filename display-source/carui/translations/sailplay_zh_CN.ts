@@ -160,5 +160,13 @@ Start music on your phone</source>
       <source>Set a location in Weather</source>
       <translation>请在天气中设置位置</translation>
     </message>
+    <message>
+      <source>This player needs to be started on the phone once</source>
+      <translation>此播放器需要先在手机上启动一次</translation>
+    </message>
+    <message>
+      <source>Could not start the background player</source>
+      <translation>无法启动后台播放器</translation>
+    </message>
   </context>
 </TS>

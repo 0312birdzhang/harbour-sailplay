@@ -160,5 +160,13 @@ Lancez la musique sur votre téléphone</translation>
       <source>Set a location in Weather</source>
       <translation>Définir un lieu dans Météo</translation>
     </message>
+    <message>
+      <source>This player needs to be started on the phone once</source>
+      <translation>Démarrez ce lecteur une fois sur le téléphone</translation>
+    </message>
+    <message>
+      <source>Could not start the background player</source>
+      <translation>Impossible de démarrer le lecteur en arrière-plan</translation>
+    </message>
   </context>
 </TS>
