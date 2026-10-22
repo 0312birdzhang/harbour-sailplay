@@ -38,3 +38,17 @@ class PrivateMuteTests(unittest.TestCase):
             self.assertIn(call('set-sink-input-volume','1','15246'),mocked.call_args_list)
             self.assertIn(call('set-sink-input-mute','1','0'),mocked.call_args_list)
             self.assertFalse(any('2' in c.args for c in mocked.call_args_list))
+
+    def test_only_droid_hal_sinks_are_muted(self):
+        listing = ('0\tsink.primary_output\tmodule-alsa-sink.c\ts16le 2ch 48000Hz\tRUNNING\n'
+                   '1\tsink.null\tmodule-null-sink.c\ts16le 2ch 48000Hz\tSUSPENDED\n'
+                   '2\tsink.primary\tmodule-droid-card.c\ts16le 2ch 48000Hz\tIDLE\n'
+                   '3\tsailplay_cast_9\tmodule-null-sink.c\ts16le 2ch 48000Hz\tRUNNING\n')
+        # Muting an ALSA primary output makes the policy attenuate the cast sink.
+        self.assertEqual(pulse.hardware_sinks(listing), ['sink.primary'])
+
+    def test_capture_never_makes_the_private_sink_the_default(self):
+        # A default private sink lets the Sailfish policy attenuate its streams.
+        import inspect
+        source = inspect.getsource(pulse.main)
+        self.assertNotIn("pactl('set-default-sink',name)", source)

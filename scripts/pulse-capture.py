@@ -115,6 +115,19 @@ def restore_private_inputs(state):
         except subprocess.SubprocessError:pass
 
 
+# Only Droid HAL sinks are muted during casting. Ports whose primary output
+# is a plain ALSA sink (sink.primary_output via module-alsa-sink) are left
+# alone: muting it makes the Sailfish audio policy attenuate the streams on
+# the private sink (measured: a steady tone fell from full scale to ~2%).
+HARDWARE_SINK_MODULES=('module-droid-card.c',)
+
+
+def hardware_sinks(short_sinks):
+    """Phone output sinks that are muted while casting (Droid HAL sinks)."""
+    return [fields[1] for fields in (line.split() for line in short_sinks.splitlines())
+            if len(fields)>2 and fields[2] in HARDWARE_SINK_MODULES]
+
+
 def restore_outputs():
     try:
         with open(ROUTE_STATE) as source:state=json.load(source)
@@ -248,19 +261,21 @@ def main():
         default_sink=pactl('get-default-sink').strip()
         # Policy modules may initially select a hardware sink before the
         # stream-created notification reaches us. Keep that output silent.
-        for line in pactl('list','short','sinks').splitlines():
-            fields=line.split()
-            if len(fields)>2 and fields[2]=='module-droid-card.c':
-                sink=fields[1]
-                sink_mutes[sink]=pactl('get-sink-mute',sink).strip().endswith('yes')
+        for sink in hardware_sinks(pactl('list','short','sinks')):
+            sink_mutes[sink]=pactl('get-sink-mute',sink).strip().endswith('yes')
         os.makedirs(os.path.dirname(ROUTE_STATE),exist_ok=True)
         all_volumes=hardware_volumes(pactl('list','sinks'))
         recovery={'default':default_sink,'cast':name,'mutes':sink_mutes,
                   'volumes':{sink:all_volumes[sink] for sink in sink_mutes if sink in all_volumes},'streams':{}}
         save_recovery(recovery)
-        pactl('set-default-sink',name)
+        # The default sink is deliberately left alone: making the private
+        # sink the default lets the Sailfish audio policy attenuate every
+        # stream on it (measured: a steady tone fell from full scale to ~2%),
+        # so the car received near silence. Streams are moved by route()
+        # as soon as they appear.
         for sink in sink_mutes:pactl('set-sink-mute',sink,'1')
-        print('CarPlay default output selected; phone hardware outputs protected',file=sys.stderr,flush=True)
+        print('CarPlay output routing active; phone hardware outputs protected: '+(','.join(sink_mutes) or 'none'),
+              file=sys.stderr,flush=True)
         loop=lib.pa_mainloop_new();context=lib.pa_context_new(lib.pa_mainloop_get_api(loop),b'Sailplay monitor')
         if lib.pa_context_connect(context,None,0,None)<0:raise RuntimeError('PulseAudio connect failed')
         wait_state(context,lib.pa_context_get_state,4)
