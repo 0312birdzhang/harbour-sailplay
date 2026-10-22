@@ -433,6 +433,7 @@ class CarUiController : public QObject
     Q_PROPERTY(QString dayStart READ dayStart NOTIFY themeSettingsChanged)
     Q_PROPERTY(QString nightStart READ nightStart NOTIFY themeSettingsChanged)
     Q_PROPERTY(bool musicActive READ musicActive NOTIFY currentAppChanged)
+    Q_PROPERTY(bool returnToDashboard READ returnToDashboard NOTIFY currentAppChanged)
     Q_PROPERTY(bool hasRememberedMusic READ hasRememberedMusic NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString lastMusicApp READ lastMusicApp NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString musicError READ musicError NOTIFY rememberedMusicChanged)
@@ -519,6 +520,7 @@ public:
     QString currentApp() const { return m_currentApp; }
     bool dashboardActive() const { return m_dashboardActive; }
     bool musicActive() const { return m_musicActive; }
+    bool returnToDashboard() const { return m_returnToDashboard; }
     static QString dashboardConfigPath() {
         return QDir::homePath() + QStringLiteral("/.config/sailplay/dashboard.ini");
     }
@@ -638,6 +640,7 @@ public:
         if (state.value(QStringLiteral("View")).toString() == QLatin1String("dashboard")) openDashboard();
     }
     Q_INVOKABLE void openDashboard() {
+        m_returnToDashboard = true;
         m_musicActive = false;
         if (!m_currentApp.isEmpty()) hideCurrent();
         m_dashboardActive = true;
@@ -656,6 +659,7 @@ public:
         emit currentAppChanged();
     }
     Q_INVOKABLE void openMusic() {
+        rememberShellOrigin();
         if (!m_currentApp.isEmpty()) hideCurrent();
         writeCmd(QStringLiteral("H"));
         m_dashboardActive = false;
@@ -1019,23 +1023,23 @@ public:
 
     Q_INVOKABLE void homeClicked()
     {
-        if (m_dashboardActive || m_musicActive) {
-            writeCmd(QStringLiteral("H"));
-            m_dashboardActive = false;
-            m_musicActive = false;
-            saveShellView(QStringLiteral("apps"));
-            emit currentAppChanged();
-            return;
-        }
-        if (m_currentApp.isEmpty()) {
+        if (!m_dashboardActive && (m_musicActive || !m_currentApp.isEmpty())) {
+            if (m_returnToDashboard) {
+                openDashboard();
+                return;
+            }
+            if (!m_currentApp.isEmpty()) hideCurrent();
+            else writeCmd(QStringLiteral("H"));
+        } else if (!m_dashboardActive) {
             openDashboard();
             return;
+        } else {
+            writeCmd(QStringLiteral("H"));
         }
-        const QString appId = m_currentApp;
-        hideCurrent();
+        m_dashboardActive = false;
+        m_musicActive = false;
+        m_returnToDashboard = false;
         saveShellView(QStringLiteral("apps"));
-        fprintf(stderr, "carui: home (hid %s)\n",
-                appId.toUtf8().constData());
         emit currentAppChanged();
     }
 
@@ -1187,6 +1191,7 @@ private:
     QString m_themeSchedule;
     bool m_dashboardActive = false;
     bool m_musicActive = false;
+    bool m_returnToDashboard = false;
     QNetworkAccessManager *m_artworkNetwork = nullptr;
     QSet<QString> m_artworkPending;
     QMap<QString, qint64> m_appPids;
@@ -1268,6 +1273,10 @@ private:
     // CarPlay semantics: the tapped app replaces whatever is on screen; a
     // hidden app comes back instead of being launched twice (native apps
     // launched as bare binaries have no single-instance guard).
+    void rememberShellOrigin() {
+        if (m_dashboardActive) m_returnToDashboard = true;
+        else if (!m_musicActive && m_currentApp.isEmpty()) m_returnToDashboard = false;
+    }
     void activate(const QString &appId, const QString &exec,
                   const QString &name)
     {
@@ -1278,7 +1287,12 @@ private:
             emit dockChanged();
             return;
         }
-        if (m_dashboardActive || m_musicActive) homeClicked();
+        rememberShellOrigin();
+        if (m_dashboardActive || m_musicActive) {
+            writeCmd(QStringLiteral("H"));
+            m_dashboardActive = false;
+            m_musicActive = false;
+        }
         if (appId == m_currentApp)
             return;   // already on screen
         if (m_hiddenApps.contains(appId)) {

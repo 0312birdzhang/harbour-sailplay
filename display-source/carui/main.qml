@@ -86,8 +86,8 @@ Window {
         }
         Rectangle {
             x: 25; y: parent.height - 108; width: 90; height: 86; radius: 22; color: homeTouch.pressed ? carPalette.pressed : "transparent"
-            Grid { visible: carController.dashboardActive || carController.musicActive || carController.currentApp !== ""; anchors.centerIn: parent; columns: 3; spacing: 5; Repeater { model: 9; Rectangle { width: 11; height: 11; radius: 3; color: carPalette.text } } }
-            Text { visible: !carController.dashboardActive && !carController.musicActive && carController.currentApp === ""; anchors.centerIn: parent; text: "◫"; color: carPalette.text; font.pixelSize: 42 }
+            Grid { id: homeGrid; visible: carController.dashboardActive || (!carController.returnToDashboard && (carController.musicActive || carController.currentApp !== "")); anchors.centerIn: parent; columns: 3; spacing: 5; Repeater { model: 9; Rectangle { width: 11; height: 11; radius: 3; color: carPalette.text } } }
+            Text { visible: !homeGrid.visible; anchors.centerIn: parent; text: "◫"; color: carPalette.text; font.pixelSize: 42 }
             MouseArea { id: homeTouch; anchors.fill: parent; onClicked: carController.homeClicked() }
         }
     }

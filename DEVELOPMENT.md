@@ -8,6 +8,14 @@ See [WIRELESS.md](WIRELESS.md) for wireless implementation details and
 
 ## Current status
 
+Version 0.1.1-45 remembers which shell page opened an app. Map/music opened from
+split dashboard return there via the bottom-left button; apps opened from the
+app grid return to the grid. Switching between apps keeps that origin, while
+pressing the button on the dashboard/grid itself still toggles the two pages.
+The button icon reflects the return target. The device controller regression
+`tests/shell_return_probe.qml` covers map/music returns and switching in both
+directions. The full-page music-position regression also passes.
+
 Version 0.1.1-10 removes the music-app selector from phone settings. Both car music layouts follow the active MPRIS player, independent of any old music binding. Map selection remains. Audio/Music desktop categories identify phone-side music shortcuts; the old music ID is used only to recognize an existing shortcut for compatibility, not to choose the player or launch target.
 
 Version 0.1.1-9 renders artwork, metadata, playback buttons and progress from the same explicit Amber.Mpris controller. The car music page and dashboard no longer depend on the lock-screen loader's dynamically reparented item. A missing player hides both controls and progress; unavailable previous/next buttons remain dimmed. The configured music app is a launch shortcut, while playback data follows the current MPRIS player, including other compatible music apps.
