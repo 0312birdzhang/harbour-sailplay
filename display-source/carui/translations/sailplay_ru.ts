@@ -137,6 +137,10 @@ Start music on your phone</source>
     <message><source>Night theme starts</source><translation>Начало ночной темы</translation></message>
     <message><source>Switches automatically using phone local time. Changes apply immediately to the car display.</source><translation>Автоматическое переключение по местному времени телефона. Изменения применяются сразу.</translation></message>
     <message><source>Choose different day and night times</source><translation>Выберите разное время начала дня и ночи</translation></message>
+    <message>
+      <source>Not Playing</source>
+      <translation>Не воспроизводится</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

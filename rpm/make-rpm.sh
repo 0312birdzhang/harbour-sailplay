@@ -26,4 +26,4 @@ cp "$REPO/rpm/sailplay-reconnect.service" "$STAGE/rpm/"
 cd "$WORK"
 tar cjf harbour-sailplay-0.1.1.tar.bz2 harbour-sailplay-0.1.1
 rpmbuild -ta --target aarch64 --define 'debug_package %{nil}' --define '__os_install_post %{nil}' harbour-sailplay-0.1.1.tar.bz2
-test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.1-39.aarch64.rpm"
+test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.1-40.aarch64.rpm"

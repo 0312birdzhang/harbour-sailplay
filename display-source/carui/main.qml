@@ -209,7 +209,7 @@ Window {
                 z: 2
                 x: 32; width: parent.width - 64; height: carController.musicActive ? 112 : 90
                 y: lockscreenMusic.y + lockscreenMusic.height + 4
-                visible: lockscreenMusic.visible
+                visible: lockscreenMusic.visible && !lockscreenMusic.idleCard
                 property var player: lockscreenMusic.mprisController
                 // Amber.Mpris exposes both position and metadata duration in milliseconds.
                 property real durationSeconds: player ? Math.max(0, Number(player.metaData.duration || 0) / 1000) : 0
