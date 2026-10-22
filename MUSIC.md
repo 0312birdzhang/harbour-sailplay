@@ -78,3 +78,8 @@ Separate open issue: the pre-existing Mconnect native audio startup can select
 maximum system volume on this phone (also reproduced using digital silence).
 Experimental volume guards did not pass device checks and are not shipped.
 The original audio implementation and packaged library were preserved exactly.
+
+In Sailplay 0.1.1-43, a paused player retains its track metadata, artwork and
+controls on the compact dashboard card. Only non-playing, non-paused states
+show Not Playing. The device check confirmed a real paused Mconnect player
+has idleCard=false, a track title and CanPlay=true without starting playback.

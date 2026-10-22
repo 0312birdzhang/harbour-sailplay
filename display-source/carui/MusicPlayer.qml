@@ -10,7 +10,7 @@ Item {
     property url albumArtSource
     property bool compact: false
     readonly property bool playing: player.playbackStatus === Mpris.Playing
-    readonly property bool idleCard: compact && !playing
+    readonly property bool idleCard: compact && !playing && player.playbackStatus !== Mpris.Paused
     readonly property real _squareSize: compact ? 72 : 88
     readonly property real headerHeight: compact ? 120 : 164
     signal clicked()
