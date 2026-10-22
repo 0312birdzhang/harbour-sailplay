@@ -8,6 +8,18 @@ def request_wifi_configuration():
     return Frame(0x5702, b'')
 
 
+def peer_supports_wifi_configuration_request(received_message_ids):
+    """Return whether sending the optional 0x5702 request is safe.
+
+    Some head units start wireless handover from WirelessCarPlayUpdate and do
+    not implement the explicit request. Sending an unadvertised 0x5702 makes
+    those units restart iAP2 before sending CarPlayStartSession. An empty set
+    preserves the legacy behavior for peers that omit their capability list.
+    """
+    received_message_ids = set(received_message_ids)
+    return not received_message_ids or 0x5702 in received_message_ids
+
+
 class WifiConfiguration:
     __slots__ = ('ssid', 'passphrase', 'security', 'channel')
 

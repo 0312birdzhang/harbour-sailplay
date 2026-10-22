@@ -26,7 +26,10 @@ from carplay_proto.iap2link import (ACK, DETECT, EAK, RST, SYN, Decoder,
                                    synchronization)
 from carplay_proto.wire import Frame, Framer, encode_param
 from carplay_proto.accessoryauth import PinnedAccessory, paired_accessory
-from carplay_proto.wireless import parse_wifi_configuration, request_wifi_configuration, parse_start_session
+from carplay_proto.wireless import (parse_wifi_configuration,
+                                    peer_supports_wifi_configuration_request,
+                                    request_wifi_configuration,
+                                    parse_start_session)
 
 PHONE_UUID = '00000000-deca-fade-deca-deafdecacafe'
 ACCESSORY_UUID = '00000000-deca-fade-deca-deafdecacaff'
@@ -247,8 +250,13 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                                                    encode_param(1, wireless)))
                                             logging.info('HU advertises 4300; diagnostic grouped CarPlayAvailability queued')
                                         logging.info('DIAGNOSTIC wireless capability notification queued; no media sender yet')
-                                    outgoing.append(request_wifi_configuration())
-                                    logging.info('pinned accessory challenge signature VERIFIED; requesting Wi-Fi config')
+                                    if peer_supports_wifi_configuration_request(peer_received_messages):
+                                        outgoing.append(request_wifi_configuration())
+                                        logging.info('pinned accessory challenge signature VERIFIED; requesting Wi-Fi config')
+                                    else:
+                                        logging.info('pinned accessory challenge signature VERIFIED; '
+                                                     'waiting for notification-driven Wi-Fi handover '
+                                                     '(peer does not advertise 0x5702)')
                                 elif frame.message_id == 0x5703:
                                     if not authenticated:
                                         raise ValueError('Wi-Fi credentials arrived before authentication')
