@@ -8,6 +8,7 @@ import plistlib
 import os
 import stat
 import copy
+import queue
 from . import crypto
 from .controlcipher import ControlCipher
 from .rtspclient import EncryptedSocket, connect
@@ -219,8 +220,9 @@ class UiCommands:
 
 class ScreenFeedback:
     """Keep control requests away from the video producer's critical path."""
-    def __init__(self,client,commands=None,modes=None,resume=None,screen=None,resource_changed=None,audio=None,duck=None,mode_lock=None,mode_revision=None):
+    def __init__(self,client,commands=None,modes=None,resume=None,screen=None,resource_changed=None,audio=None,duck=None,mode_lock=None,mode_revision=None,iap_outbound=None):
         self.client=client
+        self.iap_outbound=iap_outbound
         self.commands=commands
         self.modes=modes
         self.resume=resume
@@ -238,6 +240,7 @@ class ScreenFeedback:
         next_feedback=time.monotonic()+2
         while not self.stop.wait(0.1):
             try:
+                self.send_iap()
                 returning=self.commands and self.commands.return_requested()
                 resuming=(self.resume is not None and self.resume.is_set()) or (self.commands and self.commands.resume.is_set())
                 changed=self.resource_changed is not None and self.resource_changed.is_set()
@@ -291,6 +294,22 @@ class ScreenFeedback:
                 self.stop.set()
                 return
 
+    def send_iap(self):
+        # This thread owns the control connection, so tunnelled iAP2 bytes
+        # for the head unit are sent from here.
+        if self.iap_outbound is None:
+            return
+        while True:
+            try:
+                data=self.iap_outbound.get_nowait()
+            except queue.Empty:
+                return
+            status,_,body=self.client.request('POST','/command',plistlib.dumps(
+                {'type':'iAPSendMessage','params':{'data':data}},fmt=plistlib.FMT_BINARY),
+                {'Content-Type':'application/x-apple-binary-plist'})
+            result=plistlib.loads(body).get('status',0) if body else 0
+            print('iAP tunnel sent bytes={} HTTP={} status={}'.format(len(data),status,result),flush=True)
+
     def close(self):
         self.stop.set()
         self.thread.join(6)
@@ -309,7 +328,7 @@ def disable_bluetooth(client,address):
     if status!=200 or result!=0:raise RuntimeError('Bluetooth handoff rejected')
 
 
-def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=15,live=False,on_activity=None,bluetooth_address=None):
+def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=15,live=False,on_activity=None,bluetooth_address=None,iap_link=None):
     display = info['displays'][0]
     pipeline = None
     width,height,fps=1920,720,30
@@ -332,7 +351,18 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                         {'appStateID':2,'entity':0},{'appStateID':3,'entity':0}],
            'resources':[{'resourceID':r,'entity':1,'permanentEntity':1} for r in (1,2)]}
     keyframe_request=[0.0]
+    iap_outbound=queue.Queue()
+    iap_tunnel=None
+    if iap_link:
+        from .iaptunnel import IAPTunnel
+        iap_tunnel=IAPTunnel(iap_link,iap_outbound.put)
     def event_command(value):
+        if value.get('type')=='iAPSendMessage' and iap_tunnel:
+            from .iaptunnel import tunnel_payload
+            data=tunnel_payload(value)
+            if data:
+                iap_tunnel.feed(data)
+            return {'status':0}
         if value.get('type')=='forceKeyFrame':
             now=time.monotonic()
             if pipeline is not None and now-keyframe_request[0]>=0.5:
@@ -461,7 +491,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             from .screenstream import ScreenStream
             screen=ScreenStream(client,address,interface,shared,display,video,stream_id,width,height,
                                 request_keyframe=pipeline.request_keyframe)
-            feedback=ScreenFeedback(client,commands,modes,resume,screen,resource_changed,audio,duck,mode_lock,mode_revision)
+            feedback=ScreenFeedback(client,commands,modes,resume,screen,resource_changed,audio,duck,mode_lock,mode_revision,
+                                    iap_outbound if iap_tunnel else None)
         if live:
             import itertools
             source = itertools.chain([first_live_frame],source)
@@ -521,6 +552,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                 print('Demo video sent {} frames in {:.2f}s'.format(count,time.monotonic()-start),flush=True)
         print('Demo complete: {} frames'.format(count),flush=True)
     finally:
+        if iap_tunnel:
+            iap_tunnel.close()
         if media:media.close()
         if power:
             power.close()

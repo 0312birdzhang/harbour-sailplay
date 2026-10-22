@@ -97,7 +97,10 @@ Honda Civic head unit. These are field notes, not a specification.
   the running projection survives.
 - Video only shows with iOS-style screen packet headers (timestamp, display
   size and IDR flag on every packet).
-- Open issue: during projection the head unit sends an iAPSendMessage event
-  about once a second, which Sailplay does not answer. It then ends every
-  session about 26 s after the first video frame. The payloads are now logged
-  so the tunnelled iAP2 traffic can be identified.
+- During projection it restarts iAP2 inside the AirPlay session: about once a
+  second it sends an iAPSendMessage event whose 94-byte plist matches
+  `{type: iAPSendMessage, params: {data: <iAP2 detect, 6 bytes>}}`. When
+  nothing answered, it ended every session about 26 s after the first video
+  frame. Sailplay now runs the same phone-side iAP2 link over this channel
+  (detect, link sync, identification, authentication against the Bluetooth
+  pin) and answers with iAPSendMessage commands. Not yet tested in the car.

@@ -10,6 +10,20 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+def airplay_iap_link(local_name):
+    """Return the iAP2 link runner for iAPSendMessage, or None if unavailable."""
+    import importlib.util
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wireless-probe.py')
+        spec = importlib.util.spec_from_file_location('sailplay_wireless_probe', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except Exception as error:
+        print('iAP tunnel unavailable: {}'.format(type(error).__name__), flush=True)
+        return None
+    return lambda sock, stop: module.airplay_link(sock, stop, local_name)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--session', default='/tmp/sailplay-session.json')
@@ -372,7 +386,8 @@ def main():
                         run_demo(client,address,interface,verified.shared,setup_info,info,demo_path,
                                  seconds=(0 if args.sustained else 45) if live_ui else 15,live=live_ui,
                                  on_activity=lambda:os.utime(restore_clock,None),
-                                 bluetooth_address=session.get('bluetooth_address'))
+                                 bluetooth_address=session.get('bluetooth_address'),
+                                 iap_link=airplay_iap_link(session.get('device_name') or 'SailfishOS'))
                         break
             except Exception as error:
                 print('AirPlay probe failed: {}, errno={}'.format(type(error).__name__, getattr(error, 'errno', None)), flush=True)

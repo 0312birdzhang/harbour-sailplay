@@ -142,7 +142,8 @@ def touch_handover_heartbeat():
 
 def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
           announce_wireless=False, local_address=None, session_out=None, wifi_handover=False,sustained=False,
-          local_name='SailfishOS', paired_pin_path=None, on_authenticated=None):
+          local_name='SailfishOS', paired_pin_path=None, on_authenticated=None,
+          transport='bluetooth'):
     handover_started = False
     handover_command = None
     def retry_handover():
@@ -346,22 +347,27 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                                                    encode_param(1, wireless)))
                                             logging.info('HU advertises 4300; diagnostic grouped CarPlayAvailability queued')
                                         logging.info('DIAGNOSTIC wireless capability notification queued; no media sender yet')
-                                    for protocol_id, protocol_name in ea_protocols:
-                                        if 0xea00 not in peer_received_messages:
-                                            logging.info('accessory does not receive 0xea00; skipping EA protocol=%d name=%r',
-                                                         protocol_id, protocol_name)
-                                            continue
-                                        outgoing.append(Frame(0xea00, encode_param(0, bytes([protocol_id])) +
-                                                              encode_param(1, struct.pack('>H', protocol_id))))
-                                        logging.info('EA session requested protocol=%d session=%d name=%r',
-                                                     protocol_id, protocol_id, protocol_name)
-                                    if peer_supports_wifi_configuration_request(peer_received_messages):
-                                        outgoing.append(request_wifi_configuration())
-                                        logging.info('pinned accessory challenge signature VERIFIED; requesting Wi-Fi config')
+                                    if transport == 'airplay':
+                                        # Wi-Fi is already up; only the link and
+                                        # authentication are needed here.
+                                        logging.info('iAP2 over AirPlay: accessory authenticated')
                                     else:
-                                        logging.info('pinned accessory challenge signature VERIFIED; '
-                                                     'waiting for notification-driven Wi-Fi handover '
-                                                     '(peer does not advertise 0x5702)')
+                                        for protocol_id, protocol_name in ea_protocols:
+                                            if 0xea00 not in peer_received_messages:
+                                                logging.info('accessory does not receive 0xea00; skipping EA protocol=%d name=%r',
+                                                             protocol_id, protocol_name)
+                                                continue
+                                            outgoing.append(Frame(0xea00, encode_param(0, bytes([protocol_id])) +
+                                                                  encode_param(1, struct.pack('>H', protocol_id))))
+                                            logging.info('EA session requested protocol=%d session=%d name=%r',
+                                                         protocol_id, protocol_id, protocol_name)
+                                        if peer_supports_wifi_configuration_request(peer_received_messages):
+                                            outgoing.append(request_wifi_configuration())
+                                            logging.info('pinned accessory challenge signature VERIFIED; requesting Wi-Fi config')
+                                        else:
+                                            logging.info('pinned accessory challenge signature VERIFIED; '
+                                                         'waiting for notification-driven Wi-Fi handover '
+                                                         '(peer does not advertise 0x5702)')
                                 elif frame.message_id == 0x4e01:
                                     logging.info('Bluetooth component information body=%s', payload_hex(frame.body))
                                 elif frame.message_id == 0x4e03:
@@ -417,6 +423,25 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
         logging.exception('probe failed')
     finally:
         sock.close()
+
+
+def airplay_link(sock, stop, local_name='SailfishOS',
+                 accessory_directory='/var/lib/sailplay/accessories'):
+    """Run the phone side of an iAP2 link tunnelled through AirPlay.
+
+    Authenticates the accessory against the pin saved for the last head unit
+    over Bluetooth. No Wi-Fi request or handover: Wi-Fi is already in use.
+    """
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                            format='iAP tunnel: %(message)s')
+    device = previous_head_unit()
+    pin_path = (os.path.join(accessory_directory, device.rsplit('/', 1)[1] + '.json')
+                if device else None)
+    logging.info('starting over AirPlay; accessory pin=%s', pin_path)
+    probe(sock, stop, 0, local_name=local_name, paired_pin_path=pin_path,
+          transport='airplay')
 
 
 def main():
