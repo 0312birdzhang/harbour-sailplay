@@ -21,7 +21,7 @@ def tunnel_payload(value):
 
 
 class IAPTunnel:
-    def __init__(self, run_link, send, max_starts=10):
+    def __init__(self, run_link, send, max_starts=30):
         # run_link(sock, stop) runs one iAP2 link and returns when it ends.
         self.run_link, self.send, self.max_starts = run_link, send, max_starts
         self.lock = threading.Lock()
@@ -56,7 +56,8 @@ class IAPTunnel:
             self.local.close()
         self.local, remote = socket.socketpair()
         self.link_stop = threading.Event()
-        self.link = threading.Thread(target=self._run, args=(remote, self.link_stop), daemon=True)
+        self.link = threading.Thread(target=self._run, args=(remote, self.link_stop), daemon=True,
+                                     name='iAP tunnel link {}'.format(self.starts))
         threading.Thread(target=self._pump, args=(self.local,), daemon=True).start()
         self.link.start()
         print('iAP tunnel: link started (attempt {})'.format(self.starts), flush=True)

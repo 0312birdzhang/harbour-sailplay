@@ -59,9 +59,9 @@ class TunnelPayloadTests(unittest.TestCase):
             tunnel.close()
 
 
-class FeedbackSendTests(unittest.TestCase):
-    def test_feedback_thread_sends_queued_iap_bytes(self):
-        from carplay_proto.videodemo import ScreenFeedback
+class SendTests(unittest.TestCase):
+    def test_send_iap_posts_command(self):
+        from carplay_proto.videodemo import send_iap
         requests = []
 
         class Client:
@@ -69,18 +69,68 @@ class FeedbackSendTests(unittest.TestCase):
                 requests.append((method, path, body))
                 return 200, {}, b''
 
-        outbound = queue.Queue()
-        feedback = ScreenFeedback(Client(), iap_outbound=outbound)
-        try:
-            outbound.put(DETECT)
-            end = time.monotonic() + 2
-            while not requests and time.monotonic() < end:
-                time.sleep(0.02)
-        finally:
-            feedback.close()
+        send_iap(Client(), DETECT)
         method, path, body = requests[0]
         self.assertEqual((method, path), ('POST', '/command'))
         self.assertEqual(plistlib.loads(body), {'type': 'iAPSendMessage', 'params': {'data': DETECT}})
+
+    def test_send_failure_is_reported_not_raised(self):
+        from carplay_proto.videodemo import send_iap
+
+        class Client:
+            def request(self, *args, **kwargs):
+                raise EOFError('RTSP peer closed')
+
+        send_iap(Client(), DETECT)
+
+    def test_requests_from_threads_do_not_interleave(self):
+        from carplay_proto.rtspclient import RTSPClient
+        client = RTSPClient(None)
+        active, overlaps = [0], []
+
+        def fake(method, path, body=b'', headers=None):
+            active[0] += 1
+            overlaps.append(active[0])
+            time.sleep(0.01)
+            active[0] -= 1
+            return 200, {}, b''
+
+        client._request = fake
+        workers = [threading.Thread(target=client.request, args=('POST', '/command')) for _ in range(8)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+        self.assertEqual(max(overlaps), 1)
+
+
+class NotificationTests(unittest.TestCase):
+    def test_only_messages_the_accessory_receives(self):
+        frames = probe_module.device_notifications('Phone', 'AA:BB:CC:DD:EE:FF', {0x4e09, 0x4e0d})
+        self.assertEqual([f.message_id for f in frames], [0x4e09, 0x4e0d])
+        self.assertEqual(frames[0].parameters()[0].payload, b'Phone\x00')
+
+    def test_tunnel_thread_lines_are_prefixed(self):
+        import io, logging, sys
+        from carplay_proto.runtime_logging import log_to_stdout
+        stream, saved = io.StringIO(), sys.stdout
+        root = logging.getLogger()
+        handlers, level = list(root.handlers), root.level
+        try:
+            sys.stdout = stream
+            log_to_stdout()
+            logging.info('main')
+            worker = threading.Thread(target=logging.info, args=('link',), name='iAP tunnel link 1')
+            worker.start()
+            worker.join()
+        finally:
+            sys.stdout = saved
+            for handler in list(root.handlers):
+                root.removeHandler(handler)
+            for handler in handlers:
+                root.addHandler(handler)
+            root.setLevel(level)
+        self.assertEqual(stream.getvalue(), 'main\niAP tunnel: link\n')
 
 
 @unittest.skipIf(rsa is None, 'needs python cryptography')
@@ -109,7 +159,8 @@ class AirPlayLinkTests(unittest.TestCase):
             with mock.patch.object(probe_module, 'previous_head_unit',
                                    return_value='/org/bluez/hci0/dev_74_D7_CA_65_F7_1B'):
                 tunnel = IAPTunnel(lambda sock, stop: probe_module.airplay_link(
-                    sock, stop, accessory_directory=directory), to_car.put)
+                    sock, stop, 'Galaxy Note 10+', 'AA:BB:CC:DD:EE:FF',
+                    accessory_directory=directory), to_car.put)
                 try:
                     tunnel.feed(DETECT)
                     self.assertEqual(receive(), DETECT)
@@ -141,9 +192,24 @@ class AirPlayLinkTests(unittest.TestCase):
                     succeeded = receive()
                     self.assertEqual(frame_of(succeeded).message_id, 0xaa05)
                     tunnel.feed(encode(Packet(ACK, 0x43, succeeded.sequence, 0, None)))
-                    # Wi-Fi is already up: no Wi-Fi configuration request follows.
+                    # Then the device updates an iPhone sends, in order...
+                    notified = []
+                    for _ in range(4):
+                        packet = receive()
+                        frame = frame_of(packet)
+                        notified.append(frame.message_id)
+                        tunnel.feed(encode(Packet(ACK, 0x43, packet.sequence, 0, None)))
+                    self.assertEqual(notified, [0x4e0c, 0x4e09, 0x4e0e, 0x4e0d])
+                    # ...and no Wi-Fi configuration request: Wi-Fi is already up.
                     with self.assertRaises(queue.Empty):
                         to_car.get(timeout=1.2)
+                    # A DETECT on the established link means the head unit
+                    # restarted: that link ends and the next DETECT is answered.
+                    tunnel.feed(DETECT)
+                    time.sleep(0.3)
+                    tunnel.feed(DETECT)
+                    self.assertEqual(to_car.get(timeout=3), DETECT)
+                    self.assertEqual(tunnel.starts, 2)
                 finally:
                     tunnel.close()
 

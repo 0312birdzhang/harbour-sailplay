@@ -10,7 +10,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def airplay_iap_link(local_name):
+def airplay_iap_link(local_name, local_address=None):
     """Return the iAP2 link runner for iAPSendMessage, or None if unavailable."""
     import importlib.util
     try:
@@ -21,7 +21,7 @@ def airplay_iap_link(local_name):
     except Exception as error:
         print('iAP tunnel unavailable: {}'.format(type(error).__name__), flush=True)
         return None
-    return lambda sock, stop: module.airplay_link(sock, stop, local_name)
+    return lambda sock, stop: module.airplay_link(sock, stop, local_name, local_address)
 
 
 def main():
@@ -68,6 +68,8 @@ def main():
         sys.stderr = sys.stdout
     from carplay_proto.runtime_logging import persist_output
     persist_output('wifi-restore' if args.restore else 'wifi-airplay')
+    from carplay_proto.runtime_logging import log_to_stdout
+    log_to_stdout()
     if not 10 <= args.restore_after <= 120:
         parser.error('restore-after must be 10..120 seconds')
     import dbus
@@ -387,7 +389,8 @@ def main():
                                  seconds=(0 if args.sustained else 45) if live_ui else 15,live=live_ui,
                                  on_activity=lambda:os.utime(restore_clock,None),
                                  bluetooth_address=session.get('bluetooth_address'),
-                                 iap_link=airplay_iap_link(session.get('device_name') or 'SailfishOS'))
+                                 iap_link=airplay_iap_link(session.get('device_name') or 'SailfishOS',
+                                                           session.get('bluetooth_address')))
                         break
             except Exception as error:
                 print('AirPlay probe failed: {}, errno={}'.format(type(error).__name__, getattr(error, 'errno', None)), flush=True)

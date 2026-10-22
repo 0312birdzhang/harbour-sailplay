@@ -1,11 +1,15 @@
 """Bounded plain RTSP transport for initial AirPlay discovery."""
 import socket
+import threading
 import time
 
 
 class RTSPClient:
     def __init__(self, sock):
         self.sock, self.sequence, self.buffer = sock, 0, b''
+        # Requests come from the session thread, the feedback thread and the
+        # iAP2 tunnel; each request/response pair must not interleave.
+        self.lock = threading.RLock()
 
     def enable_encryption(self, keys):
         from .controlcipher import ControlCipher
@@ -13,6 +17,10 @@ class RTSPClient:
         self.buffer = b''
 
     def request(self, method, path, body=b'', headers=None):
+        with self.lock:
+            return self._request(method, path, body, headers)
+
+    def _request(self, method, path, body=b'', headers=None):
         # Retry receiving the SAME feedback response; never resend a request
         # or advance CSeq after a receive timeout on the encrypted stream.
         self.receive_deadline=time.monotonic()+20 if path=='/feedback' else None

@@ -249,6 +249,10 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                         logging.info('peer iAP2 detection confirmed')
                         # Phone is the iAP2 host: echo DETECT and wait for accessory SYN.
                         sock.sendall(DETECT)
+                    elif transport == 'airplay':
+                        # The head unit dropped this link and is starting over;
+                        # end it so the tunnel answers the next DETECT afresh.
+                        raise ValueError('peer restarted the iAP2 link (DETECT after sync)')
                     continue
                 if packet.control & RST:
                     raise ValueError('peer reset link')
@@ -288,7 +292,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                         0xaa01, 0xaa03, 0x5703, 0x4301):
                                     # Bodies identify what the head unit expects
                                     # next; credentials and auth are never logged.
-                                    logging.info('CSM rx body=%s', payload_hex(frame.body))
+                                    logging.info('CSM rx body=%s', payload_hex(frame.body, 4096))
                                 if frame.message_id == 0x1d01:
                                     identity = {}
                                     for parameter in frame.parameters():
@@ -365,6 +369,11 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                         # Wi-Fi is already up; only the link and
                                         # authentication are needed here.
                                         logging.info('iAP2 over AirPlay: accessory authenticated')
+                                        for frame in device_notifications(local_name, local_address,
+                                                                          peer_received_messages):
+                                            outgoing.append(frame)
+                                            logging.info('device notification queued message=0x%04x',
+                                                         frame.message_id)
                                     else:
                                         for protocol_id, protocol_name in ea_protocols:
                                             if 0xea00 not in peer_received_messages:
@@ -439,7 +448,24 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
         sock.close()
 
 
-def airplay_link(sock, stop, local_name='SailfishOS',
+def device_notifications(local_name, local_address, received_message_ids):
+    """Device updates an iPhone sends once the accessory is authenticated.
+
+    Only messages the accessory lists as received are sent; an empty list
+    (no identification parameters) sends all of them.
+    """
+    frames = [Frame(0x4e09, encode_param(0, local_name.encode('utf-8') + b'\x00'))]
+    if local_address:
+        device_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, 'org.sailplay:' + local_address)).upper()
+        frames[:0] = [Frame(0x4e0c, encode_param(0, device_id.encode('ascii') + b'\x00'))]
+        frames.append(Frame(0x4e0e, encode_param(0, local_address.encode('ascii') + b'\x00')))
+    frames.append(Frame(0x4e0d, encode_param(0, b'\x01')))
+    if received_message_ids:
+        frames = [frame for frame in frames if frame.message_id in received_message_ids]
+    return frames
+
+
+def airplay_link(sock, stop, local_name='SailfishOS', local_address=None,
                  accessory_directory='/var/lib/sailplay/accessories'):
     """Run the phone side of an iAP2 link tunnelled through AirPlay.
 
@@ -454,8 +480,8 @@ def airplay_link(sock, stop, local_name='SailfishOS',
     pin_path = (os.path.join(accessory_directory, device.rsplit('/', 1)[1] + '.json')
                 if device else None)
     logging.info('starting over AirPlay; accessory pin=%s', pin_path)
-    probe(sock, stop, 0, local_name=local_name, paired_pin_path=pin_path,
-          transport='airplay')
+    probe(sock, stop, 0, local_name=local_name, local_address=local_address,
+          paired_pin_path=pin_path, transport='airplay')
 
 
 def main():

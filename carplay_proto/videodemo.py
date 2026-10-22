@@ -8,7 +8,6 @@ import plistlib
 import os
 import stat
 import copy
-import queue
 from . import crypto
 from .controlcipher import ControlCipher
 from .rtspclient import EncryptedSocket, connect
@@ -159,7 +158,7 @@ class DemoEvents:
                             # iAP2 tunnelled over the AirPlay event channel;
                             # not handled yet, so record what the HU sends.
                             print('iAP tunnel params={}'.format(
-                                describe_params(value.get('params'))),flush=True)
+                                describe_params(value.get('params'),2048)),flush=True)
                         if self.handler and lines[0].split()[1]=='/command':
                             result=self.handler(value)
                             if result is not None:
@@ -224,9 +223,8 @@ class UiCommands:
 
 class ScreenFeedback:
     """Keep control requests away from the video producer's critical path."""
-    def __init__(self,client,commands=None,modes=None,resume=None,screen=None,resource_changed=None,audio=None,duck=None,mode_lock=None,mode_revision=None,iap_outbound=None):
+    def __init__(self,client,commands=None,modes=None,resume=None,screen=None,resource_changed=None,audio=None,duck=None,mode_lock=None,mode_revision=None):
         self.client=client
-        self.iap_outbound=iap_outbound
         self.commands=commands
         self.modes=modes
         self.resume=resume
@@ -244,7 +242,6 @@ class ScreenFeedback:
         next_feedback=time.monotonic()+2
         while not self.stop.wait(0.1):
             try:
-                self.send_iap()
                 returning=self.commands and self.commands.return_requested()
                 resuming=(self.resume is not None and self.resume.is_set()) or (self.commands and self.commands.resume.is_set())
                 changed=self.resource_changed is not None and self.resource_changed.is_set()
@@ -298,26 +295,22 @@ class ScreenFeedback:
                 self.stop.set()
                 return
 
-    def send_iap(self):
-        # This thread owns the control connection, so tunnelled iAP2 bytes
-        # for the head unit are sent from here.
-        if self.iap_outbound is None:
-            return
-        while True:
-            try:
-                data=self.iap_outbound.get_nowait()
-            except queue.Empty:
-                return
-            status,_,body=self.client.request('POST','/command',plistlib.dumps(
-                {'type':'iAPSendMessage','params':{'data':data}},fmt=plistlib.FMT_BINARY),
-                {'Content-Type':'application/x-apple-binary-plist'})
-            result=plistlib.loads(body).get('status',0) if body else 0
-            print('iAP tunnel sent bytes={} HTTP={} status={} data={}'.format(
-                len(data),status,result,describe_params(data,128)),flush=True)
-
     def close(self):
         self.stop.set()
         self.thread.join(6)
+
+
+def send_iap(client,data):
+    """Send tunnelled iAP2 bytes to the head unit as an iAPSendMessage command."""
+    try:
+        status,_,body=client.request('POST','/command',plistlib.dumps(
+            {'type':'iAPSendMessage','params':{'data':data}},fmt=plistlib.FMT_BINARY),
+            {'Content-Type':'application/x-apple-binary-plist'})
+        result=plistlib.loads(body).get('status',0) if body else 0
+        print('iAP tunnel sent bytes={} HTTP={} status={} data={}'.format(
+            len(data),status,result,describe_params(data,256)),flush=True)
+    except Exception as error:
+        print('iAP tunnel send failed: {}: {}'.format(type(error).__name__,error),flush=True)
 
 
 def disable_bluetooth(client,address):
@@ -356,11 +349,12 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                         {'appStateID':2,'entity':0},{'appStateID':3,'entity':0}],
            'resources':[{'resourceID':r,'entity':1,'permanentEntity':1} for r in (1,2)]}
     keyframe_request=[0.0]
-    iap_outbound=queue.Queue()
     iap_tunnel=None
     if iap_link:
+        # Replies go out at once from the tunnel's own thread; RTSPClient
+        # serialises them with the session's other control requests.
         from .iaptunnel import IAPTunnel
-        iap_tunnel=IAPTunnel(iap_link,iap_outbound.put)
+        iap_tunnel=IAPTunnel(iap_link,lambda data:send_iap(client,data))
     def event_command(value):
         if value.get('type')=='iAPSendMessage' and iap_tunnel:
             from .iaptunnel import tunnel_payload
@@ -496,8 +490,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             from .screenstream import ScreenStream
             screen=ScreenStream(client,address,interface,shared,display,video,stream_id,width,height,
                                 request_keyframe=pipeline.request_keyframe)
-            feedback=ScreenFeedback(client,commands,modes,resume,screen,resource_changed,audio,duck,mode_lock,mode_revision,
-                                    iap_outbound if iap_tunnel else None)
+            feedback=ScreenFeedback(client,commands,modes,resume,screen,resource_changed,audio,duck,mode_lock,mode_revision)
         if live:
             import itertools
             source = itertools.chain([first_live_frame],source)

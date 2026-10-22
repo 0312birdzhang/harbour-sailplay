@@ -60,6 +60,28 @@ class PersistentStream:
         self.handler.flush()
 
 
+class _TunnelPrefix(logging.Formatter):
+    def format(self, record):
+        text = super().format(record)
+        return 'iAP tunnel: ' + text if record.threadName.startswith('iAP tunnel') else text
+
+
+def log_to_stdout():
+    """Send logging records to (persisted) stdout at INFO.
+
+    Without this, the first logging call in a print-based helper installs a
+    WARNING-level stderr handler and every later logging.info is dropped.
+    """
+    import sys
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(_TunnelPrefix('%(message)s'))
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
+
 def persist_output(component):
     import sys
     if os.geteuid() != 0:
