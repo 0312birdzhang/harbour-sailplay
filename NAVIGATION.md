@@ -130,15 +130,42 @@ Validation on 2026-10-22:
 - The standalone probe ran successfully as the phone session user, verifying
   opt-in, Unicode snapshot writing, heartbeat/update separation, file permissions,
   terminal-state replacement and cleanup. It did not start a map or alter services.
-- The full Organic Maps application has not been rebuilt or installed; actual
-  route/GPS-to-snapshot behavior and instrument navigation are not yet verified.
+- At the initial stage-2 check, only the isolated exporter had been built.
+  Full-application validation is recorded below; actual route/GPS updates and
+  instrument navigation remain unverified.
+
+### Packaged application validation (2026-10-22)
+
+The complete Organic Maps application was rebuilt from local commit `5ce93a2`
+with the existing Sailfish aarch64 SDK and its official RPM spec. The SDK needed
+the matching `pulseaudio-devel` package for the updated upstream voice code.
+`organicmaps-2026.10.22-1.aarch64.rpm` was installed over `2026.10.09-4` on the
+phone after private backups of installed files, settings and bookmarks.
+Offline map data was retained.
+
+The installed `liborganicmaps.so` matched the extracted RPM payload:
+
+```
+SHA256 3236870a188a9456ded4e1a7c1b344449f2cc585cb4de1c9f20fdc5c79b1f692
+```
+
+A bounded application launch with the export opt-in produced an actual
+`state=idle`, `schema=1` snapshot accepted by `NavigationFeed`, and the application
+remained running. After stopping that test process, the reader rejected its
+leftover snapshot. No route was started and no navigation frame was sent.
+
+Sailplay `0.1.1-36` was also rebuilt and unpacked-verified to include the
+navigation codecs, feed reader, projected-launch opt-in and updated translation
+catalogs. That RPM was packaged for installation; the phone's Sailplay service
+was not upgraded during this check.
 
 ## Remaining stages
 
 1. Recover the enum meanings and remaining component/index requirements;
    compare with an iPhone navigation start/turn/recalculation/arrival trace.
-2. Rebuild/install the patched Organic Maps and validate route start, live
-   position updates, recalculation, cancellation and arrival snapshots.
+2. With the patched Organic Maps installed and the updated Sailplay package,
+   validate route start, live position updates, recalculation, cancellation and
+   arrival snapshots. Application startup and idle-snapshot validation are complete.
 3. Connect the snapshot to the authenticated, subscribed RFCOMM worker.
    Serialize sends through its existing acknowledged outgoing queue. Bound and
    coalesce pending updates; preserve turn-before-route ordering where required
