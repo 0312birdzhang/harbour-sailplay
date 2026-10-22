@@ -83,3 +83,13 @@ In Sailplay 0.1.1-43, a paused player retains its track metadata, artwork and
 controls on the compact dashboard card. Only non-playing, non-paused states
 show Not Playing. The device check confirmed a real paused Mconnect player
 has idleCard=false, a track title and CanPlay=true without starting playback.
+
+In 0.1.1-44, progress reads the player's authoritative MPRIS Position using
+bounded asynchronous D-Bus queries. Re-emitting metadata on pause can reset
+Amber.Mpris's cached position to zero even while the real position remains
+unchanged. The audio-free device regression reproduced cache=0 with the
+production UI correctly retaining 73.5 seconds. It also covers paused seeks to
+zero and forward, resume, track changes, and rejection of stale track/service
+replies. Position replies convert microseconds directly to UI seconds; duration
+still converts Amber metadata milliseconds to seconds. Run
+`tests/music_position_integration.py` on Sailfish as the session user.

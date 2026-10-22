@@ -748,6 +748,27 @@ public:
         for (int i=64;i<files.size();++i) QFile::remove(files.at(i).absoluteFilePath());
         return QUrl();
     }
+    Q_INVOKABLE void requestPlayerPosition(const QString &service, const QString &trackKey) {
+        if (!service.startsWith(QLatin1String("org.mpris.MediaPlayer2."))) return;
+        const QString key = service + QLatin1Char('|') + trackKey;
+        if (m_positionPending.contains(key)) return;
+        m_positionPending.insert(key);
+        QDBusMessage call = QDBusMessage::createMethodCall(service,
+            QStringLiteral("/org/mpris/MediaPlayer2"),
+            QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
+        call << QStringLiteral("org.mpris.MediaPlayer2.Player") << QStringLiteral("Position");
+        auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(call, 1000), this);
+        connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher, service, trackKey, key]() {
+            m_positionPending.remove(key);
+            const auto reply = watcher->reply();
+            if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
+                bool ok = false;
+                const qint64 usec = qvariant_cast<QDBusVariant>(reply.arguments().first()).variant().toLongLong(&ok);
+                if (ok && usec >= 0) emit playerPositionAvailable(service, trackKey, double(usec) / 1000000.0);
+            }
+            watcher->deleteLater();
+        });
+    }
     Q_INVOKABLE void seekPlayer(const QString &service, const QVariant &track, double seconds) {
         if (!service.startsWith(QLatin1String("org.mpris.MediaPlayer2."))
                 || !(seconds >= 0 && seconds < 86400000)) return;
@@ -1019,6 +1040,7 @@ public:
     }
 
 signals:
+    void playerPositionAvailable(const QString &service, const QString &trackKey, double seconds);
     void themeSettingsChanged();
     void rememberedMusicChanged();
     void dashboardSettingsChanged();
@@ -1032,6 +1054,7 @@ signals:
     void statusChanged();
 
 private:
+    QSet<QString> m_positionPending;
     QVariantMap m_status;
     void setStatus(const QString &key, const QVariant &value)
     {

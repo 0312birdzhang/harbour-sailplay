@@ -211,9 +211,12 @@ Window {
                 y: lockscreenMusic.y + lockscreenMusic.height + 4
                 visible: lockscreenMusic.visible && !lockscreenMusic.idleCard
                 property var player: lockscreenMusic.mprisController
-                // Amber.Mpris exposes both position and metadata duration in milliseconds.
+                // Amber metadata duration is milliseconds; queried MPRIS Position is microseconds.
                 property real durationSeconds: player ? Math.max(0, Number(player.metaData.duration || 0) / 1000) : 0
                 property real positionSeconds: 0
+                property string trackKey: player ? [player.currentService || "", String(player.metaData.trackId || ""),
+                    player.metaData.url || "", player.metaData.title || ""].join("|") : ""
+                onTrackKeyChanged: { positionSeconds = 0; refresh() }
                 property var seekTrackId
                 property string seekService
                 function timeText(seconds) {
@@ -222,7 +225,12 @@ Window {
                     return minutes + ":" + (n % 60 < 10 ? "0" : "") + (n % 60)
                 }
                 function refresh() {
-                    positionSeconds = player ? Math.max(0, Number(player.position) / 1000) : 0
+                    if (player && player.currentService)
+                        carController.requestPlayerPosition(player.currentService, trackKey)
+                    else positionSeconds = 0
+                }
+                function applyPosition(seconds) {
+                    positionSeconds = Math.max(0, seconds)
                     if (!seekSlider.pressed)
                         seekSlider.value = Math.min(durationSeconds || positionSeconds, positionSeconds)
                 }
@@ -235,6 +243,15 @@ Window {
                     target: musicProgress.player
                     onPositionChanged: musicProgress.refresh()
                     onPlaybackStatusChanged: musicProgress.refresh()
+                    onSeeked: musicProgress.refresh()
+                }
+                Connections {
+                    target: carController
+                    onPlayerPositionAvailable: {
+                        if (musicProgress.player && service === musicProgress.player.currentService
+                                && trackKey === musicProgress.trackKey)
+                            musicProgress.applyPosition(seconds)
+                    }
                 }
                 Silica.Slider {
                     id: seekSlider
