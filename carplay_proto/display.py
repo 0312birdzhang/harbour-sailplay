@@ -7,6 +7,35 @@ import subprocess
 import time
 
 
+
+def child_pids(parent, proc='/proc'):
+    """Direct children of parent.
+
+    Uses /proc/PID/task/PID/children when the kernel provides it
+    (CONFIG_PROC_CHILDREN); otherwise scans the PPid field of every
+    /proc/*/stat, which works on any kernel.
+    """
+    try:
+        with open('{0}/{1}/task/{1}/children'.format(proc, parent)) as source:
+            return [int(pid) for pid in source.read().split()]
+    except FileNotFoundError:
+        pass
+    children = []
+    for name in os.listdir(proc):
+        if not name.isdigit():
+            continue
+        try:
+            with open('{}/{}/stat'.format(proc, name)) as source:
+                stat = source.read()
+        except OSError:
+            continue
+        # The command name may contain spaces or parentheses; PPid is the
+        # second field after its closing parenthesis.
+        fields = stat.rsplit(')', 1)[-1].split()
+        if len(fields) > 1 and fields[1] == str(parent):
+            children.append(int(name))
+    return sorted(children)
+
 class AnnexBFrames:
     def __init__(self):
         self.buffer = b''
@@ -119,12 +148,9 @@ class DisplayPipeline:
         # su remains as a parent; never signal the entire group, which would
         # also terminate su. Validate the executable and this pipeline's FIFO.
         parent = self.capture.pid
-        children = '/proc/{0}/task/{0}/children'.format(parent)
-        try:
-            with open(children) as source:
-                candidates = [parent] + [int(pid) for pid in source.read().split()]
-        except FileNotFoundError:
+        if not os.path.exists('/proc/{}'.format(parent)):
             raise RuntimeError('capture process exited before keyframe request')
+        candidates = [parent] + child_pids(parent)
         for pid in candidates:
             try:
                 executable = os.readlink('/proc/{}/exe'.format(pid))

@@ -87,7 +87,13 @@ class ScreenStream:
             self.desired_owner=1
             self.reopen_required=False
             if self.request_keyframe:
-                self.request_keyframe()
+                # A missing IDR must not end the session; the stream waits
+                # for the next one either way.
+                try:
+                    self.request_keyframe()
+                except Exception as error:
+                    print('Keyframe request after screen resume failed: {}: {}'.format(
+                        type(error).__name__, error), flush=True)
 
     def send(self, config, nals, timestamp):
         with self.lock:
