@@ -232,5 +232,16 @@ class AirPlayLinkTests(unittest.TestCase):
                     tunnel.close()
 
 
+class SenderIdentityTests(unittest.TestCase):
+    def test_airplay_device_id_is_bluetooth_address(self):
+        spec = importlib.util.spec_from_file_location(
+            'wifi_session_probe', os.path.join(os.path.dirname(__file__), '..', 'scripts', 'wifi-session-probe.py'))
+        worker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(worker)
+        self.assertEqual(worker.sender_device_id('ec:aa:25:1a:5a:4b'), 'EC:AA:25:1A:5A:4B')
+        self.assertEqual(worker.sender_device_id(None), 'D8:B0:53:22:CE:CF')
+        self.assertEqual(worker.sender_device_id('not-an-address'), 'D8:B0:53:22:CE:CF')
+
+
 if __name__ == '__main__':
     unittest.main()

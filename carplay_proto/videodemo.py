@@ -370,7 +370,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                     pipeline.request_keyframe()
                     print('HU requested keyframe; capture IDR requested',flush=True)
                 except Exception as error:
-                    print('Keyframe request failed: '+type(error).__name__,flush=True)
+                    print('Keyframe request failed: {}: {}'.format(type(error).__name__,error),flush=True)
             return {'status':0}
         handled=media.command(value) if media else False
         if touch and not handled:

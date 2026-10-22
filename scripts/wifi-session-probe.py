@@ -10,6 +10,13 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+def sender_device_id(bluetooth_address, fallback='D8:B0:53:22:CE:CF'):
+    """AirPlay deviceID: the phone's Bluetooth address when it is valid."""
+    import re
+    address = str(bluetooth_address or '').upper()
+    return address if re.fullmatch(r'[0-9A-F]{2}(?::[0-9A-F]{2}){5}', address) else fallback
+
+
 def airplay_iap_link(local_name, local_address=None):
     """Return the iAP2 link runner for iAPSendMessage, or None if unavailable."""
     import importlib.util
@@ -354,7 +361,12 @@ def main():
                         from carplay_proto.audio import AUDIO_COMPAT_BUILD
                         print('AirPlay audio compatibility build={} RTP authenticated header=timestamp+SSRC (8 bytes)'.format(
                             AUDIO_COMPAT_BUILD), flush=True)
-                        setup = {'deviceID':'D8:B0:53:22:CE:CF','macAddress':'D8:B0:53:22:CE:CF',
+                        # CarPlay identifies devices by Bluetooth address: the head
+                        # unit's own deviceID is its Bluetooth address, and the
+                        # iAP2 link reports ours. Use the same identity here.
+                        device_id = sender_device_id(session.get('bluetooth_address'))
+                        print('AirPlay sender deviceID={}'.format(device_id), flush=True)
+                        setup = {'deviceID':device_id,'macAddress':device_id,
                                  'model':'Sailplay1,1','name':phone_name,'osName':'SailfishOS',
                                  'osBuildVersion':AUDIO_COMPAT_BUILD,'sourceVersion':'566.25.21',
                                  'sessionUUID':str(uuid.uuid4()),'timingPort':timing.port,
