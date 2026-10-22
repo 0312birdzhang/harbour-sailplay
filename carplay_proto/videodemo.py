@@ -369,6 +369,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
     events = None
     video = None
     feedback = None
+    ended_audio = None
     commands = None
     screen = None
     try:
@@ -403,8 +404,14 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         if live:
             from .audio import AudioSender
             audio=AudioSender(client,shared,info)
-            if bluetooth_address:
+            if bluetooth_address and 'honda' not in str(info.get('model','')).lower():
                 disable_bluetooth(client,bluetooth_address)
+            elif bluetooth_address:
+                # The HU needs its Bluetooth link for iAP2 call/media control.
+                # Asking a Honda to disable it ends CarPlay after the next
+                # accessory timeout and removes the wireless CarPlay record.
+                print('Keeping accessory Bluetooth enabled for {}'.format(
+                    info.get('model')),flush=True)
         status,_,body = client.request('SETUP','/setup',plistlib.dumps(payload,fmt=plistlib.FMT_BINARY),
             {'Content-Type':'application/x-apple-binary-plist'})
         print('Demo screen SETUP status={}'.format(status),flush=True)
@@ -450,7 +457,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         sample = open('/tmp/sailplay-live-video.h264','wb') if live else None
         for config,nals in source:
             if audio and audio.stop.is_set():
-                raise RuntimeError('audio encoder/capture ended; reconnecting media session')
+                print('Audio stream ended; continuing screen-only projection',flush=True)
+                ended_audio, audio = audio, None
             if events and events.stop.is_set():
                 raise RuntimeError('touch/event channel ended; reconnecting media session')
             if feedback and feedback.stop.is_set():
@@ -501,6 +509,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             power.close()
         if audio:
             audio.close()
+        if ended_audio:
+            ended_audio.close()
         if 'sample' in locals() and sample:
             sample.close()
         if feedback:
