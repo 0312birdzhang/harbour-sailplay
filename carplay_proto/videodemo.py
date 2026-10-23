@@ -49,8 +49,17 @@ def demo_frames(data):
     return config, frames
 
 
+def screen_packet_profile(info):
+    identity = str(info.get('manufacturer', '')).lower()
+    model = str(info.get('model', '')).upper()
+    return 'legacy' if 'desay' in identity or model == 'WILDLANDER' else 'ios'
+
+
 class ScreenEncoder:
-    def __init__(self, shared, stream_id):
+    def __init__(self, shared, stream_id, packet_profile='ios'):
+        if packet_profile not in ('ios', 'legacy'):
+            raise ValueError('unknown screen packet profile')
+        self.packet_profile = packet_profile
         self.key = crypto.hkdf_sha512(shared, ('DataStream-Salt'+str(stream_id)).encode(),
                                      b'DataStream-Output-Encryption-Key',32)
         self.counter = 0
@@ -70,6 +79,13 @@ class ScreenEncoder:
         header = bytearray(128)
         struct.pack_into('<I',header,0,size)
         header[4] = payload_type
+        if self.packet_profile == 'legacy':
+            if payload_type == 1:
+                header[6] = 4
+                struct.pack_into('<ff',header,16,width,height)
+            else:
+                struct.pack_into('<Q',header,8,self._timestamp(timestamp_ns))
+            return header
         header[5] = 0x10 if idr else 0
         struct.pack_into('<H',header,6,6)
         struct.pack_into('<Q',header,8,self._timestamp(timestamp_ns))
@@ -84,7 +100,8 @@ class ScreenEncoder:
             timestamp_ns = time.monotonic_ns()
         header = self._header(len(avcc),1,timestamp_ns,width,height)
         # Unencrypted H.264 SPS/PPS packet option used by iOS senders.
-        header[6:8] = b'\x16\x01'
+        if self.packet_profile == 'ios':
+            header[6:8] = b'\x16\x01'
         return bytes(header)+avcc
 
     def frame(self, nals, timestamp_ns, width, height):
@@ -485,11 +502,13 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             audio_stream=next(s for s in plistlib.loads(audio_body)['streams'] if s['type']==audio.description()['type'])
             audio.start(audio_stream,client.sock.sock.getpeername())
             if media:media.started()
-        encoder = ScreenEncoder(shared,stream_id)
+        packet_profile = screen_packet_profile(info)
+        print('Screen packet profile={}'.format(packet_profile),flush=True)
+        encoder = ScreenEncoder(shared,stream_id,packet_profile)
         if live:
             from .screenstream import ScreenStream
             screen=ScreenStream(client,address,interface,shared,display,video,stream_id,width,height,
-                                request_keyframe=pipeline.request_keyframe)
+                                request_keyframe=pipeline.request_keyframe,packet_profile=packet_profile)
             feedback=ScreenFeedback(client,commands,modes,resume,screen,resource_changed,audio,duck,mode_lock,mode_revision)
         if live:
             import itertools

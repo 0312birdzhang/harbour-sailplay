@@ -10,14 +10,15 @@ from .videodemo import ScreenEncoder
 
 
 class ScreenStream:
-    def __init__(self, client, address, interface, shared, display, video, stream_id, width=1920, height=720, request_keyframe=None):
+    def __init__(self, client, address, interface, shared, display, video, stream_id, width=1920, height=720, request_keyframe=None, packet_profile='ios'):
+        self.packet_profile=packet_profile
         self.width,self.height=width,height
         self.client, self.address, self.interface = client, address, interface
         self.shared, self.display = shared, display
         self.video = video
         self.desired_owner=1
         self.reopen_required=False
-        self.encoder = ScreenEncoder(shared, stream_id)
+        self.encoder = ScreenEncoder(shared, stream_id, self.packet_profile)
         self.config = None
         self.need_idr = True
         self.last_keepalive = time.monotonic()
@@ -77,7 +78,7 @@ class ScreenStream:
                 raise RuntimeError('screen resume SETUP rejected')
             stream = next(s for s in plistlib.loads(body)['streams'] if s['type'] == 110)
             self.video = connect(self.address, int(stream['dataPort']), self.interface).sock
-            self.encoder = ScreenEncoder(self.shared, stream_id)
+            self.encoder = ScreenEncoder(self.shared, stream_id, self.packet_profile)
             self.config, self.need_idr = None, True
             status, _, _ = self.client.request('RECORD', '/')
             print('CarPlay screen resume RECORD status={}'.format(status), flush=True)

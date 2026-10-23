@@ -142,44 +142,46 @@ def main():
                                  'org.freedesktop.DBus.ObjectManager').GetManagedObjects()
         adapter, _ = select_adapter(objects)
         phone_name = adapter_name(objects[adapter]['org.bluez.Adapter1'])
-    if args.force_wpa2:
-        def network_added(path, properties):
-            network = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', path), 'org.freedesktop.DBus.Properties')
-            configuration = network.Get('fi.w1.wpa_supplicant1.Network', 'Properties')
-            if str(configuration.get('ssid', '')).strip('"') == session['ssid']:
-                wpa2_retry.arm()
-                print('HU supplicant security before fallback: {}'.format({
-                    key:str(configuration.get(key)) for key in ('key_mgmt','proto','ieee80211w')}),flush=True)
-                network.Set('fi.w1.wpa_supplicant1.Network', 'Properties',
-                            dbus.Dictionary({'key_mgmt': dbus.String('WPA-PSK'),
-                                             'proto': dbus.String('RSN')}, signature='sv', variant_level=1))
-                print('HU network only: selected WPA2-PSK instead of SAE', flush=True)
-                # Keep ConnMan's association alive. Explicit Disconnect was
-                # interpreted as SAE authentication failure and removed this
-                # network before the WPA2 attempt could complete.
-                interface_path = str(path).split('/Networks/')[0]
-                interface = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', interface_path),
-                                           'fi.w1.wpa_supplicant1.Interface')
-                properties = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', interface_path),
-                                            'org.freedesktop.DBus.Properties')
-                from carplay_proto.wifiretry import reassociate_target
-                selection_deadline=time.monotonic()+2
-                def apply_reassociation():
-                    try:
-                        if reassociate_target(interface,properties,path):
-                            print('HU network only: requested WPA2 reassociation without Disconnect',flush=True)
-                            return False
-                    except dbus.DBusException as error:
-                        print('WPA2 reassociation request failed: '+error.get_dbus_name(),flush=True)
+    def network_added(path, properties):
+        network = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', path), 'org.freedesktop.DBus.Properties')
+        configuration = network.Get('fi.w1.wpa_supplicant1.Network', 'Properties')
+        if str(configuration.get('ssid', '')).strip('"') == session['ssid']:
+            from carplay_proto.wifiretry import mixed_wpa_security
+            if not args.force_wpa2 and not mixed_wpa_security(configuration):
+                return
+            wpa2_retry.arm()
+            print('HU supplicant security before fallback: {}'.format({
+                key:str(configuration.get(key)) for key in ('key_mgmt','proto','ieee80211w')}),flush=True)
+            network.Set('fi.w1.wpa_supplicant1.Network', 'Properties',
+                        dbus.Dictionary({'key_mgmt': dbus.String('WPA-PSK'),
+                                         'proto': dbus.String('RSN')}, signature='sv', variant_level=1))
+            print('HU network only: selected WPA2-PSK instead of SAE', flush=True)
+            # Keep ConnMan's association alive. Explicit Disconnect was
+            # interpreted as SAE authentication failure and removed this
+            # network before the WPA2 attempt could complete.
+            interface_path = str(path).split('/Networks/')[0]
+            interface = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', interface_path),
+                                       'fi.w1.wpa_supplicant1.Interface')
+            properties = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', interface_path),
+                                        'org.freedesktop.DBus.Properties')
+            from carplay_proto.wifiretry import reassociate_target
+            selection_deadline=time.monotonic()+2
+            def apply_reassociation():
+                try:
+                    if reassociate_target(interface,properties,path):
+                        print('HU network only: requested WPA2 reassociation without Disconnect',flush=True)
                         return False
-                    if time.monotonic() >= selection_deadline:
-                        print('HU WPA2 properties updated; target was not selected, leaving current network unchanged',flush=True)
-                        return False
-                    return True
-                if apply_reassociation():
-                    GLib.timeout_add(50,apply_reassociation)
-        bus.add_signal_receiver(network_added, signal_name='NetworkAdded',
-                                dbus_interface='fi.w1.wpa_supplicant1.Interface', bus_name='fi.w1.wpa_supplicant1')
+                except dbus.DBusException as error:
+                    print('WPA2 reassociation request failed: '+error.get_dbus_name(),flush=True)
+                    return False
+                if time.monotonic() >= selection_deadline:
+                    print('HU WPA2 properties updated; target was not selected, leaving current network unchanged',flush=True)
+                    return False
+                return True
+            if apply_reassociation():
+                GLib.timeout_add(50,apply_reassociation)
+    bus.add_signal_receiver(network_added, signal_name='NetworkAdded',
+                            dbus_interface='fi.w1.wpa_supplicant1.Interface', bus_name='fi.w1.wpa_supplicant1')
     if args.trace_supplicant:
         monitor = dbus.SystemBus(private=True)
         owner = str(bus.get_name_owner('fi.w1.wpa_supplicant1'))

@@ -46,3 +46,9 @@ class ReassociationWindow:
 
     def waiting(self):
         return not self.started and self.clock()<self.deadline
+
+
+def mixed_wpa_security(configuration):
+    """WPA2 is eligible only when the target offers both PSK and SAE."""
+    methods = str(configuration.get('key_mgmt', '')).split()
+    return 'WPA-PSK' in methods and 'SAE' in methods

@@ -120,3 +120,27 @@ controller completion are separate evidence; neither proves reception by the
 head unit. Device names, manufacturer payloads, link keys and pairing secrets
 are excluded. This release adds diagnosis, not a verified fix for the missing
 CarPlay icon; another receiver-side test is still required.
+
+
+### Mixed WPA2/SAE target networks (0.1.1-51)
+
+The matching head-unit supplicant network now automatically uses the existing
+WPA2/RSN compatibility path when its configured key-management list contains
+both WPA-PSK and SAE. Previously this path required `--force-wpa2`, which the
+normal handover did not pass. WPA3-only, enterprise, WPA2-only and other SSIDs
+are not changed. Reassociation still avoids an explicit Disconnect.
+
+On the 2026-10-23 WILDLANDER attempt the accessory challenge verified and
+StartSession arrived, but association was repeatedly rejected; ConnMan labelled
+these failures invalid-key despite receiving the same passphrase as iAP2.
+One observed WPA2 retry was still rejected. The user subsequently reported
+192.168.43.124, but SSH was inaccessible, so completion of projection and the
+causal effect of this change remain unverified.
+
+
+The WILDLANDER subsequently completed Wi-Fi, screen/AAC SETUP and AirPlay iAP2
+authentication but closed the session about four seconds after the first IDR.
+0.1.1-51 restores the pre-PR screen packet header for receivers identifying as
+Desay or WILDLANDER, while retaining the new header for Honda and other peers.
+This is a compatibility experiment; a displayed image and stable session must
+still be verified on the receiver. Screen reopen retains the selected profile.

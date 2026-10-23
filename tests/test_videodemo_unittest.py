@@ -6,6 +6,27 @@ from carplay_proto import crypto
 
 
 class VideoDemoTests(unittest.TestCase):
+    def test_desay_uses_legacy_headers_without_changing_honda(self):
+        from carplay_proto.videodemo import screen_packet_profile
+        self.assertEqual(screen_packet_profile({'model':'WILDLANDER'}),'legacy')
+        self.assertEqual(screen_packet_profile({'manufacturer':'Desay SV'}),'legacy')
+        self.assertEqual(screen_packet_profile({'manufacturer':'Honda','model':'CIVIC'}),'ios')
+        self.assertEqual(screen_packet_profile({}),'ios')
+
+    def test_legacy_header_matches_pre_merge_wire_format(self):
+        encoder=ScreenEncoder(bytes(32),1,packet_profile='legacy')
+        config=encoder.config(b'abcd',1920,720,1500000000)
+        expected=bytearray(128)
+        struct.pack_into('<I',expected,0,4)
+        expected[4],expected[6]=1,4
+        struct.pack_into('<ff',expected,16,1920,720)
+        self.assertEqual(config,bytes(expected)+b'abcd')
+        frame=encoder.frame([b'\x65\x80'],1500000000,1920,720)
+        expected=bytearray(128)
+        struct.pack_into('<I',expected,0,22)
+        struct.pack_into('<Q',expected,8,(1<<32)+(1<<31))
+        self.assertEqual(frame[:128],bytes(expected))
+
     def test_record_precedes_stream_setup_for_native_receiver(self):
         from carplay_proto.videodemo import run_demo
         client = Mock()

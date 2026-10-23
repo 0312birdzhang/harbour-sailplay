@@ -1,9 +1,15 @@
 import unittest
 from unittest.mock import Mock
-from carplay_proto.wifiretry import ReassociationWindow, reassociate_target, HandoverRetry
+from carplay_proto.wifiretry import ReassociationWindow, reassociate_target, HandoverRetry, mixed_wpa_security
 
 
 class RetryTests(unittest.TestCase):
+    def test_wpa2_compatibility_requires_mixed_psk_and_sae(self):
+        self.assertTrue(mixed_wpa_security({'key_mgmt':'WPA-PSK WPA-PSK-SHA256 SAE'}))
+        for value in ('SAE', 'WPA-PSK', 'WPA-EAP', 'NONE', ''):
+            self.assertFalse(mixed_wpa_security({'key_mgmt':value}))
+        self.assertFalse(mixed_wpa_security({}))
+
     def test_failed_handover_retries_without_new_bluetooth_connection(self):
         now = [100]
         launch = Mock()
