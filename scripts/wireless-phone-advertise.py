@@ -106,11 +106,6 @@ def main():
     added = []
     monitor = None
     try:
-        for identifier in missing:
-            value = uuid.UUID(identifier).bytes[::-1]
-            command(sock, 0x0010, value + b'\x00', adapter_index)
-            added.append(value)
-            logging.info('temporary phone service EIR added on %s uuid=%s', adapter, identifier)
         try:
             import importlib.util
             path = os.path.join(os.path.dirname(__file__), 'bluetooth-monitor.py')
@@ -120,8 +115,14 @@ def main():
             monitor = module.Monitor(adapter_index)
         except (OSError, ImportError, AttributeError):
             logging.exception('passive HCI monitoring unavailable')
-        run_probe(probe)
-        return 0
+        for identifier in missing:
+            value = uuid.UUID(identifier).bytes[::-1]
+            command(sock, 0x0010, value + b'\x00', adapter_index)
+            added.append(value)
+            logging.info('temporary phone service EIR added on %s uuid=%s', adapter, identifier)
+        result = subprocess.call([sys.executable, probe] + sys.argv[1:])
+        logging.info('CarPlay profile process exited status=%d', result)
+        return result
     finally:
         try:
             if monitor:

@@ -104,3 +104,19 @@ Honda Civic head unit. These are field notes, not a specification.
   frame. Sailplay now runs the same phone-side iAP2 link over this channel
   (detect, link sync, identification, authentication against the Bluetooth
   pin) and answers with iAPSendMessage commands. Not yet tested in the car.
+
+### Factory-reset receiver diagnosis (0.1.1-49)
+
+The 2026-10-23 LEVIN attempt reached Bluetooth/RFCOMM, but the receiver
+closed the channel before iAP2 DETECT/authentication or Wi-Fi handover.
+Re-registering the EIR markers during later service restarts did not resolve
+that attempt. This does not establish a certificate or ConnMan failure.
+
+The passive monitor now starts before our EIR registration, and persists
+controller EIR writes (public 128-bit service UUIDs only), their command
+completion status, and simple-pairing/authentication completion status in
+`/var/lib/sailplay/logs/bluetooth-advertise.log`. A write request and successful
+controller completion are separate evidence; neither proves reception by the
+head unit. Device names, manufacturer payloads, link keys and pairing secrets
+are excluded. This release adds diagnosis, not a verified fix for the missing
+CarPlay icon; another receiver-side test is still required.
