@@ -79,3 +79,20 @@ three complete Organic Maps process restarts through the normal launcher,
 five viewport-probe round trips, five real map round trips and forty static
 frame samples. Cold starts no longer showed the observed blank right-hand
 map region. This does not establish prolonged driving-session stability.
+
+
+### Factory-reset receiver diagnosis (0.1.1-49)
+
+The 2026-10-23 LEVIN attempt reached Bluetooth/RFCOMM, but the receiver
+closed the channel before iAP2 DETECT/authentication or Wi-Fi handover.
+Re-registering the EIR markers during later service restarts did not resolve
+that attempt. This does not establish a certificate or ConnMan failure.
+
+The passive monitor now starts before our EIR registration, and persists
+controller EIR writes (public 128-bit service UUIDs only), their command
+completion status, and simple-pairing/authentication completion status in
+`/var/lib/sailplay/logs/bluetooth-advertise.log`. A write request and successful
+controller completion are separate evidence; neither proves reception by the
+head unit. Device names, manufacturer payloads, link keys and pairing secrets
+are excluded. This release adds diagnosis, not a verified fix for the missing
+CarPlay icon; another receiver-side test is still required.

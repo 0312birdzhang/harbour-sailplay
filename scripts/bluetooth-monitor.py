@@ -4,6 +4,45 @@ import logging
 import socket
 import struct
 import threading
+import uuid
+
+
+def eir_summary(data):
+    """Only public service markers; never record names or manufacturer data."""
+    services = []
+    offset = 0
+    while offset < len(data) and data[offset]:
+        size = data[offset]
+        if size < 1 or offset + size + 1 > len(data):
+            return {'malformed': True, 'uuids128': services}
+        kind = data[offset + 1]
+        value = data[offset + 2:offset + size + 1]
+        if kind in (6, 7):
+            if len(value) % 16:
+                return {'malformed': True, 'uuids128': services}
+            services.extend(str(uuid.UUID(bytes=value[i:i+16][::-1]))
+                            for i in range(0, len(value), 16))
+        offset += size + 1
+    return {'malformed': False, 'uuids128': services}
+
+
+def public_hci_metadata(opcode, data):
+    if opcode == 2 and len(data) >= 4:
+        command, length = struct.unpack('<HB', data[:3])
+        if command == 0x0c52 and length == 241 and len(data) == 244:
+            logging.info('HCI EIR write fec=%d summary=%s', data[3], eir_summary(data[4:]))
+    if opcode != 3 or len(data) < 2 or len(data) != data[1] + 2:
+        return
+    event, size = data[:2]
+    if event == 0x0e and size >= 4:
+        command = struct.unpack('<H', data[3:5])[0]
+        if command == 0x0c52:
+            logging.info('HCI EIR write complete status=0x%02x', data[5])
+    elif event == 0x36 and size == 7:
+        logging.info('HCI simple pairing complete status=0x%02x', data[2])
+    elif event == 0x06 and size == 3:
+        logging.info('HCI authentication complete status=0x%02x handle=%d',
+                     data[2], struct.unpack('<H', data[3:5])[0])
 
 
 class Monitor:
@@ -38,6 +77,7 @@ class Monitor:
             data = raw[6:6 + size]
             if index != self.adapter_index:
                 continue
+            public_hci_metadata(opcode, data)
             if opcode == 3 and len(data) >= 6 and data[0] == 5:
                 status, handle, reason = struct.unpack('<BHB', data[2:6])
                 logging.info('HCI disconnect handle=%d status=%d reason=0x%02x', handle, status, reason)
