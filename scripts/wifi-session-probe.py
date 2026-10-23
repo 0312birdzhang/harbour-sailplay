@@ -10,6 +10,27 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+def sender_device_id(bluetooth_address, fallback='D8:B0:53:22:CE:CF'):
+    """AirPlay deviceID: the phone's Bluetooth address when it is valid."""
+    import re
+    address = str(bluetooth_address or '').upper()
+    return address if re.fullmatch(r'[0-9A-F]{2}(?::[0-9A-F]{2}){5}', address) else fallback
+
+
+def airplay_iap_link(local_name, local_address=None):
+    """Return the iAP2 link runner for iAPSendMessage, or None if unavailable."""
+    import importlib.util
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wireless-probe.py')
+        spec = importlib.util.spec_from_file_location('sailplay_wireless_probe', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except Exception as error:
+        print('iAP tunnel unavailable: {}'.format(type(error).__name__), flush=True)
+        return None
+    return lambda sock, stop: module.airplay_link(sock, stop, local_name, local_address)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--session', default='/tmp/sailplay-session.json')
@@ -54,6 +75,8 @@ def main():
         sys.stderr = sys.stdout
     from carplay_proto.runtime_logging import persist_output
     persist_output('wifi-restore' if args.restore else 'wifi-airplay')
+    from carplay_proto.runtime_logging import log_to_stdout
+    log_to_stdout()
     if not 10 <= args.restore_after <= 120:
         parser.error('restore-after must be 10..120 seconds')
     import dbus
@@ -71,12 +94,22 @@ def main():
         return network_interface(network_object(bus, 'net.connman', path), 'net.connman.Service')
     if args.restore:
         deadline = float('inf') if args.sustained else time.monotonic() + 300
+        heartbeat = '/tmp/sailplay-handover-heartbeat'
+        def modified(path):
+            try:
+                return os.path.getmtime(path)
+            except OSError:
+                return 0.0
         while True:
-            updated = os.path.getmtime(args.restore_clock) if args.restore_clock and os.path.exists(args.restore_clock) else time.time() - args.restore_after
-            remaining = args.restore_after - (time.time() - updated)
             if not args.restore_clock:
                 time.sleep(args.restore_after)
                 break
+            # The authenticated probe touches the heartbeat while it is still
+            # retrying. Without this a single failed AirPlay attempt would
+            # restore the old network and flap Wi-Fi between the HU and the
+            # previous AP every retry cycle.
+            updated = max(modified(args.restore_clock), modified(heartbeat))
+            remaining = args.restore_after - (time.time() - updated)
             if remaining <= 0 or time.monotonic() >= deadline:
                 break
             time.sleep(min(remaining, 1))
@@ -328,7 +361,12 @@ def main():
                         from carplay_proto.audio import AUDIO_COMPAT_BUILD
                         print('AirPlay audio compatibility build={} RTP authenticated header=timestamp+SSRC (8 bytes)'.format(
                             AUDIO_COMPAT_BUILD), flush=True)
-                        setup = {'deviceID':'D8:B0:53:22:CE:CF','macAddress':'D8:B0:53:22:CE:CF',
+                        # CarPlay identifies devices by Bluetooth address: the head
+                        # unit's own deviceID is its Bluetooth address, and the
+                        # iAP2 link reports ours. Use the same identity here.
+                        device_id = sender_device_id(session.get('bluetooth_address'))
+                        print('AirPlay sender deviceID={}'.format(device_id), flush=True)
+                        setup = {'deviceID':device_id,'macAddress':device_id,
                                  'model':'Sailplay1,1','name':phone_name,'osName':'SailfishOS',
                                  'osBuildVersion':AUDIO_COMPAT_BUILD,'sourceVersion':'566.25.21',
                                  'sessionUUID':str(uuid.uuid4()),'timingPort':timing.port,
@@ -362,7 +400,9 @@ def main():
                         run_demo(client,address,interface,verified.shared,setup_info,info,demo_path,
                                  seconds=(0 if args.sustained else 45) if live_ui else 15,live=live_ui,
                                  on_activity=lambda:os.utime(restore_clock,None),
-                                 bluetooth_address=session.get('bluetooth_address'))
+                                 bluetooth_address=session.get('bluetooth_address'),
+                                 iap_link=airplay_iap_link(session.get('device_name') or 'SailfishOS',
+                                                           session.get('bluetooth_address')))
                         break
             except Exception as error:
                 print('AirPlay probe failed: {}, errno={}'.format(type(error).__name__, getattr(error, 'errno', None)), flush=True)

@@ -133,6 +133,8 @@ Start music on your phone</source>
       <translation>請在天氣中設定位置</translation>
     </message>
     <message><source>Car display theme</source><translation>車機顯示主題</translation></message>
+    <message><source>Follow phone ambience</source><translation>跟隨手機氛圍</translation></message>
+    <message><source>Uses the light or dark car theme of the current ambience, so projected apps stay readable. Turn off to switch by time of day.</source><translation>依目前氛圍使用淺色或深色車機主題，讓投放的應用程式保持清晰易讀。關閉後依時間切換。</translation></message>
     <message><source>Day theme starts</source><translation>白天主題開始時間</translation></message>
     <message><source>Night theme starts</source><translation>夜間主題開始時間</translation></message>
     <message><source>Switches automatically using phone local time. Changes apply immediately to the car display.</source><translation>依手機本地時間自動切換，修改後立即套用至車機介面。</translation></message>

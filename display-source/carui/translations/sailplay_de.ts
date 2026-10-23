@@ -133,6 +133,8 @@ Musik auf dem Telefon starten</translation>
       <translation>Ort in Wetter festlegen</translation>
     </message>
     <message><source>Car display theme</source><translation>Design der Fahrzeuganzeige</translation></message>
+    <message><source>Follow phone ambience</source><translation>Telefon-Ambiente folgen</translation></message>
+    <message><source>Uses the light or dark car theme of the current ambience, so projected apps stay readable. Turn off to switch by time of day.</source><translation>Verwendet das helle oder dunkle Fahrzeugdesign des aktuellen Ambientes, damit projizierte Apps lesbar bleiben. Ausschalten, um nach Tageszeit zu wechseln.</translation></message>
     <message><source>Day theme starts</source><translation>Tagdesign ab</translation></message>
     <message><source>Night theme starts</source><translation>Nachtdesign ab</translation></message>
     <message><source>Switches automatically using phone local time. Changes apply immediately to the car display.</source><translation>Automatischer Wechsel nach der Ortszeit des Telefons. Änderungen gelten sofort für die Fahrzeuganzeige.</translation></message>

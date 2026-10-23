@@ -133,6 +133,8 @@ Start music on your phone</source>
       <translation>Выберите место в приложении «Погода»</translation>
     </message>
     <message><source>Car display theme</source><translation>Тема экрана автомобиля</translation></message>
+    <message><source>Follow phone ambience</source><translation>Следовать атмосфере телефона</translation></message>
+    <message><source>Uses the light or dark car theme of the current ambience, so projected apps stay readable. Turn off to switch by time of day.</source><translation>Использует светлую или тёмную тему автомобиля по текущей атмосфере, чтобы проецируемые приложения оставались читаемыми. Отключите для смены по времени суток.</translation></message>
     <message><source>Day theme starts</source><translation>Начало дневной темы</translation></message>
     <message><source>Night theme starts</source><translation>Начало ночной темы</translation></message>
     <message><source>Switches automatically using phone local time. Changes apply immediately to the car display.</source><translation>Автоматическое переключение по местному времени телефона. Изменения применяются сразу.</translation></message>

@@ -13,6 +13,18 @@ from .controlcipher import ControlCipher
 from .rtspclient import EncryptedSocket, connect
 
 
+def describe_params(value, limit=64):
+    """Summarise a command plist for the log, shortening binary payloads."""
+    if isinstance(value, dict):
+        return {key: describe_params(item, limit) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [describe_params(item, limit) for item in value]
+    if isinstance(value, (bytes, bytearray)):
+        return 'bytes[{}]:{}{}'.format(len(value), bytes(value[:limit]).hex(),
+                                       '...' if len(value) > limit else '')
+    return value
+
+
 def demo_frames(data):
     nals = [n for n in re.split(b'\x00\x00\x00?\x01', data) if n]
     sps = next(n for n in nals if n[0] & 31 == 7)
@@ -45,19 +57,40 @@ class ScreenEncoder:
         from .nativecrypto import NativeChaCha
         self.native = NativeChaCha(self.key)
 
-    def config(self, avcc, width, height):
+    @staticmethod
+    def _timestamp(timestamp_ns):
+        seconds, fraction = divmod(timestamp_ns,1000000000)
+        return (seconds << 32) | ((fraction << 32)//1000000000)
+
+    def _header(self,size,payload_type,timestamp_ns,width,height,idr=False):
+        # AirPlay screen packets: little-endian size, 2-byte type, 2-byte
+        # option, then a fixed-point NTP timestamp. IDR slices are flagged in
+        # the second type byte; receivers that ignore the flag still parse the
+        # VCL NAL type, but strict head units need it.
         header = bytearray(128)
-        struct.pack_into('<I',header,0,len(avcc))
-        header[4], header[6] = 1,4
-        struct.pack_into('<ff',header,16,width,height)
+        struct.pack_into('<I',header,0,size)
+        header[4] = payload_type
+        header[5] = 0x10 if idr else 0
+        struct.pack_into('<H',header,6,6)
+        struct.pack_into('<Q',header,8,self._timestamp(timestamp_ns))
+        if payload_type == 1:
+            struct.pack_into('<ff',header,16,width,height)
+        struct.pack_into('<ff',header,40,width,height)
+        struct.pack_into('<ff',header,56,max(0,width-1),max(0,height-1))
+        return header
+
+    def config(self, avcc, width, height, timestamp_ns=None):
+        if timestamp_ns is None:
+            timestamp_ns = time.monotonic_ns()
+        header = self._header(len(avcc),1,timestamp_ns,width,height)
+        # Unencrypted H.264 SPS/PPS packet option used by iOS senders.
+        header[6:8] = b'\x16\x01'
         return bytes(header)+avcc
 
-    def frame(self, nals, timestamp_ns):
+    def frame(self, nals, timestamp_ns, width, height):
         body = b''.join(struct.pack('>I',len(n))+n for n in nals)
-        header = bytearray(128)
-        struct.pack_into('<I',header,0,len(body)+16)
-        seconds, fraction = divmod(timestamp_ns,1000000000)
-        struct.pack_into('<Q',header,8,(seconds << 32) | (fraction << 32)//1000000000)
+        idr = any(n and (n[0] & 31) == 5 for n in nals)
+        header = self._header(len(body)+16,0,timestamp_ns,width,height,idr)
         encrypted = self.native.seal(crypto.nonce64(self.counter),body,bytes(header))
         self.counter += 1
         return bytes(header)+encrypted
@@ -91,6 +124,7 @@ class DemoEvents:
                 while b'\r\n\r\n' not in buf:
                     block = self.sock.recv(16384)
                     if not block:
+                        print('Demo event channel closed by head unit (received={})'.format(self.received),flush=True)
                         return
                     buf += block
                     if len(buf)>65536:
@@ -104,6 +138,7 @@ class DemoEvents:
                 while len(buf)<size:
                     block = self.sock.recv(16384)
                     if not block:
+                        print('Demo event channel closed by head unit (received={})'.format(self.received),flush=True)
                         return
                     buf += block
                 body,buf = buf[:size],buf[size:]
@@ -117,18 +152,25 @@ class DemoEvents:
                         value = plistlib.loads(body)
                         print('Demo event keys={}'.format(sorted(value)),flush=True)
                         print('Event command type={}'.format(value.get('type')),flush=True)
+                        if value.get('type') not in ('hidSendReport','forceKeyFrame','iAPSendMessage'):
+                            print('Event command detail={}'.format(describe_params(value)),flush=True)
+                        if value.get('type')=='iAPSendMessage':
+                            # iAP2 tunnelled over the AirPlay event channel;
+                            # not handled yet, so record what the HU sends.
+                            print('iAP tunnel params={}'.format(
+                                describe_params(value.get('params'),2048)),flush=True)
                         if self.handler and lines[0].split()[1]=='/command':
                             result=self.handler(value)
                             if result is not None:
                                 reply=plistlib.dumps(result,fmt=plistlib.FMT_BINARY)
                     except Exception as error:
-                        print('Event handler failed: {}'.format(type(error).__name__),flush=True)
+                        print('Event handler failed: {}: {}'.format(type(error).__name__,error),flush=True)
                         code=400
                 self.sock.sendall(('RTSP/1.0 {} {}\r\nCSeq: {}\r\nContent-Type: application/x-apple-binary-plist\r\nContent-Length: {}\r\n\r\n'.format(
                     code,'OK' if code==200 else 'Bad Request',headers.get('cseq','0').strip(),len(reply))).encode()+reply)
         except Exception as error:
             if not self.stop.is_set():
-                print('Demo event channel: {}'.format(type(error).__name__),flush=True)
+                print('Demo event channel: {}: {}'.format(type(error).__name__,error),flush=True)
         finally:
             self.stop.set()
 
@@ -249,13 +291,26 @@ class ScreenFeedback:
                 next_feedback=time.monotonic()+2
                 print('Screen feedback status={} bytes={}'.format(status,len(body)),flush=True)
             except Exception as error:
-                print('Screen feedback failed: {}'.format(type(error).__name__),flush=True)
+                print('Screen feedback failed: {}: {}'.format(type(error).__name__,error),flush=True)
                 self.stop.set()
                 return
 
     def close(self):
         self.stop.set()
         self.thread.join(6)
+
+
+def send_iap(client,data):
+    """Send tunnelled iAP2 bytes to the head unit as an iAPSendMessage command."""
+    try:
+        status,_,body=client.request('POST','/command',plistlib.dumps(
+            {'type':'iAPSendMessage','params':{'data':data}},fmt=plistlib.FMT_BINARY),
+            {'Content-Type':'application/x-apple-binary-plist'})
+        result=plistlib.loads(body).get('status',0) if body else 0
+        print('iAP tunnel sent bytes={} HTTP={} status={} data={}'.format(
+            len(data),status,result,describe_params(data,256)),flush=True)
+    except Exception as error:
+        print('iAP tunnel send failed: {}: {}'.format(type(error).__name__,error),flush=True)
 
 
 def disable_bluetooth(client,address):
@@ -271,7 +326,7 @@ def disable_bluetooth(client,address):
     if status!=200 or result!=0:raise RuntimeError('Bluetooth handoff rejected')
 
 
-def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=15,live=False,on_activity=None,bluetooth_address=None):
+def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=15,live=False,on_activity=None,bluetooth_address=None,iap_link=None):
     display = info['displays'][0]
     pipeline = None
     width,height,fps=1920,720,30
@@ -293,7 +348,30 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
     modes={'appStates':[{'appStateID':1,'entity':0,'speechMode':-1},
                         {'appStateID':2,'entity':0},{'appStateID':3,'entity':0}],
            'resources':[{'resourceID':r,'entity':1,'permanentEntity':1} for r in (1,2)]}
+    keyframe_request=[0.0]
+    iap_tunnel=None
+    if iap_link:
+        # Replies go out at once from the tunnel's own thread; RTSPClient
+        # serialises them with the session's other control requests.
+        from .iaptunnel import IAPTunnel
+        iap_tunnel=IAPTunnel(iap_link,lambda data:send_iap(client,data))
     def event_command(value):
+        if value.get('type')=='iAPSendMessage' and iap_tunnel:
+            from .iaptunnel import tunnel_payload
+            data=tunnel_payload(value)
+            if data:
+                iap_tunnel.feed(data)
+            return {'status':0}
+        if value.get('type')=='forceKeyFrame':
+            now=time.monotonic()
+            if pipeline is not None and now-keyframe_request[0]>=0.5:
+                keyframe_request[0]=now
+                try:
+                    pipeline.request_keyframe()
+                    print('HU requested keyframe; capture IDR requested',flush=True)
+                except Exception as error:
+                    print('Keyframe request failed: {}: {}'.format(type(error).__name__,error),flush=True)
+            return {'status':0}
         handled=media.command(value) if media else False
         if touch and not handled:
             touch.command(value)
@@ -337,6 +415,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
     events = None
     video = None
     feedback = None
+    ended_audio = None
     commands = None
     screen = None
     try:
@@ -371,8 +450,14 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         if live:
             from .audio import AudioSender
             audio=AudioSender(client,shared,info)
-            if bluetooth_address:
+            if bluetooth_address and 'honda' not in str(info.get('model','')).lower():
                 disable_bluetooth(client,bluetooth_address)
+            elif bluetooth_address:
+                # The HU needs its Bluetooth link for iAP2 call/media control.
+                # Asking a Honda to disable it ends CarPlay after the next
+                # accessory timeout and removes the wireless CarPlay record.
+                print('Keeping accessory Bluetooth enabled for {}'.format(
+                    info.get('model')),flush=True)
         status,_,body = client.request('SETUP','/setup',plistlib.dumps(payload,fmt=plistlib.FMT_BINARY),
             {'Content-Type':'application/x-apple-binary-plist'})
         print('Demo screen SETUP status={}'.format(status),flush=True)
@@ -418,7 +503,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         sample = open('/tmp/sailplay-live-video.h264','wb') if live else None
         for config,nals in source:
             if audio and audio.stop.is_set():
-                raise RuntimeError('audio encoder/capture ended; reconnecting media session')
+                print('Audio stream ended; continuing screen-only projection',flush=True)
+                ended_audio, audio = audio, None
             if events and events.stop.is_set():
                 raise RuntimeError('touch/event channel ended; reconnecting media session')
             if feedback and feedback.stop.is_set():
@@ -436,7 +522,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                     sample.write(b'\x00\x00\x00\x01'+sps+b'\x00\x00\x00\x01'+config[pps_pos+2:pps_pos+2+pps_size])
                     sample.flush()
                 if not live:
-                    video.sendall(encoder.config(config,width,height))
+                    video.sendall(encoder.config(config,width,height,time.monotonic_ns()))
                 previous_config=config
                 print('Screen configuration sent: {} bytes'.format(len(config)),flush=True)
             delay = 0 if live else start+count/30-time.monotonic()
@@ -445,7 +531,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             if sample and count<60:
                 sample.write(b''.join(b'\x00\x00\x00\x01'+n for n in nals))
                 sample.flush()
-            packet=encoder.frame(nals,time.monotonic_ns()) if not live else None
+            packet=encoder.frame(nals,time.monotonic_ns(),width,height) if not live else None
             before=time.monotonic()
             try:
                 if not live:
@@ -464,11 +550,15 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                 print('Demo video sent {} frames in {:.2f}s'.format(count,time.monotonic()-start),flush=True)
         print('Demo complete: {} frames'.format(count),flush=True)
     finally:
+        if iap_tunnel:
+            iap_tunnel.close()
         if media:media.close()
         if power:
             power.close()
         if audio:
             audio.close()
+        if ended_audio:
+            ended_audio.close()
         if 'sample' in locals() and sample:
             sample.close()
         if feedback:

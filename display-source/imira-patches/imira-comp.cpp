@@ -628,6 +628,82 @@ public:
     }
 };
 
+// Behind each projected app: the active ambience's app background, the
+// same image lipstick draws behind apps on the phone. Silica pages are
+// translucent by design; without it the car shell shows through and a
+// light-on-dark ambience turns white-on-white over a light car theme.
+class AppBackdrop : public QQuickPaintedItem
+{
+public:
+    explicit AppBackdrop(QQuickItem *parent) : QQuickPaintedItem(parent)
+    {
+        setAcceptedMouseButtons(Qt::NoButton);
+        items().append(this);
+    }
+    ~AppBackdrop() override { items().removeAll(this); }
+
+    void paint(QPainter *p) override
+    {
+        const QRectF r = boundingRect();
+        p->fillRect(r, fallback());
+        const QImage &img = image();
+        if (img.isNull())
+            return;
+        // Fill the viewport, cropping the portrait wallpaper as needed.
+        QSizeF size = QSizeF(img.size());
+        size.scale(r.size(), Qt::KeepAspectRatioByExpanding);
+        p->drawImage(QRectF((r.width() - size.width()) / 2,
+                            (r.height() - size.height()) / 2,
+                            size.width(), size.height()), img);
+    }
+
+    // Re-read the ambience when the dconf database changes.
+    static void refresh()
+    {
+        const QDateTime stamp = QFileInfo(QDir::homePath()
+            + QStringLiteral("/.config/dconf/user")).lastModified();
+        static QDateTime last;
+        static bool loaded = false;
+        if (loaded && stamp == last)
+            return;
+        loaded = true;
+        last = stamp;
+        const QString scheme = dconfRead(QStringLiteral("/desktop/jolla/theme/color_scheme"));
+        fallback() = scheme == QLatin1String("1") ? QColor(236, 240, 245)
+                                                  : QColor(10, 14, 20);
+        QString path = dconfRead(QStringLiteral(
+            "/desktop/jolla/background/portrait/app_picture_filename"));
+        if (path.size() >= 2 && path.startsWith(QLatin1Char('\'')) && path.endsWith(QLatin1Char('\'')))
+            path = path.mid(1, path.size() - 2);
+        static QString lastPath;
+        if (path != lastPath) {
+            lastPath = path;
+            QImage img(path);
+            // The image is only ever a blurred background; keep it small.
+            if (!img.isNull() && img.height() > 1080)
+                img = img.scaledToHeight(1080, Qt::SmoothTransformation);
+            image() = img;
+            fprintf(stderr, "imira-comp: app backdrop %s scheme=%s\n",
+                    img.isNull() ? "none" : qPrintable(path), qPrintable(scheme));
+        }
+        for (AppBackdrop *item : items())
+            item->update();
+    }
+
+private:
+    static QString dconfRead(const QString &key)
+    {
+        QProcess dconf;
+        dconf.start(QStringLiteral("dconf"), QStringList() << QStringLiteral("read") << key);
+        if (!dconf.waitForFinished(1000) || dconf.exitCode() != 0)
+            return QString();
+        return QString::fromUtf8(dconf.readAllStandardOutput()).trimmed();
+    }
+    static QImage &image() { static QImage img; return img; }
+    static QColor &fallback() { static QColor color(10, 14, 20); return color; }
+    static QList<AppBackdrop *> &items() { static QList<AppBackdrop *> list; return list; }
+};
+
 class Compositor : public QWaylandQuickCompositor
 {
 public:
@@ -702,6 +778,15 @@ public:
             viewport->setSize(QSizeF(m_contentRoot->width(), m_contentRoot->height()));
             viewport->setClip(true);
             item->setParentItem(viewport);
+            AppBackdrop *backdrop = new AppBackdrop(viewport);
+            backdrop->setZ(-1);
+            backdrop->setSize(QSizeF(viewport->width(), viewport->height()));
+            auto fitBackdrop = [backdrop, viewport]() { backdrop->setSize(QSizeF(viewport->width(), viewport->height())); };
+            QObject::connect(viewport, &QQuickItem::widthChanged, backdrop, fitBackdrop);
+            QObject::connect(viewport, &QQuickItem::heightChanged, backdrop, fitBackdrop);
+            // Hidden apps keep their viewport; never cover the car shell.
+            QObject::connect(item, &QQuickItem::visibleChanged, backdrop,
+                             [backdrop, item]() { backdrop->setVisible(item->isVisible()); });
             item->setZ(m_nextContentZ++);
             item->setOpacity(0);
             surface->setProperty("sailplayViewportReady", false);
@@ -1731,6 +1816,12 @@ int main(int argc, char *argv[])
         compositor.sendFrameCallbacks(compositor.surfaces());
     });
     frameTimer.start();
+
+    // Follow ambience changes for the app backdrop.
+    AppBackdrop::refresh();
+    QTimer ambienceTimer;
+    QObject::connect(&ambienceTimer, &QTimer::timeout, []() { AppBackdrop::refresh(); });
+    ambienceTimer.start(3000);
 
     // Status for the phone app's TV monitor, every 2 s.
     QTimer statusTimer;

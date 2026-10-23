@@ -90,7 +90,10 @@ class ProbeTests(unittest.TestCase):
             self.assertEqual(receive(), ident)
             car.sendall(encode(Packet(ACK, 0x21, ident.sequence, 10,
                                       Frame(0x1d01, b'').encoded())))
-            self.assertEqual(receive().acknowledgement, 0x21)
+            ack = receive()
+            self.assertEqual(ack.acknowledgement, 0x21)
+            # ACK-only packets carry the last sequence number sent, not 0.
+            self.assertEqual(ack.sequence, ident.sequence)
             accepted = receive()
             self.assertEqual(accepted.payload, Frame(0x1d02, b'').encoded())
             car.sendall(encode(Packet(ACK, 0x21, accepted.sequence, 0, None)))
@@ -108,6 +111,22 @@ class ProbeTests(unittest.TestCase):
             worker.join(2)
             car.close()
         self.assertFalse(worker.is_alive())
+
+
+class IdentificationParsingTests(unittest.TestCase):
+    def test_ea_protocols_from_identification(self):
+        group = lambda ident, name: encode_param(10, encode_param(0, bytes([ident])) +
+                                                 encode_param(1, name + b'\x00'))
+        frame = Frame(0x1d01, encode_param(0, b'Honda CIVIC\x00') +
+                      group(1, b'com.honda.cp.allhonda') + group(3, b'com.honda.hondalink.hlc') +
+                      encode_param(10, b'\x00'))
+        self.assertEqual(module.parse_ea_protocols(frame),
+                         [(1, 'com.honda.cp.allhonda'), (3, 'com.honda.hondalink.hlc')])
+
+    def test_bluetooth_component_ids(self):
+        frame = Frame(0x4e03, encode_param(0, b'\x00\x01') + encode_param(0, b'\x01') +
+                      encode_param(0, b'\x00\x05'))
+        self.assertEqual(module.parse_component_ids(frame), [1, 5])
 
 
 if __name__ == '__main__':

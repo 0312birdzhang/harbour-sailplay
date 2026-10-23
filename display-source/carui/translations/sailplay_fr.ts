@@ -133,6 +133,8 @@ Lancez la musique sur votre téléphone</translation>
       <translation>Définir un lieu dans Météo</translation>
     </message>
     <message><source>Car display theme</source><translation>Thème de l’écran du véhicule</translation></message>
+    <message><source>Follow phone ambience</source><translation>Suivre l’ambiance du téléphone</translation></message>
+    <message><source>Uses the light or dark car theme of the current ambience, so projected apps stay readable. Turn off to switch by time of day.</source><translation>Utilise le thème clair ou sombre de l’ambiance actuelle pour que les applications projetées restent lisibles. Désactivez pour changer selon l’heure.</translation></message>
     <message><source>Day theme starts</source><translation>Début du thème de jour</translation></message>
     <message><source>Night theme starts</source><translation>Début du thème de nuit</translation></message>
     <message><source>Switches automatically using phone local time. Changes apply immediately to the car display.</source><translation>Bascule selon l’heure locale du téléphone. Les modifications sont appliquées immédiatement.</translation></message>

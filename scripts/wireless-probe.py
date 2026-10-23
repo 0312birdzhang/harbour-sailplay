@@ -24,9 +24,12 @@ from carplay_proto.projectionpower import with_connection_power, ProfileConnecti
 from carplay_proto.iap2link import (ACK, DETECT, EAK, RST, SYN, Decoder,
                                    Packet, encode, parse_synchronization,
                                    synchronization)
-from carplay_proto.wire import Frame, Framer, encode_param
+from carplay_proto.wire import Frame, Framer, encode_param, parse_params
 from carplay_proto.accessoryauth import PinnedAccessory, paired_accessory
-from carplay_proto.wireless import parse_wifi_configuration, request_wifi_configuration, parse_start_session
+from carplay_proto.wireless import (parse_wifi_configuration,
+                                    peer_supports_wifi_configuration_request,
+                                    request_wifi_configuration,
+                                    parse_start_session, StartSession)
 from carplay_proto.navigation import NavigationSubscription, START as NAV_START, STOP as NAV_STOP
 from carplay_proto.navigationfeed import NavigationFeed
 from carplay_proto.navigationsender import NavigationSender
@@ -36,6 +39,48 @@ PHONE_UUID = '00000000-deca-fade-deca-deafdecacafe'
 ACCESSORY_UUID = '00000000-deca-fade-deca-deafdecacaff'
 IAP_V2_UUID = '02030302-1d19-415f-86f2-22a2106a0a77'
 PROFILE_PATH = '/org/sailplay/wireless_phone'
+
+
+def text_value(payload):
+    return payload.split(b'\x00', 1)[0].decode('utf-8', 'replace')
+
+
+def payload_hex(payload, limit=512):
+    suffix = '...' if len(payload) > limit else ''
+    return payload[:limit].hex() + suffix
+
+
+def parse_ea_protocols(frame):
+    protocols = []
+    for parameter in frame.parameters():
+        if parameter.id != 10:
+            continue
+        try:
+            nested = {item.id: item.payload for item in parse_params(parameter.payload)}
+        except ValueError:
+            logging.warning('invalid EA protocol group=%d payload=%s',
+                            parameter.id, payload_hex(parameter.payload))
+            continue
+        identifier = nested.get(0, b'')[:1]
+        if not identifier:
+            continue
+        name = text_value(nested.get(1, b''))
+        protocols.append((identifier[0], name))
+        logging.info('EA protocol id=%d name=%r', identifier[0], name)
+    return protocols
+
+
+def parse_component_ids(frame):
+    identifiers = []
+    for parameter in frame.parameters():
+        if parameter.id != 0:
+            continue
+        if len(parameter.payload) != 2:
+            logging.warning('invalid Bluetooth component identifier payload=%s',
+                            payload_hex(parameter.payload))
+            continue
+        identifiers.append(struct.unpack('>H', parameter.payload)[0])
+    return identifiers
 
 
 def service_record(channel):
@@ -86,9 +131,23 @@ def media_active(path='/run/sailplay-media.lock'):
         os.close(fd)
 
 
+HANDOVER_HEARTBEAT = '/tmp/sailplay-handover-heartbeat'
+
+
+def touch_handover_heartbeat():
+    """Keep the independent restore worker from reviving the old network."""
+    try:
+        os.utime(HANDOVER_HEARTBEAT, None)
+    except FileNotFoundError:
+        descriptor = os.open(HANDOVER_HEARTBEAT, os.O_WRONLY | os.O_CREAT |
+                             os.O_NOFOLLOW, 0o600)
+        os.close(descriptor)
+
+
 def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
           announce_wireless=False, local_address=None, session_out=None, wifi_handover=False,sustained=False,
-          local_name='SailfishOS', paired_pin_path=None, on_authenticated=None):
+          local_name='SailfishOS', paired_pin_path=None, on_authenticated=None,
+          transport='bluetooth'):
     handover_started = False
     handover_command = None
     def retry_handover():
@@ -101,6 +160,35 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
             logging.exception('Wi-Fi/AirPlay handover retry launch failed')
     from carplay_proto.wifiretry import HandoverRetry
     handover_retry = HandoverRetry(media_active, retry_handover)
+
+    def write_session(start):
+        descriptor = os.open(session_out, os.O_WRONLY | os.O_CREAT |
+                             os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, 'w') as output:
+            session_data = start.as_dict()
+            session_data['device_name'] = local_name
+            session_data['bluetooth_address'] = local_address
+            json.dump(session_data, output)
+
+    def start_handover(trigger):
+        nonlocal handover_started, handover_command
+        if not wifi_handover or handover_started:
+            return
+        handover_command=['systemd-run', '--unit=sailplay-handover-{}-{}'.format(os.getpid(),time.monotonic_ns()),
+            sys.executable, os.path.join(os.path.dirname(__file__), 'wifi-session-probe.py'),
+            '--connect', '--direct-passphrase',
+            '--restore-after', '90', '--log-file', '/tmp/sailplay-wifi-probe.log']
+        if sustained:
+            handover_command.append('--sustained')
+        else:
+            handover_command.append('--trace-supplicant')
+        subprocess.run(handover_command,check=True)
+        handover_started = True
+        touch_handover_heartbeat()
+        handover_retry.arm()
+        logging.info('%s triggered independent Wi-Fi/AirPlay handover', trigger)
+
     decoder, csm = Decoder(), Framer()
     deadline = time.monotonic() + duration if duration else float('inf')
     sync_at = 0
@@ -118,6 +206,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
     authenticator = None
     authenticated = False
     peer_received_messages = set()
+    ea_protocols = []
     wifi_config = None
     navigation = NavigationSubscription()
     navigation_feed = NavigationFeed()
@@ -134,6 +223,8 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
         authenticator = PinnedAccessory(accessory_key) if accessory_key else None
         while not stop.is_set() and time.monotonic() < deadline:
             handover_retry.poll()
+            if handover_started:
+                touch_handover_heartbeat()
             now = time.monotonic()
             if authenticated and now >= navigation_check_at:
                 navigation_check_at = now + 1
@@ -160,7 +251,9 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                     outgoing.append(navigation_batch.pop(0))
             if negotiated and pending is None and outgoing:
                 sequence = (sequence + 1) & 255
-                pending = Packet(ACK, sequence, last_rx, session, outgoing.pop(0).encoded())
+                frame = outgoing.pop(0)
+                logging.info('CSM tx message=0x%04x body_bytes=%d', frame.message_id, len(frame.body))
+                pending = Packet(ACK, sequence, last_rx, session, frame.encoded())
                 retries = 0
                 retry_at = 0
             if pending is not None and now >= retry_at:
@@ -176,11 +269,22 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
             if not raw:
                 break
             for packet in decoder.feed(raw):
+                if transport == 'airplay':
+                    if packet == DETECT:
+                        logging.info('link rx DETECT')
+                    else:
+                        logging.info('link rx control=0x%02x seq=%d ack=%d session=%s bytes=%d',
+                                     packet.control, packet.sequence, packet.acknowledgement,
+                                     packet.session, len(packet.payload or b''))
                 if packet == DETECT:
                     if not sync_at:
                         logging.info('peer iAP2 detection confirmed')
                         # Phone is the iAP2 host: echo DETECT and wait for accessory SYN.
                         sock.sendall(DETECT)
+                    elif transport == 'airplay':
+                        # The head unit dropped this link and is starting over;
+                        # end it so the tunnel answers the next DETECT afresh.
+                        raise ValueError('peer restarted the iAP2 link (DETECT after sync)')
                     continue
                 if packet.control & RST:
                     raise ValueError('peer reset link')
@@ -216,9 +320,17 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                 # Never log Wi-Fi credentials or authentication bodies.
                                 logging.info('CSM rx message=0x%04x body_bytes=%d',
                                              frame.message_id, len(frame.body))
+                                if transport == 'airplay' and frame.message_id not in (
+                                        0xaa01, 0xaa03, 0x5703, 0x4301):
+                                    # Bodies identify what the head unit expects
+                                    # next; credentials and auth are never logged.
+                                    logging.info('CSM rx body=%s', payload_hex(frame.body, 4096))
                                 if frame.message_id == 0x1d01:
+                                    identity = {}
                                     for parameter in frame.parameters():
-                                        if parameter.id in (6, 7):
+                                        if parameter.id in (0, 1, 2):
+                                            identity[parameter.id] = text_value(parameter.payload)
+                                        elif parameter.id in (6, 7):
                                             if len(parameter.payload) % 2:
                                                 raise ValueError('invalid supported-message list')
                                             ids = list(struct.unpack('>' + 'H' * (len(parameter.payload) // 2), parameter.payload))
@@ -227,6 +339,12 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                                          ','.join('0x%04x' % value for value in ids))
                                             if parameter.id == 7:
                                                 peer_received_messages = set(ids)
+                                    logging.info('accessory identity name=%r model=%r manufacturer=%r',
+                                                 identity.get(0, ''), identity.get(1, ''), identity.get(2, ''))
+                                    logging.info('identification parameter ids=%s',
+                                                 [(parameter.id, len(parameter.payload))
+                                                  for parameter in frame.parameters()])
+                                    ea_protocols = parse_ea_protocols(frame)
                                     outgoing.extend([Frame(0x1d02, b''), Frame(0xaa00, b'')])
                                 elif frame.message_id == 0xaa01:
                                     parameters = frame.parameters()
@@ -284,8 +402,39 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                                                    encode_param(1, wireless)))
                                             logging.info('HU advertises 4300; diagnostic grouped CarPlayAvailability queued')
                                         logging.info('DIAGNOSTIC wireless capability notification queued; no media sender yet')
-                                    outgoing.append(request_wifi_configuration())
-                                    logging.info('pinned accessory challenge signature VERIFIED; requesting Wi-Fi config')
+                                    if transport == 'airplay':
+                                        # Wi-Fi is already up; only the link and
+                                        # authentication are needed here.
+                                        logging.info('iAP2 over AirPlay: accessory authenticated')
+                                        for frame in device_notifications(local_name, local_address,
+                                                                          peer_received_messages):
+                                            outgoing.append(frame)
+                                            logging.info('device notification queued message=0x%04x',
+                                                         frame.message_id)
+                                        # A CarPlay accessory's wireless control sequence
+                                        # expects the device to request the Wi-Fi
+                                        # configuration on this link too (it lists 0x5702
+                                        # as received and answers with 0x5703).
+                                        if peer_supports_wifi_configuration_request(peer_received_messages):
+                                            outgoing.append(request_wifi_configuration())
+                                            logging.info('Wi-Fi configuration requested over AirPlay link')
+                                    else:
+                                        for protocol_id, protocol_name in ea_protocols:
+                                            if 0xea00 not in peer_received_messages:
+                                                logging.info('accessory does not receive 0xea00; skipping EA protocol=%d name=%r',
+                                                             protocol_id, protocol_name)
+                                                continue
+                                            outgoing.append(Frame(0xea00, encode_param(0, bytes([protocol_id])) +
+                                                                  encode_param(1, struct.pack('>H', protocol_id))))
+                                            logging.info('EA session requested protocol=%d session=%d name=%r',
+                                                         protocol_id, protocol_id, protocol_name)
+                                        if peer_supports_wifi_configuration_request(peer_received_messages):
+                                            outgoing.append(request_wifi_configuration())
+                                            logging.info('pinned accessory challenge signature VERIFIED; requesting Wi-Fi config')
+                                        else:
+                                            logging.info('pinned accessory challenge signature VERIFIED; '
+                                                         'waiting for notification-driven Wi-Fi handover '
+                                                         '(peer does not advertise 0x5702)')
                                 elif frame.message_id in (NAV_START, NAV_STOP):
                                     if not authenticated:
                                         logging.warning('ignoring navigation subscription before authentication')
@@ -303,47 +452,150 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                     navigation_check_at = 0
                                     logging.info('navigation subscription message=0x%04x component=%s options=%s', frame.message_id,
                                                  navigation.component, sorted(navigation.options))
+                                elif authenticated and frame.message_id in INITIAL_UPDATES:
+                                    reply = initial_update(frame, peer_received_messages)
+                                    if reply is not None:
+                                        outgoing.append(reply)
+                                        logging.info('initial update queued message=0x%04x for request=0x%04x body=%s',
+                                                     reply.message_id, frame.message_id, payload_hex(reply.body))
+                                    else:
+                                        logging.info('no initial update for request=0x%04x', frame.message_id)
+                                elif frame.message_id == 0x4e01:
+                                    logging.info('Bluetooth component information body=%s', payload_hex(frame.body))
+                                elif frame.message_id == 0x4e03:
+                                    component_ids = parse_component_ids(frame)
+                                    logging.info('Bluetooth connection updates requested components=%s body=%s',
+                                                 component_ids, payload_hex(frame.body))
+                                    for component_id in component_ids:
+                                        profiles = encode_param(7, b'')
+                                        outgoing.append(Frame(0x4e04,
+                                                              encode_param(0, struct.pack('>H', component_id)) +
+                                                              encode_param(1, profiles)))
+                                        logging.info('Bluetooth connection update queued component=%d profiles=iAP2Link',
+                                                     component_id)
+                                elif frame.message_id == 0x4e05:
+                                    logging.info('Bluetooth connection updates stopped body=%s', payload_hex(frame.body))
+                                elif frame.message_id == 0xea02:
+                                    bundle = ''
+                                    for parameter in frame.parameters():
+                                        if parameter.id == 0:
+                                            bundle = text_value(parameter.payload)
+                                    logging.info('accessory app launch requested bundle=%r body=%s',
+                                                 bundle, payload_hex(frame.body))
+                                elif frame.message_id == 0xea03:
+                                    logging.info('EA session status body=%s', payload_hex(frame.body))
                                 elif frame.message_id == 0x5703:
                                     if not authenticated:
                                         raise ValueError('Wi-Fi credentials arrived before authentication')
                                     config = parse_wifi_configuration(frame)
                                     wifi_config = config
                                     logging.info('accessory Wi-Fi configuration received: %r', config)
+                                    # Some head units (Honda) never send
+                                    # CarPlayStartSession over Bluetooth; they
+                                    # expect the phone to join their access point
+                                    # and find AirPlay on the default port.
+                                    if session_out:
+                                        write_session(StartSession(config, [], 7000, {}))
+                                        start_handover('Wi-Fi configuration')
                                 elif frame.message_id == 0x4301:
                                     if not authenticated:
                                         raise ValueError('StartSession before authentication')
                                     start = parse_start_session(frame, wifi_config)
                                     logging.info('parsed CarPlay StartSession: %r', start)
                                     if session_out:
-                                        descriptor = os.open(session_out, os.O_WRONLY | os.O_CREAT |
-                                                             os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-                                        os.fchmod(descriptor, 0o600)
-                                        with os.fdopen(descriptor, 'w') as output:
-                                            session_data = start.as_dict()
-                                            session_data['device_name'] = local_name
-                                            session_data['bluetooth_address'] = local_address
-                                            json.dump(session_data, output)
-                                        if wifi_handover and not handover_started:
-                                            handover_command=['systemd-run', '--unit=sailplay-handover-{}-{}'.format(os.getpid(),time.monotonic_ns()),
-                                                sys.executable, os.path.join(os.path.dirname(__file__), 'wifi-session-probe.py'),
-                                                '--connect', '--direct-passphrase',
-                                                '--restore-after', '90', '--log-file', '/tmp/sailplay-wifi-probe.log']
-                                            if sustained:
-                                                handover_command.append('--sustained')
-                                            else:
-                                                handover_command.append('--trace-supplicant')
-                                            subprocess.run(handover_command,check=True)
-                                            handover_started = True
-                                            handover_retry.arm()
-                                            logging.info('StartSession triggered independent Wi-Fi/AirPlay handover')
+                                        write_session(start)
+                                        start_handover('StartSession')
                     elif packet.sequence != last_rx:
-                        raise ValueError('out-of-order packet; probe stops rather than losing data')
-                    sock.sendall(encode(Packet(ACK, 0, last_rx, 0, None)))
+                        # A stale window means this RFCOMM link is poisoned;
+                        # exit and let the advertiser relaunch a clean probe.
+                        raise ValueError('out-of-order packet; restarting probe')
+                    # An ACK-only packet carries our last sent sequence number;
+                    # head units ignore one numbered 0 and keep retransmitting.
+                    sock.sendall(encode(Packet(ACK, sequence, last_rx, 0, None)))
         logging.info('probe ended; checksum errors=%d', decoder.errors)
     except (OSError, ValueError):
         logging.exception('probe failed')
     finally:
         sock.close()
+
+
+# Start... request -> the update an iPhone sends straight away in reply.
+INITIAL_UPDATES = {
+    0xae00: 0xae01,  # StartPowerUpdates -> PowerUpdate
+    0x4157: 0x4158,  # StartCommunicationsUpdates -> CommunicationsUpdate
+    0x5000: 0x5001,  # StartNowPlayingUpdates -> NowPlayingUpdate
+    0x4c00: 0x4c01,  # StartMediaLibraryInformation -> MediaLibraryInformation
+}
+
+
+def battery_charge_level(path='/sys/class/power_supply/battery/capacity'):
+    """Battery level scaled to iAP2's 0..65535 range, or None."""
+    try:
+        with open(path) as source:
+            percent = max(0, min(100, int(source.read().strip())))
+    except (OSError, ValueError):
+        return None
+    return percent * 65535 // 100
+
+
+def initial_update(request, received_message_ids):
+    """Minimal first update for a Start... request, or None.
+
+    Only the battery level is filled in (PowerUpdate parameter 6, the only
+    one the Honda asks for). The other updates are sent empty, meaning
+    nothing to report: no call data, nothing playing, no media library.
+    """
+    reply_id = INITIAL_UPDATES.get(request.message_id)
+    if reply_id is None or (received_message_ids and reply_id not in received_message_ids):
+        return None
+    if reply_id == 0xae01:
+        requested = {parameter.id for parameter in request.parameters()}
+        level = battery_charge_level()
+        body = encode_param(6, struct.pack('>H', level)) if 6 in requested and level is not None else b''
+        return Frame(0xae01, body)
+    return Frame(reply_id, b'')
+
+
+def device_language():
+    language = (os.environ.get('LANG') or 'en').split('_')[0].split('.')[0].lower()
+    return language if language.isalpha() and 2 <= len(language) <= 3 else 'en'
+
+
+def device_notifications(local_name, local_address, received_message_ids):
+    """Device updates an iPhone sends once the accessory is authenticated.
+
+    Only messages the accessory lists as received are sent; an empty list
+    (no identification parameters) sends all of them.
+    """
+    frames = [Frame(0x4e09, encode_param(0, local_name.encode('utf-8') + b'\x00'))]
+    if local_address:
+        device_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, 'org.sailplay:' + local_address)).upper()
+        frames[:0] = [Frame(0x4e0c, encode_param(0, device_id.encode('ascii') + b'\x00'))]
+        frames.append(Frame(0x4e0e, encode_param(0, local_address.encode('ascii') + b'\x00')))
+    frames.append(Frame(0x4e0a, encode_param(0, device_language().encode('ascii') + b'\x00')))
+    frames.append(Frame(0x4e0d, encode_param(0, b'\x01')))
+    if received_message_ids:
+        frames = [frame for frame in frames if frame.message_id in received_message_ids]
+    return frames
+
+
+def airplay_link(sock, stop, local_name='SailfishOS', local_address=None,
+                 accessory_directory='/var/lib/sailplay/accessories'):
+    """Run the phone side of an iAP2 link tunnelled through AirPlay.
+
+    Authenticates the accessory against the pin saved for the last head unit
+    over Bluetooth. No Wi-Fi request or handover: Wi-Fi is already in use.
+    """
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                            format='iAP tunnel: %(message)s')
+    device = previous_head_unit()
+    pin_path = (os.path.join(accessory_directory, device.rsplit('/', 1)[1] + '.json')
+                if device else None)
+    logging.info('starting over AirPlay; accessory pin=%s', pin_path)
+    probe(sock, stop, 0, local_name=local_name, local_address=local_address,
+          paired_pin_path=pin_path, transport='airplay')
 
 
 def main():
