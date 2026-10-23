@@ -8,7 +8,7 @@ autoreconf -fi
 ./configure --prefix=/usr --libdir=/usr/lib64 --sysconfdir=/etc --localstatedir=/var \
     --with-version=1.40+git26.6.sailplay1 \
     --enable-ethernet=builtin --disable-wifi --enable-bluetooth=builtin \
-    --disable-openconnect --disable-openvpn --disable-vpnc --disable-l2tp \
+    --disable-openconnect --enable-openvpn --with-openvpn=/usr/sbin/openvpn --disable-vpnc --disable-l2tp \
     --disable-pptp --disable-openfortivpn --disable-wireguard \
     --enable-loopback=builtin --enable-pacrunner=builtin \
     --enable-sailfish-vpn-access=builtin --disable-client --enable-test \
@@ -24,7 +24,10 @@ autoreconf -fi
 headers=()
 for header in include/*.h; do headers+=("include/connman/${header##*/}"); done
 make -j8 "${headers[@]}" include/connman/gdbus.h src/builtin.h
+# Main connmand needs the VPN bridge even though vpnd/protocol plugins stay stock.
+grep -q "__connman_builtin_vpn" src/builtin.h
 make -j8 CPPFLAGS="-I$WORK/headers" unit/test-service src/connmand
+nm src/connmand | grep "__connman_builtin_vpn$" > /dev/null
 mkdir -p "$WORK/package"
 cp src/connmand COPYING "$WORK/package/"
 cp "$REPO/connman-patches/90-sailplay-lifecycle.conf" "$WORK/package/"

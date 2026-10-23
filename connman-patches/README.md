@@ -31,7 +31,7 @@ runtime. The headers supplied by the available SDK were only 1.0.30.
 
 `scripts/build-connman-fix-from-wsl.sh` archives those exact local source
 commits, applies the patch, cross-builds the daemon and C tests, and creates
-`sailplay-connman-fix-1.0.0-1.aarch64.rpm`. Set `CONNMAN_SOURCE_ROOT` to the
+`sailplay-connman-fix-1.0.0-2.aarch64.rpm`. Set `CONNMAN_SOURCE_ROOT` to the
 outer ConnMan repository, `GSUPPLICANT_SOURCE` to a clone containing the header
 commit, and optionally `SAILPLAY_SDK`. The default paths match this workspace.
 Run the script as WSL root, as with the normal Sailplay build helper.
@@ -42,6 +42,15 @@ libiphb, libsystemd, libiptc, libnl-3.0, libnl-genl-3.0, xtables and usb-moded.
 Wi-Fi, Bluetooth, DNS backend and Sailfish network plugins use the original
 package configuration. Optional VPN client executables are not rebuilt or
 installed; the existing VPN daemon and plugins are untouched.
+
+Release 2 restores the main daemon's built-in `plugins/vpn.c` bridge to
+`connman-vpnd`. In this source revision the `VPN` build condition requires at
+least one protocol option, so the build enables OpenVPN with an explicit target
+binary path. Only `src/connmand` and the service unit test are built; no OpenVPN
+executable, VPN daemon or protocol plugin is packaged. `sailfish-vpn-access`
+alone does not enable this bridge. The build now checks both the generated
+built-in plugin table and the daemon's `__connman_builtin_vpn` symbol before
+packaging, preventing a successful build that silently omits VPN discovery.
 
 ## Installation and rollback
 
@@ -88,3 +97,12 @@ completed another real reconnect in 36.0 seconds, including at least 300 new
 video frames. ConnMan still had the same process and D-Bus owner. The Sailplay
 Python regression suite passed 155 tests; phase leases have separate tokens
 and a bounded, non-renewable profile window per Bluetooth link.
+
+
+Release 2 was installed on the same supported phone: the main ConnMan VPN
+service count increased from 0 to 53, matching the unchanged vpnd's 53
+connections. Wi-Fi remained ready/online and the stock daemon checksum was
+unchanged. All 14 service tests, including `registry_retained_reference`, passed
+as the unprivileged session user. The RPM payload contains only the replacement
+main daemon, systemd override and license. This confirms VPN discovery; actual
+VPN tunnel connectivity was not exercised in this validation.

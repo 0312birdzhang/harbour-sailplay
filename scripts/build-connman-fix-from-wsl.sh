@@ -17,5 +17,5 @@ printf 'ConnMan source: %s\nlibgsupplicant headers: %s\n' "$BASE" "$GSUPPLICANT"
 cd "$SDK"
 ./sdk-chroot -u pc sb2 -t SailfishOS-latest-aarch64 bash \
     "/parentroot$REPO/connman-patches/build-in-sdk.sh" "/parentroot$WORK" "/parentroot$REPO"
-cp /home/pc/rpmbuild/RPMS/aarch64/sailplay-connman-fix-1.0.0-1.aarch64.rpm "$REPO/../"
+cp /home/pc/rpmbuild/RPMS/aarch64/sailplay-connman-fix-1.0.0-2.aarch64.rpm "$REPO/../"
 printf 'Build sources, test executable and manifest retained: %s\n' "$WORK"

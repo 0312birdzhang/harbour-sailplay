@@ -1,6 +1,6 @@
 Name: sailplay-connman-fix
 Version: 1.0.0
-Release: 1
+Release: 2
 Summary: ConnMan service registry lifetime fix for Sailplay
 License: GPLv2
 BuildArch: aarch64
