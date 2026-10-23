@@ -156,3 +156,35 @@ A changed scale or call state now preserves the current main-volume setting
 and permits the remaining route cleanup to finish. A same-context write or
 verification failure still retains the record rather than claiming recovery.
 Cleanup logs now distinguish restored playback from recovery still pending.
+
+
+### Independent car keyboard (0.1.1-53)
+
+Each display session launches a second system Maliit server using
+`-override-address unix:path=/run/user/100000/sailplay-maliit/socket`.
+Car-side Qt apps use `QT_IM_MODULE=Maliit` and `MALIIT_SERVER_ADDRESS` for
+that peer while retaining the ordinary session bus for media and other APIs.
+The phone's `org.maliit.server` and its keyboard remain owned by the existing
+system instance. The private runtime directory is user-owned and mode 0700;
+a live peer or non-socket file is never replaced. The display pipeline owns
+and stops the keyboard along with its compositor. A PID/start-time identity
+record is also written before exec: the production setgid compositor cannot
+rely on reading a client's environment. This uses the existing app identity
+mechanism and never changes the system's process-access policy.
+
+The compositor treats the keyboard as an overlay rather than an app window,
+keeps application keyboard focus during key taps, and honours Maliit's
+`MOUSE_REGION`. An empty region hides the overlay and lets clicks reach the
+app; wl_surface's default full input region must not be used in that case.
+Do not force `QT_WAYLAND_SHELL_INTEGRATION=wl-shell`: this Qt 5.6 build crashes
+inside initializeShellIntegration with that newer plugin key.
+
+Device validation used a synthetic Qt Quick input window on the actual
+1920x720 virtual compositor: type ni, commit U+4F60, backspace, commit again,
+hide the keyboard and reopen it. All assertions passed, and the phone's
+Maliit service owner was unchanged. The regression fixture is
+`tests/private_keyboard_integration.py` with `tests/fixtures/keyboard-input.qml`;
+it refuses an existing compositor and should be run as the session user with
+a bounded CPU wake lease. This is phone-side virtual display validation;
+physical head-unit interaction, other resolutions, Qt6 and non-Qt input
+clients require separate testing.

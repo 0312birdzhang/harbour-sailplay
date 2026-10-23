@@ -1,11 +1,13 @@
 Name: harbour-sailplay
 Version: 0.1.1
-Release: 52
+Release: 53
 Summary: SailfishOS wireless CarPlay phone and virtual vehicle display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
 BuildArch: aarch64
 Requires: ffmpeg-tools
+Requires: maliit-framework-wayland
+Requires: maliit-framework-wayland-inputcontext
 Requires: python3-base
 Requires: python3-dbus
 Requires: python3-gobject

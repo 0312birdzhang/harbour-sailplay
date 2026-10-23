@@ -47,6 +47,7 @@
 #include <QPainter>
 #include <QQuickItem>
 #include <QPointer>
+#include <QRegion>
 #include <QQuickPaintedItem>
 #include <QQuickRenderControl>
 #include <QQuickWindow>
@@ -336,11 +337,10 @@ private:
         fprintf(stderr, "imira-comp: launching %s (%s)\n",
                 qPrintable(app.name), qPrintable(app.exec));
         // Env that a TV app needs; everything else is inherited from us.
-        // QT_IM_MODULE=none: a desktop has a real keyboard — no Maliit
-        // on-screen keyboard popping over the TV windows.
+        // Use the display-scoped Maliit peer, never the phone keyboard.
         QString cmd = QStringLiteral(
             "QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=imira-comp-0 "
-            "QT_IM_MODULE=none "
+            "QT_IM_MODULE=Maliit MALIIT_SERVER_ADDRESS=unix:path=/run/user/100000/sailplay-maliit/socket "
             "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100000/dbus/"
             "user_bus_socket ");
         const QString extra = extraEnvFor(app.id);
@@ -769,6 +769,43 @@ public:
                         m_width, m_height);
                 return;
             }
+            if (appKey == QLatin1String("sailplay-input-method")) {
+                // Input-method windows are transparent overlays. They must
+                // never enter the content stack or hide the application.
+                item->setParentItem(m_window->contentItem());
+                item->setZ(100000);
+                m_inputPanels.append(item);
+                auto fit = [this, item]() {
+                    const QSize size = item->surface()->size();
+                    if (size.isEmpty()) return;
+                    item->setSize(QSizeF(size));
+                    const qreal scale = qMin(qreal(m_width)/size.width(), qreal(m_height)/size.height());
+                    item->setScale(scale);
+                    item->setPosition(QPointF((m_width-size.width()*scale)/2,
+                                             m_height-size.height()*scale));
+                };
+                fit();
+                auto updateRegion = [surface, item]() {
+                    const QVariant value = surface->windowProperties().value(QStringLiteral("MOUSE_REGION"));
+                    if (value.canConvert<QRegion>())
+                        item->setVisible(!value.value<QRegion>().isEmpty());
+                };
+                updateRegion();
+                QObject::connect(surface, &QWaylandSurface::windowPropertyChanged, item,
+                    [updateRegion](const QString &name, const QVariant &) {
+                        if (name == QLatin1String("MOUSE_REGION")) updateRegion();
+                    });
+                QObject::connect(surface, &QWaylandSurface::sizeChanged, item, fit);
+                auto remove = [this, item]() {
+                    m_inputPanels.removeAll(item);
+                    item->setVisible(false);
+                    item->deleteLater();
+                };
+                QObject::connect(surface, &QWaylandSurface::unmapped, item, remove);
+                QObject::connect(surface, &QWaylandSurface::surfaceDestroyed, item, remove);
+                fprintf(stderr, "imira-comp: private input-method overlay mapped\n");
+                return;
+            }
             // CarLife content window (a launched app): fills the area right
             // of the shell's dock, no chrome. CarPlay-style, an app replaces
             // the one on screen. Native apps honour the resize request and
@@ -919,6 +956,17 @@ public:
 
     QWaylandSurfaceItem *contentItemAt(const QPointF &pos) const
     {
+        for (int i = m_inputPanels.size()-1; i >= 0; --i) {
+            const QPointer<QWaylandSurfaceItem> panel = m_inputPanels.at(i);
+            if (!panel || !panel->isVisible()) continue;
+            const QPointF local = panel->mapFromScene(pos);
+            const QVariant mouseRegion = panel->surface()->windowProperties().value(QStringLiteral("MOUSE_REGION"));
+            const bool accepts = mouseRegion.canConvert<QRegion>()
+                ? mouseRegion.value<QRegion>().contains(local.toPoint())
+                : panel->surface()->inputRegionContains(local.toPoint());
+            if (panel->contains(local) && accepts)
+                return panel.data();
+        }
         // Dashboard apps are previews; the shell opens them on a tap.
         if (m_dashboard && m_shellItem
                 && m_shellItem->contains(m_shellItem->mapFromScene(pos)))
@@ -936,6 +984,8 @@ public:
             return m_shellItem;
         return nullptr;
     }
+
+    bool isInputPanel(QWaylandSurfaceItem *item) const { return m_inputPanels.contains(item); }
 
     void removeContent(QWaylandSurfaceItem *item)
     {
@@ -1319,6 +1369,7 @@ private:
     QWaylandSurfaceItem *m_shellItem = nullptr;
     QQuickItem *m_contentRoot = nullptr;
     QVector<ContentWin> m_content;
+    QList<QPointer<QWaylandSurfaceItem> > m_inputPanels;
     bool m_dashboard = false;
     QString m_dashboardMap, m_dashboardMusic;
     int m_nextContentZ = 10;
@@ -1576,7 +1627,12 @@ private:
                     qPrintable(item->surface()->title()), local.x(),
                     local.y(), (void *)mf);
             if (ev.value) {
+                if (!m_comp->isInputPanel(item))
+                    seat->setKeyboardFocus(item->surface());
+                QPointer<QWaylandSurface> keyboardFocus(seat->keyboardFocus());
                 seat->sendMousePressEvent(b, local, m_pos);
+                if (m_comp->isInputPanel(item) && keyboardFocus)
+                    seat->setKeyboardFocus(keyboardFocus.data());
                 if (b == Qt::LeftButton)
                     m_contentPressed = item;
             } else {

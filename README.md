@@ -68,6 +68,7 @@ Sailplay builds on and learns from the following projects:
 - [Qt](https://www.qt.io/) and Sailfish Silica / Amber.Mpris: the application UI, Wayland compositor and music controls.
 - [x264](https://www.videolan.org/developers/x264.html): software H.264 video encoding.
 - [FFmpeg](https://ffmpeg.org/): AAC audio encoding.
+- [Maliit](https://github.com/sailfishos/maliit-framework): the independent car-side keyboard server and Qt input-method connection.
 - [PulseAudio](https://www.freedesktop.org/wiki/Software/PulseAudio/): playback routing and monitor capture.
 - [BlueZ](https://www.bluez.org/) and [ConnMan](https://git.kernel.org/pub/scm/network/connman/connman.git/): Bluetooth and Wi-Fi integration.
 - [OpenSSL](https://www.openssl.org/) and [cryptography](https://cryptography.io/): runtime cryptographic operations and development tests.

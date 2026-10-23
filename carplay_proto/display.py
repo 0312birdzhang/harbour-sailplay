@@ -129,6 +129,14 @@ class DisplayPipeline:
             if comp.poll() is not None or time.monotonic()>deadline:
                 raise RuntimeError('virtual compositor failed to start')
             time.sleep(.1)
+        keyboard=self.launch('keyboard','env XDG_RUNTIME_DIR=/run/user/100000 '
+                    'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100000/dbus/user_bus_socket '
+                    'python3 /opt/sailplay/scripts/keyboard-server.py')
+        deadline=time.monotonic()+8
+        while not os.path.exists('/run/user/100000/sailplay-maliit/socket'):
+            if keyboard.poll() is not None or time.monotonic()>deadline:
+                raise RuntimeError('private keyboard failed to start')
+            time.sleep(.1)
         self.ui=self.launch('carui','env XDG_RUNTIME_DIR=/run/user/100000 '
                     'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100000/dbus/user_bus_socket '
                     'QT_QPA_PLATFORM=wayland '
