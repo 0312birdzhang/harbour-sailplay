@@ -720,7 +720,7 @@ public:
         // Hard-clipped app viewport: even a stale/ignored 1920-wide buffer
         // cannot draw outside the 1780px content area.
         m_contentRoot = new QQuickItem(m_window->contentItem());
-        kDockW = qRound(140.0 * width / 1920.0);
+        kDockW = qRound(140.0 * qMin(width / (height > width ? 900.0 : 1920.0), height / 720.0));
         m_contentRoot->setPosition(QPointF(kDockW, 0));
         m_contentRoot->setSize(QSizeF(m_width - kDockW, m_height));
         m_contentRoot->setClip(true);
@@ -1074,7 +1074,7 @@ public:
     void layoutDashboard()
     {
         const qreal aw = m_width - kDockW;
-        const qreal scale = m_width / 1920.0;
+        const qreal scale = qMin(m_width / (m_height > m_width ? 900.0 : 1920.0), m_height / 720.0);
         const qreal gap = 16 * scale;
         const qreal top = 16.0 * m_height / 720.0;
         const qreal mapWidth = (aw - 3 * gap) * 0.65;

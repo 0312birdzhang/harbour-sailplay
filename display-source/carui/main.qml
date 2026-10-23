@@ -10,13 +10,18 @@ Window {
     Item {
     CarPalette { id: carPalette }
     id: root
-    width: 1920; height: projectionWindow.height / scale
-    scale: projectionWindow.width / 1920
+    property bool portrait: projectionWindow.height > projectionWindow.width
+    width: projectionWindow.width / scale; height: projectionWindow.height / scale
+    scale: Math.min(projectionWindow.width / (portrait ? 900 : 1920), projectionWindow.height / 720)
     transformOrigin: Item.TopLeft
     property string clockText: Qt.formatDateTime(new Date(), "hh:mm")
     property var status: carController.status
     property var apps: carController.tiles
-    property int pageCount: Math.max(1, Math.ceil((apps.length + 1) / 8))
+    property int gridColumns: Math.max(1, Math.min(6, Math.floor((width - dock.width - 64) / 350)))
+    property int gridRows: Math.max(1, Math.min(4, Math.floor((height - 114) / 270)))
+    property int pageSize: gridColumns * gridRows
+    property int pageCount: Math.max(1, Math.ceil((apps.length + 1) / pageSize))
+    onPageCountChanged: if (pages.currentIndex >= pageCount) pages.goToPage(pageCount - 1)
     property int battery: status.battery === undefined ? -1 : status.battery
     property int mobile: status.mobileStrength === undefined ? -1 : status.mobileStrength
     property string notice: ""
@@ -105,22 +110,30 @@ Window {
             width: pages.width; height: pages.height
             property int pageIndex: index
             Grid {
-                x: 40; y: 22; columns: 4
+                anchors.centerIn: parent
+                columns: root.gridColumns
+                property real cellWidth: (pages.width - 64) / columns
+                property real cellHeight: Math.min(330, (pages.height - 48) / root.gridRows)
                 Repeater {
-                    model: 8
+                    model: root.pageSize
                     Item {
-                        property int appIndex: parent.parent.pageIndex * 8 + index - 1
+                        property int appIndex: parent.parent.pageIndex * root.pageSize + index - 1
                         property bool oem: appIndex === -1
                         property var entry: appIndex >= 0 && appIndex < root.apps.length ? root.apps[appIndex] : null
                         visible: oem || entry !== null
-                        width: (pages.width - 80) / 4; height: (pages.height - 35) / 2
+                        width: parent.cellWidth; height: parent.cellHeight
+                        property real iconSize: Math.min(156, width * 0.55, height * 0.55)
+                        property real labelSize: Math.min(31, iconSize * 0.23)
+                        property real labelGap: iconSize * 0.12
+                        property real tileTop: (height - iconSize - labelGap - labelSize * 1.3) / 2
                         Rectangle {
-                            y: 27; anchors.horizontalCenter: parent.horizontalCenter
-                            width: 156; height: 156; radius: 34; color: oem ? carPalette.oem : carPalette.tile; opacity: appTouch.pressed ? 0.65 : 1
+                            y: parent.tileTop; anchors.horizontalCenter: parent.horizontalCenter
+                            width: parent.iconSize; height: width; radius: width * 34 / 156; color: oem ? carPalette.oem : carPalette.tile; opacity: appTouch.pressed ? 0.65 : 1
                             Image { anchors.fill: parent; anchors.margins: 8; fillMode: Image.PreserveAspectFit; source: entry && entry.icon ? "file://" + entry.icon : ""; visible: !oem && source !== "" }
-                            Text { anchors.centerIn: parent; visible: !oem && entry && !entry.icon; text: entry ? entry.name.charAt(0) : ""; font.pixelSize: 76; color: carPalette.text }
+                            Text { anchors.centerIn: parent; visible: !oem && entry && !entry.icon; text: entry ? entry.name.charAt(0) : ""; font.pixelSize: parent.width * 76 / 156; color: carPalette.text }
                             Canvas {
                                 anchors.centerIn: parent; width: 112; height: 98; visible: oem
+                                scale: parent.width / 156
                                 property color ink: carPalette.text
                                 onInkChanged: requestPaint()
                                 onPaint: {
@@ -131,7 +144,7 @@ Window {
                                 }
                             }
                         }
-                        Text { y: 203; width: parent.width - 20; anchors.horizontalCenter: parent.horizontalCenter; text: oem ? qsTranslate("Sailplay", "Return to car") : entry ? entry.name : ""; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; font.pixelSize: 31; color: carPalette.text }
+                        Text { y: parent.tileTop + parent.iconSize + parent.labelGap; width: parent.width - 20; anchors.horizontalCenter: parent.horizontalCenter; text: oem ? qsTranslate("Sailplay", "Return to car") : entry ? entry.name : ""; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; font.pixelSize: parent.labelSize; color: carPalette.text }
                         MouseArea {
                             id: appTouch; anchors.fill: parent
                             onClicked: {
