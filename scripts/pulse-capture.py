@@ -119,7 +119,14 @@ def restore_main_volume(state):
     props=main_volume_properties()
     current=props.GetAll('com.Meego.MainVolume2')
     if (int(current['StepCount'])!=old['StepCount'] or str(current['CallState'])!=old['CallState']):
-        raise RuntimeError('system volume context changed; restoration retained for retry')
+        # MainVolume steps are route-specific (e.g. Bluetooth 20, speaker 12).
+        # An old step cannot be restored into the new scale. Keeping the new
+        # route's setting is safe; retaining this record would poison every
+        # subsequent capture startup before it can produce PCM.
+        print('Audio volume context changed; preserving current step={}/{} callState={}'.format(
+            int(current['CurrentStep']), int(current['StepCount']), str(current['CallState'])),
+            file=sys.stderr,flush=True)
+        return False
     props.Set('com.Meego.MainVolume2','CurrentStep',dbus.UInt32(old['CurrentStep']))
     actual=int(props.Get('com.Meego.MainVolume2','CurrentStep'))
     if actual!=old['CurrentStep']:raise RuntimeError('system volume restoration not confirmed')
@@ -394,13 +401,16 @@ def main():
             try:
                 if pactl('get-default-sink').strip()==name:pactl('set-default-sink',default_sink)
             except subprocess.SubprocessError:pass
-        try:restore_outputs()
+        restored=False
+        try:
+            restore_outputs()
+            restored=True
         except Exception as error:
             print('Audio output restoration pending: '+type(error).__name__,file=sys.stderr,flush=True)
         if module:
             try:pactl('unload-module',module)
             except subprocess.SubprocessError:pass
-        print('Audio monitor removed; playback restored',file=sys.stderr,flush=True)
+        print('Audio monitor removed; '+('playback restored' if restored else 'routing recovery pending'),file=sys.stderr,flush=True)
 
 if __name__=='__main__':
     try:

@@ -84,3 +84,24 @@ class PrivateMuteTests(unittest.TestCase):
                 pulse.restore_outputs()
             self.assertLess(calls.index(('restore-system-step',)),calls.index(('set-sink-mute','sink.primary_output','0')))
             self.assertFalse(record.exists())
+
+
+class ChangedVolumeContextTests(unittest.TestCase):
+    def test_bluetooth_to_speaker_change_does_not_poison_next_capture(self):
+        import json,tempfile,types
+        from pathlib import Path
+        from unittest.mock import Mock,patch,call
+        props=Mock()
+        props.GetAll.return_value={'CurrentStep':2,'StepCount':12,'CallState':'inactive'}
+        state={'mutes':{'sink.primary_output':False},'volumes':{'sink.primary_output':['20000']},
+               'mainVolume':{'CurrentStep':6,'StepCount':20,'CallState':'background'}}
+        with tempfile.TemporaryDirectory() as directory:
+            record=Path(directory)/'recovery.json';record.write_text(json.dumps(state))
+            with patch.object(pulse,'ROUTE_STATE',str(record)),patch.object(pulse,'main_volume_properties',return_value=props),patch.dict('sys.modules',{'dbus':types.SimpleNamespace(UInt32=int)}),patch.object(pulse,'pactl',return_value='') as command:
+                pulse.restore_outputs()
+                self.assertFalse(record.exists())
+                props.Set.assert_not_called()
+                self.assertIn(call('set-sink-mute','sink.primary_output','0'),command.call_args_list)
+                command.reset_mock()
+                pulse.restore_outputs()
+                command.assert_not_called()

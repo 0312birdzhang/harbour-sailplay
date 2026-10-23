@@ -144,3 +144,15 @@ authentication but closed the session about four seconds after the first IDR.
 Desay or WILDLANDER, while retaining the new header for Honda and other peers.
 This is a compatibility experiment; a displayed image and stable session must
 still be verified on the receiver. Screen reopen retains the selected profile.
+
+
+### Audio recovery across output modes (0.1.1-52)
+
+A saved Bluetooth main-volume scale (6/20 on the observed device) can differ
+from the current speaker scale (1/12). Previously this raised before removing
+the route recovery record. Every new pulse-capture process then failed during
+startup, causing AAC EOF and aborting projection before sending video.
+A changed scale or call state now preserves the current main-volume setting
+and permits the remaining route cleanup to finish. A same-context write or
+verification failure still retains the record rather than claiming recovery.
+Cleanup logs now distinguish restored playback from recovery still pending.
