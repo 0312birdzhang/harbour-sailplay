@@ -33,7 +33,8 @@ class DisplayFramesTests(unittest.TestCase):
             if path == '/proc/101/cmdline':
                 return io.BytesIO(b'carlife-capture\0--out\0/unrelated\0')
             return io.BytesIO(b'carlife-capture\0--out\0' + pipeline.fifo.encode() + b'\0')
-        with patch('builtins.open', side_effect=read), \
+        with patch('carplay_proto.display.os.path.exists', return_value=True), \
+             patch('builtins.open', side_effect=read), \
              patch('os.readlink', side_effect=lambda path: '/usr/bin/su' if path == '/proc/100/exe' else '/opt/sailplay/carlife-capture'), \
              patch('os.kill') as kill:
             pipeline.request_keyframe()
@@ -42,7 +43,8 @@ class DisplayFramesTests(unittest.TestCase):
     def test_keyframe_never_signals_unrelated_process(self):
         pipeline = DisplayPipeline()
         pipeline.capture = SimpleNamespace(pid=100)
-        with patch('builtins.open', return_value=io.StringIO('')), \
+        with patch('carplay_proto.display.os.path.exists', return_value=True), \
+             patch('builtins.open', return_value=io.StringIO('')), \
              patch('os.readlink', return_value='/usr/bin/su'), patch('os.kill') as kill:
             with self.assertRaises(RuntimeError):
                 pipeline.request_keyframe()

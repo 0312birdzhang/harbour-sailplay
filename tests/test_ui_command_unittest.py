@@ -86,9 +86,11 @@ class UiCommandTests(unittest.TestCase):
             self.assertTrue(predicate())
         try:
             for resource in modes['resources']:resource.update(entity=2,permanentEntity=2)
-            changed.set();wait_for(lambda:audio.gain==0)
+            changed.set();wait_for(lambda:audio.gain==0 and screen.ownership.call_args is not None
+                                  and screen.ownership.call_args.args==(2,))
             screen.ownership.assert_called_with(2)
-            resume.set();wait_for(lambda:audio.gain==1)
+            resume.set();wait_for(lambda:audio.gain==1 and screen.ownership.call_args is not None
+                                 and screen.ownership.call_args.args==(1,))
             self.assertTrue(all(r['entity']==1 and r['permanentEntity']==1 for r in modes['resources']))
             screen.ownership.assert_called_with(1)
             self.assertEqual([r['entity'] for r in payloads[-1]['params']['resources']],[1,1])
