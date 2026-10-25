@@ -24,6 +24,28 @@ class SenderTests(unittest.TestCase):
         self.assertEqual(int.from_bytes(r[10], 'big'), 200)
         self.assertEqual(int.from_bytes(r[7], 'big'), 12300)
         self.assertEqual(self.frames(), [])
+    def test_distance_display_uses_iap2_units_not_map_units(self):
+        # Real vehicle regression: 600 m was rendered as 600 km with raw unit 0.
+        for distance, unit, raw, text, wire_unit in (
+                (600, 0, 600, b'600\0', b'\x02'),
+                (999, 0, 999, b'999\0', b'\x02'),
+                (1000, 0, 1000, b'1.0\0', b'\x00'),
+                (1.2, 1, 1200, b'1.2\0', b'\x00'),
+                (100, 2, 30, b'30\0', b'\x02'),
+                (1, 3, 1609, b'1.6\0', b'\x00')):
+            with self.subTest(distance=distance, unit=unit):
+                self.sender.reset()
+                self.snapshot['navigation'].update(nextDistance=distance,
+                    nextDistanceUnit=unit, remainingDistance=distance,
+                    remainingDistanceUnit=unit)
+                route = {p.id:p.payload for p in self.frames()[1].parameters()}
+                self.assertEqual(route[11], text)
+                self.assertEqual(route[12], wire_unit)
+                self.assertEqual(route[8], text)
+                self.assertEqual(route[9], wire_unit)
+                self.assertEqual(int.from_bytes(route[10], 'big'), raw)
+                self.assertEqual(int.from_bytes(route[7], 'big'), raw)
+
     def test_requires_subscription_and_supported_messages(self):
         self.assertEqual(self.sender.frames(self.snapshot,self.sub,set()), [])
         self.sub.offer(Frame(STOP,encode_param(0,b'\0\x09')))

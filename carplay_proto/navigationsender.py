@@ -13,8 +13,10 @@ def meters(value, unit):
 
 
 def display(value):
-    # iAP2 metric units: 0 meters, 1 kilometers. Normalize imperial inputs.
-    return (format(value / 1000, '.1f'), 1) if value >= 1000 else (str(value), 0)
+    # iAP2 display units differ from Organic Maps: 0 kilometers, 2 meters.
+    # HSAE maps raw 0 -> internal 2 (km), raw 2 -> internal 0 (m).
+    # Normalize imperial inputs to meters before selecting the display unit.
+    return (format(value / 1000, '.1f'), 0) if value >= 1000 else (str(value), 2)
 
 
 class NavigationSender:
@@ -45,7 +47,7 @@ class NavigationSender:
             # HSAE suppresses state 0 before forwarding to the meter. State 2
             # reaches its end-guidance path and clears cached instructions.
             logging.info('navigation tx clear component=%s reason=%s', component, nav.get('state', 'expired'))
-            return [route_update(2, 0, '', '', 0, '0', 0, '0', 0,
+            return [route_update(2, 0, '', '', 0, '0', 2, '0', 2,
                                  component=component, next_meters=0, remaining_meters=0)]
         signature = (snapshot['pid'], snapshot['startTicks'], snapshot['sequence'])
         if signature == self.last:
@@ -66,6 +68,8 @@ class NavigationSender:
                                component, 0, next_m, remaining_m)]
         self.last = signature
         self.active = True
-        logging.info('navigation tx component=%s sequence=%s turn=%s frames=5202,5201',
-                     component, snapshot['sequence'], turn)
+        logging.info('navigation tx component=%s sequence=%s turn=%s next_m=%s '
+                     'next_display=%s next_unit=%s remaining_m=%s remaining_display=%s '
+                     'remaining_unit=%s frames=5202,5201', component, snapshot['sequence'],
+                     turn, next_m, next_text, next_unit, remaining_m, remaining_text, remaining_unit)
         return result

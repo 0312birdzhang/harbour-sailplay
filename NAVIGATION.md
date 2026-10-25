@@ -229,3 +229,26 @@ python3 -m unittest discover -s tests -p 'test_navigationfeed_unittest.py' -v
 ```
 
 These are offline codec/subscription tests, not a real navigation session.
+
+
+## Instrument distance-unit correction (0.1.1-55)
+
+Vehicle testing confirmed navigation reaches the instrument cluster, but 600 m
+was displayed as 600 km. Organic Maps units (`0=m`, `1=km`) must not be reused
+as iAP2 display-unit enums: this receiver expects `2=m`, `0=km`.
+
+Read-only inspection of the saved `libHSMeterLink.so` confirms the receiver
+lookup at virtual address `0x2c648`: raw units 0..4 map to internal units
+`[2, 6, 0, 5, 4]`. `getGroupCarplayMsg` selects this table at `0x1d954`..`0x1d96c`
+and passes the result to `sendbackNaviInfo` at `0x1dcd4`. Its small-distance
+branch at `0x1bddc` accepts internal units 0/4/5 (m/feet/yard); the other branch
+handles km/miles. This is ordinary objdump evidence, not a REA tool result.
+The binary identity remains the one recorded above.
+
+The sender now selects raw display unit 2 below 1000 m and 0 for kilometers,
+for both next-maneuver and remaining-distance text. Numeric meter fields 10
+and 7 remain unchanged. Diagnostic tx logs record normalized meter values,
+display strings and raw units, allowing the next vehicle run to be checked
+without logging route names. Tests cover 600 m, the 999/1000 m boundary,
+kilometers and imperial-input normalization. Corrected cluster rendering still
+requires a subsequent vehicle test.
