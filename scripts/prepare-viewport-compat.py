@@ -18,6 +18,14 @@ def adapt(text):
         'width: Screen.width': 'width: window._sailplayPortraitWidth',
         'height: Screen.height': 'height: window._sailplayPortraitHeight',
     }
+    # Newer Silica derives stack dimensions from contentArea instead of Screen.
+    # Both layouts still need the client-specific output for the outer area.
+    for name, first, second in (('_screenWidth', 'width', 'height'),
+                                ('_screenHeight', 'height', 'width')):
+        old = 'readonly property real %s: stack.verticalOrientation ? Screen.%s : Screen.%s' % (name, first, second)
+        alternate = old.replace('Screen.', 'contentArea.')
+        if text.count(old) == 0 and text.count(alternate) == 1:
+            changes[alternate] = changes.pop(old)
     if any(text.count(old)!=1 for old in changes) or text.count('id: window')!=1:
         raise RuntimeError('unsupported Silica ApplicationWindow source; viewport override not applied')
     for old,new in changes.items():text=text.replace(old,new)

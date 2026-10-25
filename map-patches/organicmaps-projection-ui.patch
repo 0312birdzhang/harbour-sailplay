@@ -1,0 +1,183 @@
+diff --git a/sailfish/app.cpp b/sailfish/app.cpp
+index 2429c04..70fd841 100644
+--- a/sailfish/app.cpp
++++ b/sailfish/app.cpp
+@@ -181,6 +181,9 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
+   view->rootContext()->setContextProperty(QStringLiteral("urlHandler"), &urlHandler);
+   view->rootContext()->setContextProperty(QStringLiteral("mapsStorage"), &mapsStorage);
+   view->rootContext()->setContextProperty(QStringLiteral("downloads"), &downloads);
++  bool const projected = qgetenv("WAYLAND_DISPLAY").contains("imira-comp") &&
++                         qgetenv("SAILPLAY_NAVIGATION_EXPORT") == "1";
++  view->rootContext()->setContextProperty(QStringLiteral("sailplayProjected"), projected);
+   // A local file loads synchronously.
+   view->setSource(SailfishApp::pathToMainQml());
+   if (view->status() != QQuickView::Ready)
+diff --git a/sailfish/map_item.cpp b/sailfish/map_item.cpp
+index 7cea0a0..84e28e9 100644
+--- a/sailfish/map_item.cpp
++++ b/sailfish/map_item.cpp
+@@ -109,6 +109,7 @@ MapItem::MapItem(QQuickItem * parent)
+ 
+   connect(this, &QQuickItem::windowChanged, this, &MapItem::OnWindowChanged);
+   connect(qGuiApp, &QGuiApplication::applicationStateChanged, this, &MapItem::OnApplicationStateChanged);
++  connect(this, &QQuickItem::visibleChanged, this, &MapItem::UpdateRenderingState);
+   connect(m_routing.get(), &Routing::navigatingChanged, this, [this] { UpdateLocationService(); });
+ 
+   m_storageSlot = m_framework.GetStorage().Subscribe([this](storage::CountryId const &) {
+@@ -560,13 +561,26 @@ void MapItem::OnCompassReading()
+ void MapItem::OnWindowChanged(QQuickWindow * window)
+ {
+   if (window)
++  {
++    connect(window, &QWindow::visibleChanged, this, &MapItem::UpdateRenderingState, Qt::UniqueConnection);
+     CreateEngine();
++    UpdateRenderingState();
++  }
++}
++
++void MapItem::OnApplicationStateChanged(Qt::ApplicationState)
++{
++  UpdateRenderingState();
+ }
+ 
+-void MapItem::OnApplicationStateChanged(Qt::ApplicationState state)
++void MapItem::UpdateRenderingState()
+ {
+-  // Sailfish keeps a minimized app running as its cover; stop drawing until it is active again.
+-  bool const inBackground = state != Qt::ApplicationActive;
++  // Silica can hide the map item together with phone activation even though the
++  // car compositor still consumes its last buffer. Projected render lifetime
++  // follows the app process, which Sailplay retires on session end.
++  bool const projected = qgetenv("WAYLAND_DISPLAY").contains("imira-comp") &&
++                         qgetenv("SAILPLAY_NAVIGATION_EXPORT") == "1";
++  bool const inBackground = !projected && QGuiApplication::applicationState() != Qt::ApplicationActive;
+   if (!m_contextFactory || inBackground == m_inBackground)
+     return;
+ 
+@@ -598,7 +612,9 @@ void MapItem::CreateEngine()
+   QScreen * screen = window()->screen();
+   qreal const dpi = screen ? screen->physicalDotsPerInch() : 0;
+   m_visualScale = dpi > 0 ? df::DPI2VS(dpi) : 2.0;
+-  LOG(LINFO, ("Screen DPI:", dpi, "visual scale:", m_visualScale));
++  LOG(LINFO, ("Screen DPI:", dpi, "visual scale:", m_visualScale,
++               "projected:", qgetenv("SAILPLAY_NAVIGATION_EXPORT").toStdString(),
++               "display:", qgetenv("WAYLAND_DISPLAY").toStdString()));
+ 
+   // The screen size only changes on rotation, so the framebuffers needn't be rounded up.
+   m_contextFactory = std::make_unique<qt::common::QtOGLContextFactory>(shareContext, true /* exactSize */);
+@@ -645,6 +661,7 @@ void MapItem::CreateEngine()
+ 
+   // E.g. a recording restored after a restart.
+   UpdateLocationService();
++  UpdateRenderingState();
+   emit engineCreated();
+ }
+ 
+diff --git a/sailfish/map_item.hpp b/sailfish/map_item.hpp
+index 1951b5e..0e8338e 100644
+--- a/sailfish/map_item.hpp
++++ b/sailfish/map_item.hpp
+@@ -179,6 +179,7 @@ protected:
+ private:
+   void OnWindowChanged(QQuickWindow * window);
+   void OnApplicationStateChanged(Qt::ApplicationState state);
++  void UpdateRenderingState();
+   void CreateEngine();
+   void Resize(int width, int height);
+   void UpdateWidgetLayout();
+diff --git a/sailfish/qml/pages/MapPage.qml b/sailfish/qml/pages/MapPage.qml
+index ce76585..a440c09 100644
+--- a/sailfish/qml/pages/MapPage.qml
++++ b/sailfish/qml/pages/MapPage.qml
+@@ -14,6 +14,11 @@ Page {
+ 
+     // For children, where "map: map" would bind to their own property.
+     readonly property QtObject mapItem: map
++    readonly property bool projected: sailplayProjected
++    // Phone theme metrics are too large for a short car viewport, including split view.
++    readonly property real navigationScale: projected
++        ? Math.max(0.1, Math.min(1, height / (480 * Theme.pixelRatio), width / (800 * Theme.pixelRatio))) : 1
++    readonly property bool wideLayout: projected ? width > height : isLandscape
+     readonly property bool navigating: map.routing.navigating
+     readonly property bool choosingPosition: map.choosingPosition
+     readonly property bool mapIsDark: {
+@@ -32,10 +37,10 @@ Page {
+     // The lowest of the controls along the top right edge, or the padded camera notch in portrait; the compass
+     // goes below it.
+     readonly property real topControlsBottom: recordingButton.visible ? recordingButton.y + recordingButton.height
+-        : navigationTopPanel.visible ? navigationTopPanel.y + navigationTopPanel.rightHeight
++        : navigationTopPanel.visible ? navigationTopPanel.y + navigationTopPanel.rightHeight * page.navigationScale
+         : topInset + buttonMargin
+     // Silica keeps landscape pages clear of the camera notch.
+-    readonly property real topInset: page.orientation === Orientation.Portrait ? Screen.topCutout.height : 0
++    readonly property real topInset: !projected && page.orientation === Orientation.Portrait ? Screen.topCutout.height : 0
+     // For the navigation and downloader layouts that keep the Android sizes.
+     readonly property real androidDp: myPositionButton.androidDp
+     readonly property real buttonMargin: Theme.paddingMedium
+@@ -135,15 +140,15 @@ Page {
+             leftMargin: -leftInset
+             rightMargin: -rightInset
+         }
+-        leftInset: page.orientation === Orientation.Landscape ? Screen.topCutout.height : 0
+-        rightInset: page.orientation === Orientation.LandscapeInverted ? Screen.topCutout.height : 0
++        leftInset: !page.projected && page.orientation === Orientation.Landscape ? Screen.topCutout.height : 0
++        rightInset: !page.projected && page.orientation === Orientation.LandscapeInverted ? Screen.topCutout.height : 0
+         // Keeps the scale line and attribution above the bottom row with its padding, or above the navigation
+         // panel.
+-        bottomWidgetsOffset: page.navigating ? navigationBottomPanel.height
++        bottomWidgetsOffset: page.navigating ? navigationBottomPanel.height * page.navigationScale
+                            : bottomButtons.visible ? bottomButtons.height + 2 * page.buttonMargin : 0
+         topWidgetsOffset: page.topControlsBottom
+         // Routes are fitted into the map above the open sheets.
+-        viewportBottomInset: page.navigating ? navigationBottomPanel.height : page.bottomPanelsSize
++        viewportBottomInset: page.navigating ? navigationBottomPanel.height * page.navigationScale : page.bottomPanelsSize
+     }
+ 
+     Connections {
+@@ -226,10 +231,12 @@ Page {
+ 
+     NavigationTopPanel {
+         id: navigationTopPanel
++        scale: page.navigationScale
++        transformOrigin: Item.TopLeft
++        width: (parent.width - 2 * page.buttonMargin) / scale
+         anchors {
+             top: parent.top
+             left: parent.left
+-            right: parent.right
+             // margin_half around the Android turn card.
+             margins: page.buttonMargin
+             // Clear the camera notch in portrait, like the Silica PageHeader does.
+@@ -238,7 +245,7 @@ Page {
+         visible: page.navigating
+         navigation: map.routing.navigation
+         androidDp: page.androidDp
+-        landscape: page.isLandscape
++        landscape: page.wideLayout
+     }
+ 
+     MapButton {
+@@ -434,7 +441,7 @@ Page {
+             bottom: navigationBottomPanel.top
+             margins: page.buttonMargin
+         }
+-        visible: page.navigating
++        visible: page.navigating && !page.projected
+         spacing: page.buttonMargin
+ 
+         // The first tap offers categories to show on the map, the next opens search; a shown category or another
+@@ -481,11 +488,13 @@ Page {
+ 
+     NavigationBottomPanel {
+         id: navigationBottomPanel
++        scale: page.navigationScale
++        transformOrigin: Item.BottomLeft
+         anchors {
+             left: parent.left
+             bottom: parent.bottom
+         }
+-        width: page.isPortrait ? parent.width : Math.round(parent.width * 0.4)
++        width: (page.wideLayout ? Math.round(parent.width * 0.4) : parent.width) / scale
+         radius: page.isPortrait ? 0 : Theme.paddingLarge
+         visible: page.navigating
+         navigation: map.routing.navigation
