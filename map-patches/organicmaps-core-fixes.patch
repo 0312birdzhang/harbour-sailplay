@@ -1,0 +1,2125 @@
+diff --git a/libs/coding/blake3.cpp b/libs/coding/blake3.cpp
+index bed77f1f..d2ebf241 100644
+--- a/libs/coding/blake3.cpp
++++ b/libs/coding/blake3.cpp
+@@ -2,10 +2,8 @@
+ 
+ #include "coding/base64.hpp"
+ #include "coding/internal/file_data.hpp"
+-#include "coding/reader.hpp"
+ 
+ #include "base/assert.hpp"
+-#include "base/logging.hpp"
+ 
+ #include <algorithm>
+ 
+@@ -39,29 +37,20 @@ std::string Blake3::FinalizeToBase64(size_t numBytes) const
+ // static
+ Blake3::Hash Blake3::Calculate(std::string const & filePath)
+ {
+-  try
+-  {
+-    base::FileData file(filePath, base::FileData::Op::READ);
+-    uint64_t const fileSize = file.Size();
+-
+-    Blake3 hasher;
+-    uint64_t currSize = 0;
+-    uint32_t constexpr kFileBufferSize = 64 * 1024;
+-    unsigned char buffer[kFileBufferSize];
+-    while (currSize < fileSize)
+-    {
+-      auto const toRead = std::min(kFileBufferSize, static_cast<uint32_t>(fileSize - currSize));
+-      file.Read(currSize, buffer, toRead);
+-      hasher.Update(buffer, toRead);
+-      currSize += toRead;
+-    }
+-    return hasher.Finalize();
+-  }
+-  catch (Reader::Exception const & ex)
++  base::FileData file(filePath, base::FileData::Op::READ);
++  uint64_t const fileSize = file.Size();
++  Blake3 hasher;
++  uint64_t currSize = 0;
++  uint32_t constexpr kFileBufferSize = 64 * 1024;
++  unsigned char buffer[kFileBufferSize];
++  while (currSize < fileSize)
+   {
+-    LOG(LERROR, ("Error reading file:", filePath, ex.what()));
++    auto const toRead = static_cast<size_t>(std::min<uint64_t>(kFileBufferSize, fileSize - currSize));
++    file.Read(currSize, buffer, toRead);
++    hasher.Update(buffer, toRead);
++    currSize += toRead;
+   }
+-  return {};
++  return hasher.Finalize();
+ }
+ 
+ // static
+diff --git a/libs/coding/blake3.hpp b/libs/coding/blake3.hpp
+index d4129783..9e82cf13 100644
+--- a/libs/coding/blake3.hpp
++++ b/libs/coding/blake3.hpp
+@@ -39,12 +39,13 @@ public:
+   // Same as Finalize(), but returns base64 of the first |numBytes| of the digest.
+   std::string FinalizeToBase64(size_t numBytes = kHashSizeInBytes) const;
+ 
+-  // One-shot helpers.
++  // One-shot file helpers throw Reader::Exception on I/O errors.
+   static Hash Calculate(std::string const & filePath);
+   static std::string CalculateBase64(std::string const & filePath, size_t numBytes = kHashSizeInBytes);
+   // Same as CalculateBase64, but truncated to the per-map integrity hash size used
+   // for map files referenced in countries.json. See the definition for details.
+   static std::string CalculateMwmBase64(std::string const & filePath);
++
+   static Hash CalculateForString(std::string_view str);
+ 
+ private:
+diff --git a/libs/coding/coding_tests/blake3_test.cpp b/libs/coding/coding_tests/blake3_test.cpp
+index ba3e121f..296f5249 100644
+--- a/libs/coding/coding_tests/blake3_test.cpp
++++ b/libs/coding/coding_tests/blake3_test.cpp
+@@ -3,6 +3,7 @@
+ #include "coding/base64.hpp"
+ #include "coding/blake3.hpp"
+ #include "coding/hex.hpp"
++#include "coding/reader.hpp"
+ 
+ #include "platform/platform_tests_support/scoped_file.hpp"
+ 
+@@ -106,10 +107,41 @@ UNIT_TEST(BLAKE3_File_And_Truncation)
+   TEST_EQUAL(shortB64, base64::Encode(memView.substr(0, kShortBytes)), ());
+   TEST_EQUAL(shortB64.size(), 12, ());
+   TEST_EQUAL(shortB64.find('='), std::string::npos, ());
++  TEST_EQUAL(Blake3::CalculateMwmBase64(path), shortB64, ());
+ 
+   // Streaming FinalizeToBase64 must agree with the one-shot truncated form.
+   Blake3 hasher;
+   hasher.Update(contents.data(), contents.size());
+   TEST_EQUAL(hasher.FinalizeToBase64(kShortBytes), shortB64, ());
+ }
++
++UNIT_TEST(BLAKE3_File_BufferBoundaries)
++{
++  for (size_t const size : {size_t{0}, size_t{65535}, size_t{65536}, size_t{65537}, size_t{131073}})
++  {
++    auto const bytes = MakeVectorInput(size);
++    std::string const contents(bytes.begin(), bytes.end());
++    platform::tests_support::ScopedFile file("blake3_boundaries.tmp", contents);
++    TEST_EQUAL(Blake3::Calculate(file.GetFullPath()), Blake3::CalculateForString(contents), (size));
++  }
++}
++
++UNIT_TEST(BLAKE3_File_Missing)
++{
++  std::string path;
++  {
++    platform::tests_support::ScopedFile file("blake3_missing.tmp", std::string{});
++    path = file.GetFullPath();
++  }
++  bool openError = false;
++  try
++  {
++    Blake3::CalculateMwmBase64(path);
++  }
++  catch (Reader::OpenException const &)
++  {
++    openError = true;
++  }
++  TEST(openError, (path));
++}
+ }  // namespace blake3_test
+diff --git a/libs/map/map_tests/routing_manager_tests.cpp b/libs/map/map_tests/routing_manager_tests.cpp
+index 1263a410..269e377f 100644
+--- a/libs/map/map_tests/routing_manager_tests.cpp
++++ b/libs/map/map_tests/routing_manager_tests.cpp
+@@ -3,6 +3,8 @@
+ #include "map/framework.hpp"
+ #include "map/routing_mark.hpp"
+ 
++#include "routing/ruler_router.hpp"
++
+ #include "storage/routing_helpers.hpp"
+ 
+ #include "platform/gui_thread.hpp"
+@@ -891,4 +893,93 @@ UNIT_TEST(RoutingManager_OptimizeRoutePointsPreservesPassedStops)
+   TEST(passedPoint->IsPassed(), ());
+   TEST(!passedPoint->IsVisible(), ());
+ }
++UNIT_TEST(RoutingManager_RebuildClearsUnavailableAlternatives)
++{
++  class Delegate final : public RoutingManager::Delegate
++  {
++  public:
++    void OnRouteFollow(routing::RouterType) override {}
++  } delegate;
++  class Router final : public routing::IRouter
++  {
++  public:
++    std::string GetName() const override { return "route choices test"; }
++    void ClearState() override {}
++    void SetGuides(routing::GuidesTracks &&) override {}
++    bool FindClosestProjectionToRoad(m2::PointD const &, m2::PointD const &, double, routing::EdgeProj &) override
++    {
++      return false;
++    }
++    routing::RouterResultCode CalculateRoute(routing::Checkpoints const & checkpoints, m2::PointD const & direction,
++                                             bool adjust, bool alternatives, routing::RouterDelegate const & delegate,
++                                             routing::RoutesResult & result) override
++    {
++      if (++m_calls == 2)
++        return routing::RouterResultCode::RouteNotFound;
++      auto const code = static_cast<routing::IRouter &>(m_ruler).CalculateRoute(checkpoints, direction, adjust,
++                                                                                alternatives, delegate, result);
++      auto alternative = result.GetActive();
++      alternative.SetDiffMidpoint({2, 5});
++      result.m_routes.emplace_back(std::move(alternative));
++      return code;
++    }
++
++  private:
++    routing::RulerRouter m_ruler;
++    size_t m_calls = 0;
++  };
++
++  auto & platform = GetPlatform();
++  auto gui = std::make_unique<TestGuiThread>();
++  auto * guiThread = gui.get();
++  platform.SetGuiThread(std::move(gui));
++  SCOPE_GUARD(restoreGui, [&platform] { platform.SetGuiThread(std::make_unique<platform::GuiThread>()); });
++  BookmarkManager bookmarks(BookmarkManager::Callbacks([]() -> StringsBundle const &
++  {
++    static StringsBundle const bundle;
++    return bundle;
++  }, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr));
++  RoutingManager manager(RoutingManager::Callbacks(nullptr, nullptr, nullptr, nullptr, nullptr), delegate);
++  manager.SetBookmarkManager(&bookmarks);
++  auto & session = manager.RoutingSession();
++  session.SetRouter(std::make_unique<Router>(), nullptr);
++  bool built = false;
++  session.SetRoutingCallbacks([&built](routing::RoutesResult const &, routing::RouterResultCode) { built = true; },
++                              nullptr, nullptr, nullptr);
++  session.BuildRoute(routing::Checkpoints({1, 2}, {5, 6}), routing::RouterDelegate::kNoTimeout);
++  while (!built)
++    guiThread->RunNext();
++  TEST(session.SwapActiveAlternative(1), ());
++  {
++    auto edit = bookmarks.GetEditSession();
++    edit.CreateUserMark<RouteAltMark>({1, 2});
++    edit.CreateUserMark<RouteAltMark>({2, 5});
++  }
++  TEST_EQUAL(bookmarks.GetUserMarkIds(UserMark::Type::ROUTE_ALT).size(), 2, ());
++
++  bool failed = false;
++  session.RebuildRoute({1, 2}, [](routing::RoutesResult const &, routing::RouterResultCode) {}, nullptr,
++                       [&failed](routing::RouterResultCode) { failed = true; }, routing::RouterDelegate::kNoTimeout,
++                       routing::SessionState::RouteRebuilding, false);
++  TEST(bookmarks.GetUserMarkIds(UserMark::Type::ROUTE_ALT).empty(),
++       ("Unavailable controls must disappear immediately."));
++  session.RouteCall([](routing::RoutesResult const & result)
++  {
++    TEST_EQUAL(result.m_routes.size(), 1, ());
++    TEST_EQUAL(result.m_activeIdx, 0, ());
++    TEST_EQUAL(result.GetActive().GetDiffMidpoint(), std::optional<m2::PointD>({2, 5}),
++               ("The selected route must be retained."));
++  });
++  while (!failed)
++    guiThread->RunNext();
++  TEST(bookmarks.GetUserMarkIds(UserMark::Type::ROUTE_ALT).empty(), ());
++
++  bool recovered = false;
++  session.RebuildRoute({1, 2}, [&recovered](routing::RoutesResult const &, routing::RouterResultCode) {
++    recovered = true;
++  }, nullptr, nullptr, routing::RouterDelegate::kNoTimeout, routing::SessionState::RouteRebuilding, false);
++  while (!recovered)
++    guiThread->RunNext();
++  TEST(session.SwapActiveAlternative(1), ("Fresh alternatives must become selectable."));
++}
+ }  // namespace routing_manager_tests
+diff --git a/libs/map/routing_manager.cpp b/libs/map/routing_manager.cpp
+index 9e7a84b7..fbec454c 100644
+--- a/libs/map/routing_manager.cpp
++++ b/libs/map/routing_manager.cpp
+@@ -348,6 +348,12 @@ RoutingManager::RoutingManager(Callbacks && callbacks, Delegate & delegate)
+   { OnRebuildRouteReady(result, code); }, [this](uint64_t routeId, storage::CountriesSet const & absentCountries)
+   { OnNeedMoreMaps(routeId, absentCountries); }, [this](RouterResultCode code) { OnRemoveRoute(code); });
+ 
++  m_routingSession.SetChangeSessionStateCallback([this](SessionState, SessionState state)
++  {
++    if (state == SessionState::RouteBuilding || state == SessionState::RouteRebuilding)
++      ClearAlternativeRoutes();
++  });
++
+   m_routingSession.SetCheckpointCallback([this](size_t passedCheckpointIdx)
+   {
+     GetPlatform().RunTask(Platform::Thread::Gui, [this, passedCheckpointIdx]()
+@@ -733,8 +739,15 @@ void RoutingManager::CreateRouteAltMarks(routing::RoutesResult const & result)
+                      i == result.m_activeIdx});
+   }
+ 
+-  GetPlatform().RunTask(Platform::Thread::Gui, [this, infos = std::move(infos)]()
++  GetPlatform().RunTask(Platform::Thread::Gui, [this, routesId = result.m_routesId, infos = std::move(infos)]()
+   {
++    // A rebuild or navigation can hide choices before this queued task runs.
++    bool hasAlternatives = false;
++    m_routingSession.RouteCall([&](RoutesResult const & current)
++    { hasAlternatives = current.m_routesId == routesId && current.m_routes.size() > 1; });
++    if (!hasAlternatives || m_routingSession.IsFollowing())
++      return;
++
+     // Place each balloon up or down based on the midpoint's latitude relative to the others:
+     // the northern midpoint (larger mercator y) gets the up balloon, the southern one goes down.
+     // +y in drape vertex-normal space is downward, so (0, -N) lifts the body above the pivot.
+diff --git a/libs/map/routing_manager.hpp b/libs/map/routing_manager.hpp
+index e2090d18..8260db8f 100644
+--- a/libs/map/routing_manager.hpp
++++ b/libs/map/routing_manager.hpp
+@@ -165,8 +165,8 @@ public:
+   void CloseRouting(bool removeRoutePoints);
+ 
+   /// \brief Activate alternative |idx| (typically triggered by tapping its ETA balloon).
+-  /// Returns false if the index is out of range or already active. Re-renders the drape so
+-  /// the newly-active variant is highlighted and the previously-active becomes the alternative.
++  /// Returns false if the index is out of range, already active, or its adjustment caches are
++  /// unavailable or belong to another result. Re-renders the drape to highlight the selected variant.
+   bool SwapActiveAlternative(size_t idx);
+ 
+   /// \brief Hit-tests |mercator| against the alternative-route polylines. If one is closer than
+@@ -338,8 +338,7 @@ private:
+   void CreateRouteAltMarks(routing::RoutesResult const & result);
+ 
+   // Synchronously remove the alternative-route subroutes from drape and clear the alt ETA
+-  // balloons. Used when entering navigation mode (FollowRoute) so the alts drawn at build
+-  // time disappear immediately. The active route is left untouched.
++  // balloons when rebuilding or entering navigation. The active route is left untouched.
+   void ClearAlternativeRoutes();
+ 
+   /// \returns false if the location could not be matched to the route and should be matched to the
+diff --git a/libs/platform/location.hpp b/libs/platform/location.hpp
+index d8510ed6..e468a167 100644
+--- a/libs/platform/location.hpp
++++ b/libs/platform/location.hpp
+@@ -29,7 +29,8 @@ enum TLocationSource
+   ETizen,  // Deprecated but left here for backward compatibility.
+   EGeoClue2,
+   EPredictor,
+-  EUser
++  EUser,
++  EGeoClue
+ };
+ 
+ /// Our structure ALWAYS has valid lat, lon and horizontal accuracy.
+diff --git a/libs/platform/location_service/location_service.cpp b/libs/platform/location_service/location_service.cpp
+index 8e349bab..99235279 100644
+--- a/libs/platform/location_service/location_service.cpp
++++ b/libs/platform/location_service/location_service.cpp
+@@ -9,8 +9,7 @@
+ #if defined(OMIM_OS_MAC)
+ std::unique_ptr<location::LocationService> CreateAppleLocationService(location::LocationObserver &);
+ #elif defined(QT_LOCATION_SERVICE)
+-std::unique_ptr<location::LocationService> CreateQtLocationService(location::LocationObserver &,
+-                                                                   std::string const & sourceName);
++std::unique_ptr<location::LocationService> CreateQtLocationService(location::LocationObserver &);
+ #endif
+ 
+ namespace location
+@@ -73,9 +72,9 @@ public:
+   {
+ #if defined(QT_LOCATION_SERVICE)
+ #if defined(OMIM_OS_SAILFISH)
+-    m_services.push_back(CreateQtLocationService(*this, "geoclue"));
++    m_services.push_back(CreateQtLocationService(*this));
+ #elif defined(OMIM_OS_LINUX)
+-    m_services.push_back(CreateQtLocationService(*this, "geoclue2"));
++    m_services.push_back(CreateQtLocationService(*this));
+ #endif                                 // OMIM_OS_LINUX
+ #elif defined(APPLE_LOCATION_SERVICE)  // No QT_LOCATION_SERVICE
+     m_services.push_back(CreateAppleLocationService(*this));
+diff --git a/libs/platform/location_service/qt_location_service.cpp b/libs/platform/location_service/qt_location_service.cpp
+index 51ef7678..45a529ca 100644
+--- a/libs/platform/location_service/qt_location_service.cpp
++++ b/libs/platform/location_service/qt_location_service.cpp
+@@ -53,13 +53,23 @@ static location::TLocationError TLocationErrorFromQGeoPositionInfoError(QGeoPosi
+ 
+ location::TLocationSource QStringToTLocationSource(QString const & sourceName)
+ {
+-  // Qt 5 on Sailfish OS uses the GeoClue 1 plugin ("geoclue"). An undefined source makes GpsInfo invalid,
+-  // which drops every fix.
+-  if ("geoclue2" == sourceName || "geoclue" == sourceName)
++  if ("geoclue2" == sourceName)
+     return location::TLocationSource::EGeoClue2;
++  if ("geoclue" == sourceName)
++    return location::TLocationSource::EGeoClue;
+ 
+   return location::TLocationSource::EUndefined;
+ }
++
++std::string AvailableGeoClueSource()
++{
++  auto const sources = QGeoPositionInfoSource::availableSources();
++  for (auto const * name : {"geoclue2", "geoclue"})
++    if (sources.contains(QLatin1String(name)))
++      return name;
++  LOG(LWARNING, ("No GeoClue position source among", sources.join(", ").toStdString()));
++  return "geoclue2";
++}
+ }  // namespace
+ 
+ QtLocationService::QtLocationService(location::LocationObserver & observer, std::string const & sourceName)
+@@ -116,6 +126,8 @@ QtLocationService::QtLocationService(location::LocationObserver & observer, std:
+ 
+ void QtLocationService::OnLocationUpdate(QGeoPositionInfo const & info)
+ {
++  if (!m_started)
++    return;
+   if (!info.isValid())
+   {
+     LOG(LWARNING,
+@@ -135,6 +147,8 @@ void QtLocationService::OnLocationUpdate(QGeoPositionInfo const & info)
+ 
+ void QtLocationService::OnErrorOccurred(QGeoPositionInfoSource::Error positioningError)
+ {
++  if (!m_started)
++    return;
+   LOG(LWARNING, ("Location error occured QGeoPositionInfoSource::Error code:", positioningError));
+   m_clientIsActive = false;
+   m_observer.OnLocationError(TLocationErrorFromQGeoPositionInfoError(positioningError));
+@@ -145,7 +159,7 @@ void QtLocationService::OnSupportedPositioningMethodsChanged()
+   auto positioningMethods = m_positionSource->supportedPositioningMethods();
+   LOG(LDEBUG, ("Supported Positioning Method changed for:", m_positionSource->sourceName().toStdString(),
+                "to:", positioningMethods));
+-  if (positioningMethods == QGeoPositionInfoSource::NoPositioningMethods)
++  if (m_started && positioningMethods == QGeoPositionInfoSource::NoPositioningMethods)
+   {
+     m_clientIsActive = false;
+     m_observer.OnLocationError(location::TLocationError::EGPSIsOff);
+@@ -156,14 +170,14 @@ void QtLocationService::Start()
+ {
+   if (m_positionSource)
+   {
++    m_started = true;
+     LOG(LDEBUG, ("Starting Updates from:", m_positionSource->sourceName().toStdString()));
+ #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+     // Request the first update with a timeout to 30 minutes which is needed on devices that don't make use of `A-GNSS`
+     // and can't get a lock within Qt's default `UPDATE_TIMEOUT_COLDSTART` (currently 2 minutes).
+     m_positionSource->requestUpdate(1800000);
+ #else
+-    // Qt 5 (the GeoClue 1 plugin on Sailfish OS) emits a timeout at once from requestUpdate() without a fix,
+-    // so subscribe right away.
++    // Qt 5's GeoClue 1 plugin emits a timeout at once from requestUpdate() without a fix, so subscribe right away.
+     m_positionSource->startUpdates();
+     m_clientIsActive = true;
+ #endif
+@@ -172,15 +186,16 @@ void QtLocationService::Start()
+ 
+ void QtLocationService::Stop()
+ {
++  m_started = false;
+   if (m_positionSource && m_clientIsActive)
+   {
+     LOG(LDEBUG, ("Stopping Updates from:", m_positionSource->sourceName().toStdString()));
+     m_positionSource->stopUpdates();
++    m_clientIsActive = false;
+   }
+ }
+ 
+-std::unique_ptr<location::LocationService> CreateQtLocationService(location::LocationObserver & observer,
+-                                                                   std::string const & sourceName)
++std::unique_ptr<location::LocationService> CreateQtLocationService(location::LocationObserver & observer)
+ {
+-  return std::make_unique<QtLocationService>(observer, sourceName);
++  return std::make_unique<QtLocationService>(observer, AvailableGeoClueSource());
+ }
+diff --git a/libs/platform/location_service/qt_location_service.hpp b/libs/platform/location_service/qt_location_service.hpp
+index 32673645..0d541732 100644
+--- a/libs/platform/location_service/qt_location_service.hpp
++++ b/libs/platform/location_service/qt_location_service.hpp
+@@ -16,6 +16,8 @@ class QtLocationService
+   // /gdbus-org.freedesktop.GeoClue2.Client.html#gdbus-property-org-freedesktop-GeoClue2-Client.Active
+   // But `QGeoPositionInfoSource` doesn't expose that so we have to deduce its state.
+   bool m_clientIsActive = false;
++  // Signals queued before Stop() still arrive afterwards.
++  bool m_started = false;
+ 
+ public:
+   explicit QtLocationService(location::LocationObserver &, std::string const &);
+diff --git a/libs/routing/async_router.cpp b/libs/routing/async_router.cpp
+index 9fd4e444..a3ec0b15 100644
+--- a/libs/routing/async_router.cpp
++++ b/libs/routing/async_router.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include "base/logging.hpp"
+ #include "base/macros.hpp"
++#include "base/scope_guard.hpp"
+ #include "base/timer.hpp"
+ 
+ #include <functional>
+@@ -75,7 +76,12 @@ void AsyncRouter::RouterDelegateProxy::Cancel()
+ bool AsyncRouter::FindClosestProjectionToRoad(m2::PointD const & point, m2::PointD const & direction, double radius,
+                                               EdgeProj & proj)
+ {
+-  /// @todo No need to put a lock_guard at first glance. May be wrong ..
++  lock_guard ul(m_guard);
++  // Calculations mutate the road graph caches. GPS updates can return the session to OnRoute
++  // before a rebuild finishes, so guard projection by worker activity, not session state.
++  if (!m_router || m_isCalculating)
++    return false;
++
+   return m_router->FindClosestProjectionToRoad(point, direction, radius, proj);
+ }
+ 
+@@ -154,6 +160,7 @@ void AsyncRouter::SetRouter(std::unique_ptr<IRouter> && router, std::unique_ptr<
+ 
+   m_router = std::move(router);
+   m_absentRegionsFinder = std::move(finder);
++  m_cachedRoutesId = 0;
+ }
+ 
+ void AsyncRouter::CalculateRoute(Checkpoints const & checkpoints, m2::PointD const & direction, bool adjustToPrevRoute,
+@@ -168,6 +175,7 @@ void AsyncRouter::CalculateRoute(Checkpoints const & checkpoints, m2::PointD con
+   m_startDirection = direction;
+   m_adjustToPrevRoute = adjustToPrevRoute;
+   m_needAlternatives = needAlternatives;
++  m_cachedRoutesId = 0;
+ 
+   ResetDelegate();
+ 
+@@ -189,16 +197,23 @@ void AsyncRouter::ClearState()
+   lock_guard ul(m_guard);
+ 
+   m_clearState = true;
++  m_cachedRoutesId = 0;
+   m_threadCondVar.notify_one();
+ 
+   ResetDelegate();
+ }
+ 
+-void AsyncRouter::SwapAltRouteToActive()
++bool AsyncRouter::SwapAltRouteToActive(uint64_t routesId)
+ {
+   lock_guard ul(m_guard);
+-  if (m_router)
+-    m_router->SwapAltRouteToActive();
++  // Requests invalidate the generation before the worker can touch its caches. Only a successful
++  // completion republishes it together with the idle state.
++  if (!m_router || routesId == 0 || routesId != m_cachedRoutesId)
++    return false;
++
++  ASSERT(!m_isCalculating, ());
++  m_router->SwapAltRouteToActive();
++  return true;
+ }
+ 
+ // static
+@@ -294,6 +309,7 @@ void AsyncRouter::CalculateRoute()
+     checkpoints = m_checkpoints;
+     startDirection = m_startDirection;
+     adjustToPrevRoute = m_adjustToPrevRoute;
++    needAlternatives = m_needAlternatives;
+     delegateProxy = m_delegateProxy;
+     router = m_router;
+     absentRegionsFinder = m_absentRegionsFinder;
+@@ -301,7 +317,7 @@ void AsyncRouter::CalculateRoute()
+     routerName = router->GetName();
+     router->SetGuides(std::move(m_guides));
+     m_guides.clear();
+-    needAlternatives = m_needAlternatives;
++    m_isCalculating = true;
+   }
+ 
+   auto result = std::make_shared<RoutesResult>(router->GetName(), routeId);
+@@ -312,6 +328,18 @@ void AsyncRouter::CalculateRoute()
+ 
+   try
+   {
++    bool completed = false;
++    // Publish the cache generation together with the idle state. A failed or superseded request
++    // cannot safely associate the old displayed alternatives with the router's current caches.
++    SCOPE_GUARD(routerIdle, [&]
++    {
++      lock_guard ul(m_guard);
++      bool const cacheIsValid = completed && code == RouterResultCode::NoError && result->IsValid() &&
++                                m_delegateProxy == delegateProxy && !m_clearState;
++      m_cachedRoutesId = cacheIsValid ? routeId : 0;
++      m_isCalculating = false;
++    });
++
+     LOG(LINFO, ("Calculating the route of direct length", checkpoints.GetSummaryLengthBetweenPointsMeters(),
+                 "m. checkpoints:", checkpoints, "startDirection:", startDirection, "router name:", router->GetName()));
+ 
+@@ -330,6 +358,7 @@ void AsyncRouter::CalculateRoute()
+     LogCode(code, elapsedSec);
+     if (result->IsValid())
+       LOG(LINFO, ("ETA:", result->GetActive().GetTotalTimeSec(), "sec."));
++    completed = true;
+   }
+   catch (RootException const & e)
+   {
+diff --git a/libs/routing/async_router.hpp b/libs/routing/async_router.hpp
+index 159abfcf..ae61344e 100644
+--- a/libs/routing/async_router.hpp
++++ b/libs/routing/async_router.hpp
+@@ -53,7 +53,8 @@ public:
+   /// Interrupt routing and clear buffers
+   void ClearState();
+   /// Forward to the underlying IRouter. See IRouter::SwapAltRouteToActive.
+-  void SwapAltRouteToActive();
++  /// Refuses pending/running calculations and result IDs that do not match the cached adjustment state.
++  bool SwapAltRouteToActive(uint64_t routesId);
+ 
+   bool FindClosestProjectionToRoad(m2::PointD const & point, m2::PointD const & direction, double radius,
+                                    EdgeProj & proj);
+@@ -115,6 +116,11 @@ private:
+   m2::PointD m_startDirection = m2::PointD::Zero();
+   bool m_adjustToPrevRoute = false;
+   bool m_needAlternatives = true;
++  /// True while the routing thread has exclusive ownership of the router for a calculation request.
++  bool m_isCalculating = false;
++  /// Id of the valid result represented by the router's adjustment caches. Requests and state
++  /// clearing invalidate it immediately; only successful completion can publish a nonzero id.
++  uint64_t m_cachedRoutesId = 0;
+   std::shared_ptr<RouterDelegateProxy> m_delegateProxy;
+   std::shared_ptr<AbsentRegionsFinder> m_absentRegionsFinder;
+   std::shared_ptr<IRouter> m_router;
+diff --git a/libs/routing/routing_session.cpp b/libs/routing/routing_session.cpp
+index afc61ca4..e08695bf 100644
+--- a/libs/routing/routing_session.cpp
++++ b/libs/routing/routing_session.cpp
+@@ -81,6 +81,15 @@ void RoutingSession::RebuildRoute(m2::PointD const & startPoint, ReadyCallback c
+ {
+   CHECK_THREAD_CHECKER(m_threadChecker, ());
+   CHECK(m_router, ());
++  // Rebuilds replace adjustment caches, so the retained result must expose only the followed
++  // variant until a new result supplies usable alternatives.
++  if (m_lastResult && m_lastResult->m_routes.size() > 1)
++  {
++    if (m_lastResult->m_activeIdx != 0)
++      m_lastResult->m_routes.front() = std::move(m_lastResult->GetActive());
++    m_lastResult->m_routes.resize(1);
++    m_lastResult->m_activeIdx = 0;
++  }
+   SetState(routeRebuildingState);
+ 
+   ++m_routingRebuildCount;
+@@ -89,12 +98,13 @@ void RoutingSession::RebuildRoute(m2::PointD const & startPoint, ReadyCallback c
+ 
+   Checkpoints checkpoints(m_checkpoints);
+   checkpoints.SetPointFrom(startPoint);
+-  // Use old-style callback construction, because lambda constructs buggy function on Android
+-  // (callback param isn't captured by value).
+   // RoutingManager::InsertRoute draws alternatives only outside navigation, don't pay for them.
+   m_router->CalculateRoute(checkpoints, direction, adjustToPrevRoute, !m_isFollowing /* needAlternatives */,
+-                           DoReadyCallback(*this, readyCallback), needMoreMapsCallback, removeRouteCallback,
+-                           m_progressCallback, timeoutSec);
++                           [this, readyCallback](std::shared_ptr<RoutesResult> const & result, RouterResultCode code)
++  {
++    AssignRoute(result, code);
++    readyCallback(result ? *result : RoutesResult{}, code);
++  }, needMoreMapsCallback, removeRouteCallback, m_progressCallback, timeoutSec);
+ }
+ 
+ m2::PointD RoutingSession::GetEndPoint() const
+@@ -103,12 +113,6 @@ m2::PointD RoutingSession::GetEndPoint() const
+   return m_checkpoints.GetFinish();
+ }
+ 
+-void RoutingSession::DoReadyCallback::operator()(std::shared_ptr<RoutesResult> const & result, RouterResultCode e)
+-{
+-  m_rs.AssignRoute(result, e);
+-  m_callback(result ? *result : RoutesResult{}, e);
+-}
+-
+ void RoutingSession::RemoveRoute()
+ {
+   CHECK_THREAD_CHECKER(m_threadChecker, ());
+@@ -570,6 +574,10 @@ bool RoutingSession::SwapActiveAlternative(size_t idx)
+   if (!m_lastResult || idx >= m_lastResult->m_routes.size() || idx == m_lastResult->m_activeIdx)
+     return false;
+ 
++  // Validate the cache generation before changing the GUI-owned selection.
++  if (!m_router || !m_router->SwapAltRouteToActive(m_lastResult->m_routesId))
++    return false;
++
+   m_lastResult->m_activeIdx = idx;
+   // Promote the newly-active RouteBase to a followed Route, preserving the session's routing settings.
+   auto route = std::make_shared<Route>(m_lastResult->GetActive());
+@@ -588,8 +596,6 @@ bool RoutingSession::SwapActiveAlternative(size_t idx)
+ 
+   m_speedCameraManager.Reset();
+   m_speedCameraManager.SetRoute(m_route);
+-  if (m_router)
+-    m_router->SwapAltRouteToActive();
+   return true;
+ }
+ 
+diff --git a/libs/routing/routing_session.hpp b/libs/routing/routing_session.hpp
+index 4d392af2..90ac2c9c 100644
+--- a/libs/routing/routing_session.hpp
++++ b/libs/routing/routing_session.hpp
+@@ -150,8 +150,9 @@ public:
+   void AssignRouteForTesting(Route && route, RouterResultCode e);
+ 
+   /// \brief Swap the currently active route to alternative |idx| inside m_lastResult.
+-  /// Used when the user taps an alternative ETA balloon. Returns false if the index is out of range
+-  /// or already active. The follow state (m_route) is rebuilt from the newly-promoted RouteBase.
++  /// Used when the user taps an alternative ETA balloon. Returns false if the index is out of range,
++  /// already active, or the router refuses the swap (it is calculating, or the result is stale).
++  /// The follow state (m_route) is rebuilt from the newly-promoted RouteBase.
+   bool SwapActiveAlternative(size_t idx);
+ 
+   bool IsSpeedCamLimitExceeded() const { return m_speedCameraManager.IsSpeedLimitExceeded(); }
+@@ -163,16 +164,6 @@ public:
+   double GetCompletionPercent() const;
+ 
+ private:
+-  struct DoReadyCallback
+-  {
+-    RoutingSession & m_rs;
+-    ReadyCallback m_callback;
+-
+-    DoReadyCallback(RoutingSession & rs, ReadyCallback const & cb) : m_rs(rs), m_callback(cb) {}
+-
+-    void operator()(std::shared_ptr<RoutesResult> const & result, RouterResultCode e);
+-  };
+-
+   void AssignRoute(std::shared_ptr<RoutesResult> const & result, RouterResultCode e);
+   /// RemoveRoute() removes m_route and resets route attributes (m_lastDistance, m_moveAwayCounter).
+   void RemoveRoute();
+diff --git a/libs/routing/routing_tests/async_router_test.cpp b/libs/routing/routing_tests/async_router_test.cpp
+index 4714fc2c..40361af2 100644
+--- a/libs/routing/routing_tests/async_router_test.cpp
++++ b/libs/routing/routing_tests/async_router_test.cpp
+@@ -1,134 +1,396 @@
+ #include "testing/testing.hpp"
+ 
++#include "routing/async_router.hpp"
+ #include "routing/route.hpp"
+ #include "routing/router.hpp"
+-#include "routing/routing_callbacks.hpp"
++#include "routing/routing_tests/tools.hpp"
+ 
++#include "geometry/mercator.hpp"
++
++#include "base/exception.hpp"
++#include "base/logging.hpp"
++#include "base/scope_guard.hpp"
++
++#include <chrono>
+ #include <condition_variable>
++#include <future>
+ #include <memory>
+ #include <mutex>
+ #include <string>
++#include <thread>
++#include <type_traits>
++#include <utility>
+ #include <vector>
+ 
+ namespace async_router_test
+ {
+ using namespace routing;
+-using namespace std::placeholders;
+ using namespace std;
++using namespace std::chrono_literals;
+ 
+-class DummyRouter : public IRouter
++Route MakeValidRoute(Checkpoints const & checkpoints)
+ {
+-  RouterResultCode m_result;
+-
+-public:
+-  DummyRouter(RouterResultCode code, set<string> const & absent) : m_result(code) {}
+-
+-  // IRouter overrides:
+-  string GetName() const override { return "Dummy"; }
+-  void SetGuides(GuidesTracks && /* guides */) override {}
+-  RouterResultCode CalculateRoute(Checkpoints const & checkpoints, m2::PointD const & startDirection,
+-                                  bool adjustToPrevRoute, bool needAlternatives, RouterDelegate const & delegate,
+-                                  RoutesResult & result) override
++  auto const & points = checkpoints.GetPoints();
++  Route route;
++  route.SetGeometry(points.cbegin(), points.cend());
++  vector<RouteSegment> segments;
++  double distanceMeters = 0.0;
++  double distanceMercator = 0.0;
++  for (size_t i = 1; i < points.size(); ++i)
+   {
+-    Route route;
+-    route.SetGeometry(checkpoints.GetPoints().cbegin(), checkpoints.GetPoints().cend());
+-    result.MakeFrom(GetName(), std::move(route));
+-    return m_result;
++    distanceMeters += mercator::DistanceOnEarth(points[i - 1], points[i]);
++    distanceMercator += points[i - 1].Length(points[i]);
++    turns::TurnItem const turn(
++        i, i + 1 == points.size() ? turns::CarDirection::ReachedYourDestination : turns::CarDirection::None);
++    segments.emplace_back(Segment(0, 0, i - 1, true), turn,
++                          geometry::PointWithAltitude(points[i], geometry::kDefaultAltitudeMeters),
++                          RouteSegment::RoadNameInfo{});
++    segments.back().SetDistancesAndTime(distanceMeters, distanceMercator, 0.0);
+   }
++  route.SetRouteSegments(std::move(segments));
++  route.SetSubroutes(vector<Route::SubrouteAttrs>{Route::SubrouteAttrs(
++      geometry::PointWithAltitude(points.front(), geometry::kDefaultAltitudeMeters),
++      geometry::PointWithAltitude(points.back(), geometry::kDefaultAltitudeMeters), 0, points.size() - 1)});
++  return route;
++}
+ 
+-  bool FindClosestProjectionToRoad(m2::PointD const & point, m2::PointD const & direction, double radius,
+-                                   EdgeProj & proj) override
+-  {
+-    return false;
+-  }
++enum class Outcome
++{
++  Success,
++  BlockedSuccess,
++  Failure,
++  Exception
+ };
+ 
+-struct DummyRoutingCallbacks
++class TestRouter final : public IRouter
+ {
+-  vector<RouterResultCode> m_codes;
+-  vector<set<string>> m_absent;
+-  condition_variable m_cv;
+-  mutex m_lock;
+-  uint32_t const m_expected;
+-  uint32_t m_called;
++public:
++  explicit TestRouter(vector<Outcome> outcomes) : m_outcomes(std::move(outcomes)) {}
++  string GetName() const override { return "async test"; }
++  void ClearState() override {}
++  void SetGuides(GuidesTracks &&) override {}
++  void SwapAltRouteToActive() override { ++m_swaps; }
++
++  RouterResultCode CalculateRoute(Checkpoints const & checkpoints, m2::PointD const &, bool, bool,
++                                  RouterDelegate const &, RoutesResult & result) override
++  {
++    CHECK_LESS(m_calculations, m_outcomes.size(), ());
++    auto const outcome = m_outcomes[m_calculations++];
++    if (outcome == Outcome::BlockedSuccess)
++    {
++      unique_lock lock(m_mutex);
++      m_started = true;
++      m_cv.notify_all();
++      m_cv.wait(lock, [this] { return m_release; });
++    }
++    if (outcome == Outcome::Failure)
++      return RouterResultCode::RouteNotFound;
+ 
+-  explicit DummyRoutingCallbacks(uint32_t expectedCalls) : m_expected(expectedCalls), m_called(0) {}
++    result.MakeFrom(GetName(), MakeValidRoute(checkpoints));
++    auto alternative =
++        MakeValidRoute(Checkpoints(CheckpointsGeometry{checkpoints.GetStart(), {2, 5}, checkpoints.GetFinish()}));
++    alternative.SetDiffMidpoint({2, 5});
++    result.m_routes.emplace_back(std::move(static_cast<RouteBase &>(alternative)));
++    if (outcome == Outcome::Exception)
++      MYTHROW(RootException, ("Test exception after constructing a valid result"));
++    return RouterResultCode::NoError;
++  }
+ 
+-  // ReadyCallbackOwnership callback
+-  void operator()(shared_ptr<Route> route, RouterResultCode code)
++  bool FindClosestProjectionToRoad(m2::PointD const &, m2::PointD const &, double, EdgeProj &) override
+   {
+-    CHECK(route, ());
+-    m_codes.push_back(code);
+-    TestAndNotifyReadyCallbacks();
++    ++m_projections;
++    return false;
+   }
+ 
+-  // NeedMoreMapsCallback callback
+-  void operator()(uint64_t routeId, set<string> const & absent)
++  bool WaitStarted()
+   {
+-    m_codes.push_back(RouterResultCode::NeedMoreMaps);
+-    m_absent.emplace_back(absent);
+-    TestAndNotifyReadyCallbacks();
++    unique_lock lock(m_mutex);
++    return m_cv.wait_for(lock, 30s, [this] { return m_started; });
+   }
+ 
+-  void WaitFinish()
++  void Release()
+   {
+-    unique_lock<mutex> lk(m_lock);
+-    return m_cv.wait(lk, [this] { return m_called == m_expected; });
++    lock_guard lock(m_mutex);
++    m_release = true;
++    m_cv.notify_all();
+   }
+ 
+-  void TestAndNotifyReadyCallbacks()
++  bool WaitIdle(AsyncRouter & async)
+   {
++    auto const before = m_projections;
++    auto const deadline = chrono::steady_clock::now() + 30s;
++    while (chrono::steady_clock::now() < deadline)
+     {
+-      lock_guard<mutex> calledLock(m_lock);
+-      ++m_called;
+-      TEST_LESS_OR_EQUAL(m_called, m_expected, ("The result callback called more times than expected."));
++      EdgeProj proj;
++      async.FindClosestProjectionToRoad({1, 2}, {0, 1}, 50, proj);
++      if (m_projections > before)
++        return true;
++      this_thread::sleep_for(1ms);
+     }
+-    m_cv.notify_all();
++    return false;
+   }
++
++  size_t m_swaps = 0;
++  size_t m_projections = 0;
++
++private:
++  vector<Outcome> const m_outcomes;
++  size_t m_calculations = 0;
++  mutex m_mutex;
++  condition_variable m_cv;
++  bool m_started = false;
++  bool m_release = false;
++};
++
++using ReadyResult = pair<uint64_t, RouterResultCode>;
++
++struct ReadyRequest
++{
++  // Keep the promise alive when cancellation drops its callback, so an undelivered future stays pending.
++  shared_ptr<promise<ReadyResult>> m_ready = make_shared<promise<ReadyResult>>();
++  future<ReadyResult> m_future = m_ready->get_future();
+ };
+ 
+-// TODO(o.khlopkova) Uncomment and update these tests.
+-
+-// UNIT_CLASS_TEST(AsyncGuiThreadTest, NeedMoreMapsSignalTest)
+-//{
+-//  set<string> const absentData({"test1", "test2"});
+-//  unique_ptr<IOnlineFetcher> fetcher(new DummyFetcher(absentData));
+-//  unique_ptr<IRouter> router(new DummyRouter(RouterResultCode::NoError, {}));
+-//  DummyRoutingCallbacks resultCallback(2 /* expectedCalls */);
+-//  AsyncRouter async(DummyStatisticsCallback, nullptr /* pointCheckCallback */);
+-//  async.SetRouter(std::move(router), std::move(fetcher));
+-//  async.CalculateRoute(Checkpoints({1, 2} /* start */, {5, 6} /* finish */), {3, 4}, false,
+-//                       bind(ref(resultCallback), _1, _2) /* readyCallback */,
+-//                       bind(ref(resultCallback), _1, _2) /* needMoreMapsCallback */,
+-//                       nullptr /* removeRouteCallback */, nullptr /* progressCallback */);
+-//
+-//  resultCallback.WaitFinish();
+-//
+-//  TEST_EQUAL(resultCallback.m_codes.size(), 2, ());
+-//  TEST_EQUAL(resultCallback.m_codes[0], RouterResultCode::NoError, ());
+-//  TEST_EQUAL(resultCallback.m_codes[1], RouterResultCode::NeedMoreMaps, ());
+-//  TEST_EQUAL(resultCallback.m_absent.size(), 2, ());
+-//  TEST(resultCallback.m_absent[0].empty(), ());
+-//  TEST_EQUAL(resultCallback.m_absent[1].size(), 2, ());
+-//  TEST_EQUAL(resultCallback.m_absent[1], absentData, ());
+-//}
+-
+-// UNIT_CLASS_TEST(AsyncGuiThreadTest, StandardAsyncFogTest)
+-//{
+-//  unique_ptr<IOnlineFetcher> fetcher(new DummyFetcher({}));
+-//  unique_ptr<IRouter> router(new DummyRouter(RouterResultCode::NoError, {}));
+-//  DummyRoutingCallbacks resultCallback(1 /* expectedCalls */);
+-//  AsyncRouter async(DummyStatisticsCallback, nullptr /* pointCheckCallback */);
+-//  async.SetRouter(std::move(router), std::move(fetcher));
+-//  async.CalculateRoute(Checkpoints({1, 2} /* start */, {5, 6} /* finish */), {3, 4}, false,
+-//                       bind(ref(resultCallback), _1, _2), nullptr /* needMoreMapsCallback */,
+-//                       nullptr /* progressCallback */, nullptr /* removeRouteCallback */);
+-//
+-//  resultCallback.WaitFinish();
+-//
+-//  TEST_EQUAL(resultCallback.m_codes.size(), 1, ());
+-//  TEST_EQUAL(resultCallback.m_codes[0], RouterResultCode::NoError, ());
+-//  TEST_EQUAL(resultCallback.m_absent.size(), 1, ());
+-//  TEST(resultCallback.m_absent[0].empty(), ());
+-//}
+-}  //  namespace async_router_test
++ReadyRequest Calculate(AsyncRouter & async, RemoveRouteCallback const & removed = {})
++{
++  // GUI callbacks can outlive the test body, including after an assertion throws.
++  ReadyRequest request;
++  async.CalculateRoute(Checkpoints({1, 2}, {5, 6}), {3, 4}, true /* adjustToPrevRoute */, true /* needAlternatives */,
++                       [ready = request.m_ready](shared_ptr<RoutesResult> result, RouterResultCode code)
++  { ready->set_value({result->m_routesId, code}); }, nullptr, removed, nullptr);
++  return request;
++}
++
++uint64_t WaitReady(ReadyRequest & ready)
++{
++  TEST(ready.m_future.wait_for(30s) == future_status::ready, ("Route was not built."));
++  auto const [id, code] = ready.m_future.get();
++  TEST_EQUAL(code, RouterResultCode::NoError, ());
++  return id;
++}
++
++template <typename Fn>
++auto RunOnGui(Fn && fn)
++{
++  // Return GUI-thread assertion failures to the test thread, keeping the task alive on timeout.
++  auto task = make_shared<packaged_task<invoke_result_t<Fn>()>>(std::forward<Fn>(fn));
++  auto done = task->get_future();
++  GetPlatform().RunTask(Platform::Thread::Gui, [task] { (*task)(); });
++  TEST(done.wait_for(30s) == future_status::ready, ("GUI task did not finish."));
++  return done.get();
++}
++
++UNIT_CLASS_TEST(AsyncGuiThreadTest, RouterCallsWhileCalculating)
++{
++  auto router = make_unique<TestRouter>(vector{Outcome::Success, Outcome::BlockedSuccess});
++  auto * raw = router.get();
++  AsyncRouter async(nullptr);
++  async.SetRouter(std::move(router), nullptr);
++  // Release before ~AsyncRouter joins its worker, even when a TEST throws.
++  SCOPE_GUARD(releaseRouter, [raw] { raw->Release(); });
++
++  auto first = Calculate(async);
++  auto const oldId = WaitReady(first);
++  TEST(async.SwapAltRouteToActive(oldId), ("Warm the cache with a promotable result."));
++  auto second = Calculate(async);
++  TEST(raw->WaitStarted(), ("Rebuild did not start."));
++
++  TEST(!async.SwapAltRouteToActive(oldId), ("Rebuilding must invalidate an existing cache generation."));
++  TEST_EQUAL(raw->m_swaps, 1, ());
++  EdgeProj proj;
++  TEST(!async.FindClosestProjectionToRoad({1, 2}, {0, 1}, 50, proj), ());
++  TEST_EQUAL(raw->m_projections, 0, ("The busy router must not be queried."));
++
++  raw->Release();
++  auto const newId = WaitReady(second);
++  TEST(!async.SwapAltRouteToActive(oldId), ("The previously delivered result is stale."));
++  TEST(async.SwapAltRouteToActive(newId), ());
++  TEST_EQUAL(raw->m_swaps, 2, ());
++  async.FindClosestProjectionToRoad({1, 2}, {0, 1}, 50, proj);
++  TEST_EQUAL(raw->m_projections, 1, ());
++}
++
++UNIT_CLASS_TEST(AsyncGuiThreadTest, SwapAfterFailedCalculation)
++{
++  auto router = make_unique<TestRouter>(vector{Outcome::Success, Outcome::Failure, Outcome::Success});
++  AsyncRouter async(nullptr);
++  async.SetRouter(std::move(router), nullptr);
++  auto first = Calculate(async);
++  auto const oldId = WaitReady(first);
++
++  auto failed = make_shared<promise<RouterResultCode>>();
++  auto failure = failed->get_future();
++  Calculate(async, [failed](RouterResultCode code) { failed->set_value(code); });
++  TEST(failure.wait_for(30s) == future_status::ready, ());
++  auto const code = failure.get();
++  TEST_EQUAL(code, RouterResultCode::RouteNotFound, ());
++  TEST(!async.SwapAltRouteToActive(oldId), ());
++
++  auto recovered = Calculate(async);
++  TEST(async.SwapAltRouteToActive(WaitReady(recovered)), ("A successful build restores promotion."));
++}
++
++UNIT_CLASS_TEST(AsyncGuiThreadTest, SwapAfterExceptionalCalculation)
++{
++  base::ScopedLogAbortLevelChanger allowExpectedError(base::LCRITICAL);
++  auto router = make_unique<TestRouter>(vector{Outcome::Success, Outcome::Exception, Outcome::Success});
++  auto * raw = router.get();
++  AsyncRouter async(nullptr);
++  async.SetRouter(std::move(router), nullptr);
++  auto first = Calculate(async);
++  auto const oldId = WaitReady(first);
++  auto exception = Calculate(async);
++  TEST(exception.m_future.wait_for(30s) == future_status::ready, ());
++  auto const [failedId, code] = exception.m_future.get();
++  TEST_EQUAL(code, RouterResultCode::InternalError, ());
++  TEST(!async.SwapAltRouteToActive(oldId), ());
++  TEST(!async.SwapAltRouteToActive(failedId), ("A partially constructed result cannot validate caches."));
++  TEST(raw->WaitIdle(async), ());
++  auto recovered = Calculate(async);
++  TEST(async.SwapAltRouteToActive(WaitReady(recovered)), ());
++}
++
++UNIT_CLASS_TEST(AsyncGuiThreadTest, SwapAfterClearState)
++{
++  auto router = make_unique<TestRouter>(vector{Outcome::Success, Outcome::BlockedSuccess});
++  auto * raw = router.get();
++  AsyncRouter async(nullptr);
++  async.SetRouter(std::move(router), nullptr);
++  SCOPE_GUARD(releaseRouter, [raw] { raw->Release(); });
++  auto first = Calculate(async);
++  auto const oldId = WaitReady(first);
++  auto cancelled = Calculate(async);
++  TEST(raw->WaitStarted(), ());
++  async.ClearState();
++  raw->Release();
++  TEST(raw->WaitIdle(async), ());
++  TEST(!async.SwapAltRouteToActive(oldId), ());
++  TEST(cancelled.m_future.wait_for(0s) != future_status::ready, ());
++}
++
++UNIT_CLASS_TEST(AsyncGuiThreadTest, SwapAfterSupersededCalculation)
++{
++  auto router = make_unique<TestRouter>(vector{Outcome::Success, Outcome::BlockedSuccess, Outcome::Success});
++  auto * raw = router.get();
++  AsyncRouter async(nullptr);
++  async.SetRouter(std::move(router), nullptr);
++  SCOPE_GUARD(releaseRouter, [raw] { raw->Release(); });
++  auto first = Calculate(async);
++  auto const oldId = WaitReady(first);
++  auto superseded = Calculate(async);
++  TEST(raw->WaitStarted(), ());
++  auto replacement = Calculate(async);
++  raw->Release();
++  auto const newId = WaitReady(replacement);
++  TEST(superseded.m_future.wait_for(0s) != future_status::ready, ());
++  TEST(!async.SwapAltRouteToActive(oldId), ());
++  TEST(async.SwapAltRouteToActive(newId), ());
++}
++
++UNIT_CLASS_TEST(AsyncGuiThreadTestWithRoutingSession, AlternativesDiscardedDuringRebuild)
++{
++  auto built = make_shared<promise<bool>>();
++  auto builtFuture = built->get_future();
++  RunOnGui([this, built]
++  {
++    InitRoutingSession();
++    m_session->SetRouter(make_unique<TestRouter>(vector{Outcome::Success, Outcome::Failure, Outcome::Success}),
++                         nullptr);
++    m_session->SetRoutingCallbacks([this, built](RoutesResult const &, RouterResultCode)
++    { built->set_value(m_session->SwapActiveAlternative(1)); }, nullptr, nullptr, nullptr);
++    m_session->BuildRoute(Checkpoints({1, 2}, {5, 6}), RouterDelegate::kNoTimeout);
++  });
++  TEST(builtFuture.wait_for(30s) == future_status::ready, ());
++  TEST(builtFuture.get(), ());
++
++  auto failed = make_shared<promise<void>>();
++  auto failedFuture = failed->get_future();
++  RunOnGui([this, failed]
++  {
++    m_session->RebuildRoute({1, 2}, [](RoutesResult const &, RouterResultCode) {}, nullptr, [failed](RouterResultCode)
++    { failed->set_value(); }, RouterDelegate::kNoTimeout, SessionState::RouteRebuilding, true);
++    m_session->RouteCall([](RoutesResult const & result)
++    {
++      TEST_EQUAL(result.m_routes.size(), 1, ());
++      TEST_EQUAL(result.GetActive().GetRouteSegments().size(), 2,
++                 ("Only the selected three-point route remains available while rebuilding."));
++    });
++  });
++  TEST(failedFuture.wait_for(30s) == future_status::ready, ());
++
++  auto recovered = make_shared<promise<bool>>();
++  auto recoveredFuture = recovered->get_future();
++  RunOnGui([this, recovered]
++  {
++    m_session->RouteCall([](RoutesResult const & result)
++    {
++      TEST_EQUAL(result.m_routes.size(), 1, ());
++      TEST_EQUAL(result.GetActive().GetRouteSegments().size(), 2,
++                 ("Failure retains the selected route without choices."));
++    });
++    m_session->RebuildRoute({1, 2}, [this, recovered](RoutesResult const &, RouterResultCode) {
++      recovered->set_value(m_session->SwapActiveAlternative(1));
++    }, nullptr, nullptr, RouterDelegate::kNoTimeout, SessionState::RouteRebuilding, true);
++  });
++  TEST(recoveredFuture.wait_for(30s) == future_status::ready, ());
++  TEST(recoveredFuture.get(), ("A successful result restores alternatives."));
++}
++
++UNIT_CLASS_TEST(AsyncGuiThreadTestWithRoutingSession, RoadProjectionAfterReturningToRouteDuringRebuild)
++{
++  auto built = make_shared<promise<void>>();
++  auto builtFuture = built->get_future();
++  auto * raw = RunOnGui([this, built]
++  {
++    InitRoutingSession();
++    auto router = make_unique<TestRouter>(vector{Outcome::Success, Outcome::BlockedSuccess});
++    auto * raw = router.get();
++    m_session->SetRouter(std::move(router), nullptr);
++    m_session->SetRoutingCallbacks([built](RoutesResult const &, RouterResultCode) { built->set_value(); }, nullptr,
++                                   nullptr, nullptr);
++    m_session->BuildRoute(Checkpoints({1, 2}, {5, 6}), RouterDelegate::kNoTimeout);
++    return raw;
++  });
++  SCOPE_GUARD(releaseRouter, [raw] { raw->Release(); });
++  TEST(builtFuture.wait_for(30s) == future_status::ready, ());
++
++  auto rebuilt = make_shared<promise<void>>();
++  auto rebuiltFuture = rebuilt->get_future();
++  RunOnGui([this, rebuilt]
++  {
++    TEST(m_session->EnableFollowMode(), ());
++    m_session->RebuildRoute({1, 2}, [rebuilt](RoutesResult const &, RouterResultCode) { rebuilt->set_value(); },
++                            nullptr, nullptr, RouterDelegate::kNoTimeout, SessionState::RouteRebuilding, true);
++    TEST(m_session->IsRebuildingOnly(), ());
++  });
++  TEST(raw->WaitStarted(), ("Rebuild did not start."));
++
++  RunOnGui([this, raw]
++  {
++    location::GpsInfo info;
++    info.m_longitude = 1.002;
++    info.m_latitude = mercator::YToLat(2);
++    // Iterator movement accepts the accuracy radius; route snapping uses a smaller threshold.
++    info.m_horizontalAccuracy = 500;
++    TEST_EQUAL(m_session->OnLocationPositionChanged(info), SessionState::OnRoute, ());
++    location::RouteMatchingInfo matchingInfo;
++    TEST(!m_session->MatchLocationToRoute(info, matchingInfo), ("The caller must fall back to the road graph."));
++
++    // Ensure road projection has a direction, so it reaches the async-router guard.
++    m_session->PushPositionAccumulator({1, 2});
++    m_session->PushPositionAccumulator({1, 2.0002});
++    m_session->MatchLocationToRoadGraph(info);
++    TEST_EQUAL(raw->m_projections, 0, ("OnRoute must not expose the busy road graph."));
++  });
++  TEST(rebuiltFuture.wait_for(0s) != future_status::ready, ("The worker must still be blocked."));
++
++  raw->Release();
++  TEST(rebuiltFuture.wait_for(30s) == future_status::ready, ());
++  RunOnGui([this, raw]
++  {
++    location::GpsInfo info;
++    m_session->MatchLocationToRoadGraph(info);
++    TEST_EQUAL(raw->m_projections, 1, ("Road projection resumes after the worker finishes."));
++  });
++}
++}  // namespace async_router_test
+diff --git a/libs/storage/storage.cpp b/libs/storage/storage.cpp
+index d51f677f..b1d8a84f 100644
+--- a/libs/storage/storage.cpp
++++ b/libs/storage/storage.cpp
+@@ -17,6 +17,7 @@
+ #include "coding/blake3.hpp"
+ #include "coding/file_writer.hpp"
+ #include "coding/internal/file_data.hpp"
++#include "coding/reader.hpp"
+ 
+ #include "base/exception.hpp"
+ #include "base/file_name_utils.hpp"
+@@ -31,6 +32,7 @@
+ 
+ #include <algorithm>
+ #include <sstream>
++#include <string_view>
+ 
+ namespace storage
+ {
+@@ -68,12 +70,9 @@ CountryTree::Node const & LeafNodeFromCountryId(CountryTree const & root, Countr
+   return *node;
+ }
+ 
+-bool IsFileDownloaded(std::string const & readyFilePath, MapFileType type)
++bool HasDownloadedFile(std::string const & readyFilePath, MapFileType type)
+ {
+-  // Since a downloaded valid diff file may be either with .diff or .diff.ready extension,
+-  // we have to check these both cases in order to find
+-  // the diff file which is ready to apply.
+-  // If there is such a file we have to cause the success download scenario.
++  // Downloaded diffs can have either .diff or .diff.ready extension.
+   bool isDownloadedDiff = false;
+   if (type == MapFileType::Diff)
+   {
+@@ -82,9 +81,7 @@ bool IsFileDownloaded(std::string const & readyFilePath, MapFileType type)
+     isDownloadedDiff = GetPlatform().IsFileExistsByFullPath(filePath);
+   }
+ 
+-  // It may happen that the file already was downloaded, so there is
+-  // no need to request servers list and download file.  Let's
+-  // switch to next file.
++  // Existing files skip the transfer but still follow the validation and registration path.
+   return isDownloadedDiff || GetPlatform().IsFileExistsByFullPath(readyFilePath);
+ }
+ }  // namespace
+@@ -102,14 +99,13 @@ Progress Storage::GetOverallProgress(CountriesVec const & countries) const
+   Progress overallProgress;
+   for (auto const & country : countries)
+   {
+-    // Lightweight progress for leaf nodes (asserted by the original code).
+-    // Avoids the full subtree traversal, status computation, and string
++    // Leaf-country progress avoids the subtree traversal, status computation and
+     // allocations that GetNodeAttrs performs.
+     auto const downloadingIt = m_downloadingCountries.find(country);
+     if (downloadingIt != m_downloadingCountries.cend())
+     {
+-      if (!downloadingIt->second.IsUnknown())
+-        overallProgress.m_bytesDownloaded += downloadingIt->second.m_bytesDownloaded;
++      if (!downloadingIt->second.m_progress.IsUnknown())
++        overallProgress.m_bytesDownloaded += downloadingIt->second.m_progress.m_bytesDownloaded;
+       overallProgress.m_bytesTotal += GetRemoteSize(GetCountryFile(country));
+     }
+     else if (m_justDownloaded.count(country) != 0)
+@@ -242,7 +238,15 @@ void Storage::Clear()
+ {
+   CHECK_THREAD_CHECKER(m_threadChecker, ());
+ 
++  auto countries = GetQueuedCountries(m_downloader->GetQueue());
++  for (auto const & [countryId, _] : m_downloadingCountries)
++    countries.insert(countryId);
++
++  // Request teardown can write resume state; delete temporary files afterwards.
+   m_downloader->Clear();
++  m_downloadingCountries.clear();
++  for (auto const & countryId : countries)
++    DeleteDownloaderFilesForCountry(m_currentVersion, m_dataDir, GetCountryFile(countryId));
+   m_justDownloaded.clear();
+   m_failedCountries.clear();
+   m_localFiles.clear();
+@@ -440,7 +444,7 @@ LocalAndRemoteSize Storage::CountrySizeInBytes(CountryId const & countryId) cons
+ 
+   auto const it = m_downloadingCountries.find(countryId);
+   if (it != m_downloadingCountries.cend())
+-    sizes.first = it->second.m_bytesDownloaded;
++    sizes.first = it->second.m_progress.m_bytesDownloaded;
+ 
+   return sizes;
+ }
+@@ -485,14 +489,10 @@ Status Storage::CountryStatus(CountryId const & countryId) const
+   if (m_failedCountries.count(countryId) > 0)
+     return Status::DownloadFailed;
+ 
+-  // Check if we are already downloading this country or have it in the queue.
++  if (m_downloadingCountries.contains(countryId))
++    return Status::Downloading;
+   if (IsCountryInQueue(countryId))
+-  {
+-    if (m_downloadingCountries.find(countryId) != m_downloadingCountries.cend())
+-      return Status::Downloading;
+-
+     return Status::InQueue;
+-  }
+ 
+   if (IsDiffApplyingInProgressToCountry(countryId))
+     return Status::Applying;
+@@ -561,8 +561,12 @@ void Storage::SaveDownloadQueue()
+   CHECK_THREAD_CHECKER(m_threadChecker, ());
+ 
+   std::ostringstream ss;
+-  m_downloader->GetQueue().ForEachCountry([&ss](QueuedCountry const & country)
+-  { ss << (ss.tellp() == 0 ? "" : ";") << country.GetCountryId(); });
++  auto const append = [&ss](CountryId const & countryId) { ss << (ss.tellp() == 0 ? "" : ";") << countryId; };
++  m_downloader->GetQueue().ForEachCountry([&append](QueuedCountry const & country) { append(country.GetCountryId()); });
++  // A transfer can leave the queue before validation registers its map.
++  for (auto const & [countryId, _] : m_downloadingCountries)
++    if (!IsCountryInQueue(countryId))
++      append(countryId);
+ 
+   settings::Set(kDownloadQueueKey, ss.str());
+ }
+@@ -591,7 +595,8 @@ void Storage::DownloadCountry(CountryId const & countryId, MapFileType type)
+ {
+   CHECK_THREAD_CHECKER(m_threadChecker, ());
+ 
+-  if (IsCountryInQueue(countryId) || IsDiffApplyingInProgressToCountry(countryId))
++  if (IsCountryInQueue(countryId) || m_downloadingCountries.contains(countryId) ||
++      IsDiffApplyingInProgressToCountry(countryId))
+     return;
+ 
+   m_failedCountries.erase(countryId);
+@@ -605,15 +610,17 @@ void Storage::DownloadCountry(CountryId const & countryId, MapFileType type)
+     return;
+   }
+ 
+-  if (IsFileDownloaded(GetFileDownloadPath(countryId, type), type))
++  QueuedCountry queuedCountry(countryFile, countryId, type, m_currentVersion, m_dataDir, m_diffsDataSource);
++  queuedCountry.Subscribe(*this);
++
++  if (HasDownloadedFile(GetFileDownloadPath(countryId, type), type))
+   {
+-    OnMapDownloadFinished(countryId, DownloadStatus::Completed, type);
++    OnStartDownloading(queuedCountry);
++    SaveDownloadQueue();
++    OnDownloadFinished(queuedCountry, DownloadStatus::Completed);
+     return;
+   }
+ 
+-  QueuedCountry queuedCountry(countryFile, countryId, type, m_currentVersion, m_dataDir, m_diffsDataSource);
+-  queuedCountry.Subscribe(*this);
+-
+   m_downloader->DownloadMapFile(std::move(queuedCountry));
+ }
+ 
+@@ -630,8 +637,6 @@ void Storage::DeleteCountry(CountryId const & countryId, MapFileType type)
+   DeleteCountryFilesFromDownloader(countryId);
+   m_diffsDataSource->RemoveDiffForCountry(countryId);
+ 
+-  m_downloadingCountries.erase(countryId);
+-
+   NotifyStatusChangedForHierarchy(countryId);
+ }
+ 
+@@ -687,7 +692,7 @@ bool Storage::IsDownloadInProgress() const
+ {
+   CHECK_THREAD_CHECKER(m_threadChecker, ());
+ 
+-  return !m_downloader->GetQueue().IsEmpty();
++  return !m_downloadingCountries.empty() || !m_downloader->GetQueue().IsEmpty() || !m_diffsBeingApplied.empty();
+ }
+ 
+ void Storage::LoadCountriesFile(std::string const & pathToCountriesFile)
+@@ -752,11 +757,10 @@ void Storage::OnStartDownloading(QueuedCountry const & queuedCountry)
+ {
+   CHECK_THREAD_CHECKER(m_threadChecker, ());
+ 
++  VERIFY(m_downloadingCountries.try_emplace(queuedCountry.GetCountryId()).second, (queuedCountry.GetCountryId()));
+   if (m_startDownloadingCallback)
+     m_startDownloadingCallback();
+ 
+-  m_downloadingCountries[queuedCountry.GetCountryId()] = Progress::Unknown();
+-
+   NotifyStatusChangedForHierarchy(queuedCountry.GetCountryId());
+ }
+ 
+@@ -764,12 +768,12 @@ void Storage::OnDownloadProgress(QueuedCountry const & queuedCountry, Progress c
+ {
+   CHECK_THREAD_CHECKER(m_threadChecker, ());
+ 
+-  if (m_observers.empty())
+-    return;
+-
+-  m_downloadingCountries[queuedCountry.GetCountryId()] = progress;
++  auto const it = m_downloadingCountries.find(queuedCountry.GetCountryId());
++  ASSERT(it != m_downloadingCountries.end(), (queuedCountry.GetCountryId()));
++  it->second.m_progress = progress;
+ 
+-  ReportProgressForHierarchy(queuedCountry.GetCountryId(), progress);
++  if (!m_observers.empty())
++    ReportProgressForHierarchy(queuedCountry.GetCountryId(), progress);
+ }
+ 
+ void Storage::OnDownloadFinished(QueuedCountry const & queuedCountry, DownloadStatus status)
+@@ -778,39 +782,61 @@ void Storage::OnDownloadFinished(QueuedCountry const & queuedCountry, DownloadSt
+ 
+   auto const & countryId = queuedCountry.GetCountryId();
+   auto const fileType = queuedCountry.GetFileType();
+-  auto const finishFn = [this, countryId, fileType](DownloadStatus status)
++  auto const it = m_downloadingCountries.find(countryId);
++  // Deferred transfer completion can arrive after cancellation.
++  if (status == DownloadStatus::Completed && it == m_downloadingCountries.end())
++    return;
++
++  auto const path = GetFileDownloadPath(countryId, fileType);
++  auto finishFn = [this, countryId, fileType, path](DownloadStatus status)
+   {
++    CHECK_THREAD_CHECKER(m_threadChecker, ());
++    // Deletion shares the owner thread with retries, so an old result cannot delete a new file.
++    if (status == DownloadStatus::FailedIntegrityCheck)
++      base::DeleteFileX(path);
+     m_downloadingCountries.erase(countryId);
+     OnMapDownloadFinished(countryId, status, fileType);
+     OnFinishDownloading();
+   };
+ 
+-  if (status == DownloadStatus::Completed && m_integrityValidationEnabled)
++  auto const hash = status == DownloadStatus::Completed && m_integrityValidationEnabled
++                      ? GetCountryFile(countryId).GetHash()
++                      : std::string{};
++  if (!hash.empty())
+   {
+-    /// @todo Can/Should be combined with ApplyDiff routine when we will restore it.
+-    /// While this is simple and working solution, I think that Downloader component
+-    /// should make this kind of checks (taking the expected hash as input). But now it's
+-    /// not so simple as it may seem ..
++    auto const size = static_cast<int64_t>(queuedCountry.GetDownloadSize());
++    it->second.m_progress = {size, size};
++    // Hashing runs on the file thread to keep the GUI responsive; completion returns
++    // to Storage's owner thread before accessing its state.
+ 
+-    GetPlatform().RunTask(Platform::Thread::File,
+-                          [path = GetFileDownloadPath(countryId, fileType), hash = GetCountryFile(countryId).GetHash(),
+-                           fn = std::move(finishFn)]()
++    GetPlatform().RunTask(Platform::Thread::File, [path, hash, lifetime = std::weak_ptr(it->second.m_lifetime),
++                                                   fn = std::move(finishFn)]() mutable
+     {
+-      DownloadStatus status = DownloadStatus::Completed;
+-
+-      if (coding::Blake3::CalculateMwmBase64(path) != hash)
++      if (lifetime.expired())
++        return;
++      DownloadStatus status = DownloadStatus::FailedIntegrityCheck;
++      std::string readError;
++      try
++      {
++        if (coding::Blake3::CalculateMwmBase64(path) == hash)
++          status = DownloadStatus::Completed;
++      }
++      catch (Reader::Exception const & ex)
+       {
+-        base::DeleteFileX(path);
+-        status = DownloadStatus::FailedIntegrityCheck;
+-        LOG(LERROR, ("Integrity check error for", path));
++        readError = ex.what();
+       }
+ 
+-      GetPlatform().RunTask(Platform::Thread::Gui, [fn = std::move(fn), status]()
++      GetPlatform().RunTask(Platform::Thread::Gui, [lifetime = std::move(lifetime), fn = std::move(fn), path, status,
++                                                    readError = std::move(readError)]()
+       {
++        if (lifetime.expired())
++          return;
++        // Clean up and notify before error logging can abort a Debug build.
++        fn(status);
+         if (status == DownloadStatus::Completed)
+           LOG(LDEBUG, ("Successful integrity check"));
+-
+-        fn(status);
++        else
++          LOG(LERROR, ("Integrity check error for", path, readError));
+       });
+     });
+   }
+@@ -1073,6 +1099,7 @@ bool Storage::DeleteCountryFilesFromDownloader(CountryId const & countryId)
+ {
+   CHECK_THREAD_CHECKER(m_threadChecker, ());
+ 
++  m_downloadingCountries.erase(countryId);
+   if (IsDiffApplyingInProgressToCountry(countryId))
+     m_diffsBeingApplied[countryId]->Cancel();
+ 
+@@ -1607,7 +1634,9 @@ void Storage::SetStartDownloadingCallback(StartDownloadingCallback const & cb)
+ 
+ void Storage::OnFinishDownloading()
+ {
+-  if (!m_diffsBeingApplied.empty() || !m_downloader->GetQueue().IsEmpty())
++  CHECK_THREAD_CHECKER(m_threadChecker, ());
++
++  if (IsDownloadInProgress())
+     return;
+ 
+   m_justDownloaded.clear();
+@@ -1828,8 +1857,8 @@ Progress Storage::CalculateProgress(CountryTree::Node const & subtreeRoot, Count
+     auto const downloadingIt = m_downloadingCountries.find(d);
+     if (downloadingIt != m_downloadingCountries.cend())
+     {
+-      if (!downloadingIt->second.IsUnknown())
+-        result.m_bytesDownloaded += downloadingIt->second.m_bytesDownloaded;
++      if (!downloadingIt->second.m_progress.IsUnknown())
++        result.m_bytesDownloaded += downloadingIt->second.m_progress.m_bytesDownloaded;
+ 
+       result.m_bytesTotal += GetRemoteSize(GetCountryFile(d));
+     }
+@@ -1884,14 +1913,12 @@ void Storage::CancelDownloadNode(CountryId const & countryId)
+   ForEachInSubtree(countryId, [&](CountryId const & descendantId, bool /* groupNode */)
+   {
+     auto needNotify = false;
+-    if (setQueue.count(descendantId) != 0)
++    if (setQueue.count(descendantId) != 0 || m_downloadingCountries.contains(descendantId))
+       needNotify = DeleteCountryFilesFromDownloader(descendantId);
+ 
+     if (m_failedCountries.erase(descendantId) != 0)
+       needNotify = true;
+ 
+-    m_downloadingCountries.erase(descendantId);
+-
+     if (needNotify)
+       NotifyStatusChangedForHierarchy(descendantId);
+   });
+diff --git a/libs/storage/storage.hpp b/libs/storage/storage.hpp
+index 49aa695e..c9c7c606 100644
+--- a/libs/storage/storage.hpp
++++ b/libs/storage/storage.hpp
+@@ -67,9 +67,8 @@ struct NodeAttrs
+   /// Number of mwms belonging to the node which have been downloaded.
+   MwmCounter m_localMwmCounter;
+ 
+-  /// Number of leaves of the node which have been downloaded
+-  /// plus which is in progress of downloading (zero or one)
+-  /// plus which are staying in queue.
++  /// Number of leaf maps that are downloaded, queued, downloading, validating,
++  /// applying a diff or have a download error.
+   MwmCounter m_downloadingMwmCounter;
+ 
+   /// If it's not an expandable node, |m_mwmSize| is size of one mwm according to countries.json.
+@@ -82,10 +81,7 @@ struct NodeAttrs
+   /// have been downloaded.
+   MwmSize m_localMwmSize;
+ 
+-  /// Size of leaves of the node which have been downloaded
+-  /// plus which is in progress of downloading (zero or one)
+-  /// plus which are staying in queue.
+-  /// \note The size of leaves is the size is written in countries.json.
++  /// Total size from countries.json of the leaves counted by m_downloadingMwmCounter.
+   MwmSize m_downloadingMwmSize;
+ 
+   /// The name of the node in a local language. That means the language dependent on
+@@ -147,14 +143,9 @@ struct NodeStatuses
+   bool m_groupNode;
+ };
+ 
+-// This class is used for downloading, updating and deleting maps.
+-// Storage manages a queue of mwms to be downloaded.
+-// Every operation with this queue must be executed
+-// on the storage thread. In the current implementation, the storage
+-// thread coincides with the main (UI) thread.
+-// Downloading of only one mwm at a time is supported, so while the
+-// mwm at the top of the queue is being downloaded (or updated by
+-// applying a diff file) all other mwms have to wait.
++// Storage downloads, updates and deletes maps. Queue operations run on its owner
++// thread, which is the main (UI) thread for downloads. Downloader queues track
++// pending transfers; active countries include integrity validation after a transfer finishes.
+ class Storage final : public QueuedCountry::Subscriber
+ {
+ public:
+@@ -163,10 +154,9 @@ public:
+   using DeleteCallback = std::function<bool(storage::CountryId const &, LocalFilePtr const)>;
+   using ChangeCountryFunction = std::function<void(CountryId const &)>;
+   using ProgressFunction = std::function<void(CountryId const &, downloader::Progress const &)>;
+-  using DownloadingCountries = std::unordered_map<CountryId, downloader::Progress>;
+ 
+ private:
+-  /// We support only one simultaneous request at the moment
++  // Owns the transfer queue; active countries also track validation below.
+   std::unique_ptr<MapFilesDownloader> m_downloader;
+ 
+   /// Stores timestamp for update checks
+@@ -249,7 +239,14 @@ private:
+ 
+   StartDownloadingCallback m_startDownloadingCallback;
+ 
+-  DownloadingCountries m_downloadingCountries;
++  struct DownloadingCountry
++  {
++    downloader::Progress m_progress = downloader::Progress::Unknown();
++    // Erasing the operation invalidates its file and GUI callbacks, including after
++    // cancellation followed by a new download of the same country.
++    std::shared_ptr<int> const m_lifetime = std::make_shared<int>(0);
++  };
++  std::unordered_map<CountryId, DownloadingCountry> m_downloadingCountries;
+ 
+   void LoadCountriesFile(std::string const & pathToCountriesFile);
+ 
+@@ -460,7 +457,7 @@ public:
+   /// Delete local maps and aggregate their Id if needed
+   void DeleteAllLocalMaps(CountriesVec * existedCountries = nullptr);
+ 
+-  // Clears local files registry and downloader's queue.
++  // Cancels transfers and pending validation, removes their temporary files and clears the local registry.
+   void Clear();
+ 
+   /// Used in Android to get absent Worlds files to download.
+@@ -540,6 +537,7 @@ public:
+   /// Notifies observers about country status change.
+   void DeleteCustomCountryVersion(platform::LocalCountryFile const & localFile);
+ 
++  // Includes queued transfers, integrity validation and diff application.
+   bool IsDownloadInProgress() const;
+ 
+   /// @param[out] res Populated with oudated countries.
+diff --git a/libs/storage/storage_integration_tests/storage_downloading_tests.cpp b/libs/storage/storage_integration_tests/storage_downloading_tests.cpp
+index 382b568d..f24d886f 100644
+--- a/libs/storage/storage_integration_tests/storage_downloading_tests.cpp
++++ b/libs/storage/storage_integration_tests/storage_downloading_tests.cpp
+@@ -151,11 +151,9 @@ UNIT_CLASS_TEST(StorageTest, DownloadIntegrity_Test)
+   string mapPath;
+   coding::Blake3::Hash mapHash;
+ 
+-  // Wipes the registered map and any stranded .ready file. A round whose interruption came too
+-  // late completes the transfer, and .ready is renamed to .mwm only by the Gui continuation of
+-  // the integrity check, which cannot run once the event loop has exited. Leaving it behind
+-  // would make the next DownloadNode complete synchronously in Storage::DownloadCountry, and
+-  // the RunEventLoop() below would then wait forever.
++  // Remove completed map and ready files so subsequent rounds perform a transfer.
++  // A ready file goes straight to validation, while an up-to-date map makes
++  // DownloadNode return without a completion notification.
+   auto const deleteMapFiles = [&mapPath]
+   {
+     FileWriter::DeleteFileX(mapPath);
+@@ -204,10 +202,9 @@ UNIT_CLASS_TEST(StorageTest, DownloadIntegrity_Test)
+       InitStorage(storage, onProgressFn);
+       storage.DownloadNode(kCountryId);
+       testing::RunEventLoop();
+-      // StopEventLoop only unwinds the loop, it does not cancel the transfer, so the progress
+-      // callback that trips the threshold can be the one that also completes the file. The
+-      // scope guard wipes whatever landed on disk and the next round starts over, which on the
+-      // last round leaves this iteration hashing a fresh download instead of a resumed one.
++      // Stopping the event loop leaves the transfer active, so it can finish before
++      // Storage is destroyed. Cleanup removes completed files; partial chunks remain
++      // available to the next round.
+       if (!storage.IsDownloadInProgress())
+         LOG(LINFO, ("Interruption came too late, the map was downloaded fully."));
+     }
+diff --git a/libs/storage/storage_tests/storage_download_tests.cpp b/libs/storage/storage_tests/storage_download_tests.cpp
+index d92932c0..553d840b 100644
+--- a/libs/storage/storage_tests/storage_download_tests.cpp
++++ b/libs/storage/storage_tests/storage_download_tests.cpp
+@@ -2,22 +2,28 @@
+ 
+ #include "storage/storage_tests/test_map_files_downloader.hpp"
+ 
++#include "storage/queued_country.hpp"
+ #include "storage/storage.hpp"
+ 
++#include "platform/chunks_download_strategy.hpp"
+ #include "platform/local_country_file_utils.hpp"
+ #include "platform/mwm_version.hpp"
+ #include "platform/platform.hpp"
+ #include "platform/platform_tests_support/writable_dir_changer.hpp"
++#include "platform/settings.hpp"
+ 
+ #include "coding/blake3.hpp"
++#include "coding/file_writer.hpp"
+ 
+ #include "base/logging.hpp"
++#include "base/scope_guard.hpp"
+ #include "base/string_utils.hpp"
+ 
+ #include "defines.hpp"
+ 
+ #include <cstddef>
+ #include <cstdint>
++#include <future>
+ #include <memory>
+ #include <string>
+ #include <utility>
+@@ -39,8 +45,7 @@ std::string const kCorrupted = "Neverland";
+ // under /unit_tests/maps/<version>/<name>.mwm; here they only produce the size and the hash
+ // that go into the countries JSON, so both generators must stay identical - a mismatch
+ // surfaces as a map integrity failure rather than as a server error.
+-// Sizes are 2.00-2.25 MB, i.e. 4-5 of the downloader's 512 KB chunks, so an interrupted
+-// download always leaves a partial file to resume from.
++// Sizes are 2.00-2.25 MB, i.e. 4-5 of the downloader's 512 KB chunks.
+ size_t constexpr kSyntheticBaseSize = 2 * 1024 * 1024;
+ 
+ uint8_t SyntheticSeed(CountryId const & countryId)
+@@ -93,11 +98,8 @@ std::string DownloadPath(Storage const & storage, CountryId const & countryId)
+   return GetFileDownloadPath(storage.GetCurrentDataVersion(), countryId, MapFileType::Map);
+ }
+ 
+-// Storage completes a download in two steps: HttpMapFilesDownloader pops the country from the
+-// queue, and only then Storage::OnDownloadFinished hands the integrity check to
+-// Platform::Thread::File. An empty queue is therefore observable while a map is still being
+-// validated, so the tests below wait for the terminal per-country notifications instead - the
+-// update callback for a registered map, NodeStatus::Error for a rejected one.
++// Terminal per-country notifications distinguish a registered map from an integrity failure,
++// including completion of the asynchronous file validation.
+ void InitStorage(Storage & storage, Storage::UpdateCallback didDownload,
+                  Storage::ChangeCountryFunction changeCountry = [](CountryId const &) {},
+                  Storage::ProgressFunction progress = [](CountryId const &, downloader::Progress const &) {})
+@@ -115,6 +117,77 @@ void TestDownloadedMap(Storage const & storage, CountryId const & countryId)
+              (countryId));
+ }
+ 
++class FileThreadBlocker
++{
++public:
++  FileThreadBlocker()
++  {
++    auto const release = m_release.get_future().share();
++    TEST(GetPlatform().RunTask(Platform::Thread::File, [release]() { release.wait(); }).m_isSuccess, ());
++  }
++
++  ~FileThreadBlocker() { Release(); }
++
++  void Release()
++  {
++    if (!m_released)
++    {
++      m_release.set_value();
++      m_released = true;
++    }
++  }
++
++private:
++  std::promise<void> m_release;
++  bool m_released = false;
++};
++
++void WaitForFileThread()
++{
++  std::promise<void> fileIdle;
++  auto const idle = fileIdle.get_future();
++  TEST(GetPlatform().RunTask(Platform::Thread::File, [&fileIdle]() { fileIdle.set_value(); }).m_isSuccess, ());
++  idle.wait();
++}
++
++void DrainFileAndGui()
++{
++  // File tasks and GUI posts are FIFO. Posting the marker from File keeps it deferred on Qt.
++  bool guiDrained = false;
++  auto const posted = GetPlatform().RunTask(Platform::Thread::File, [&guiDrained]()
++  {
++    GetPlatform().RunTask(Platform::Thread::Gui, [&guiDrained]()
++    {
++      guiDrained = true;
++      testing::StopEventLoop();
++    });
++  });
++  TEST(posted.m_isSuccess, ());
++  testing::RunEventLoop();
++  TEST(guiDrained, ());
++}
++
++void SeedReadyFile(Storage const & storage, CountryId const & countryId = kWest, bool corrupt = false)
++{
++  TEST(!PrepareDirToDownloadCountry(storage.GetCurrentDataVersion(), {}).empty(), ());
++  auto content = SyntheticContent(countryId);
++  if (corrupt)
++    content[0] ^= 1;
++  FileWriter writer(DownloadPath(storage, countryId));
++  writer.Write(content.data(), content.size());
++}
++
++void QueueValidation(Storage & storage, CountryId const & countryId = kWest)
++{
++  QueuedCountry country(storage.GetCountryFile(countryId), countryId, MapFileType::Map, storage.GetCurrentDataVersion(),
++                        {}, std::make_shared<diffs::DiffsDataSource>());
++  country.Subscribe(storage);
++  country.OnStartDownloading();
++  auto const size = static_cast<int64_t>(SyntheticSize(countryId));
++  country.OnDownloadProgress({size, size});
++  country.OnDownloadFinished(downloader::DownloadStatus::Completed);
++}
++
+ class StorageDownloadTest
+ {
+ protected:
+@@ -145,28 +218,39 @@ UNIT_CLASS_TEST(StorageDownloadTest, DownloadNode)
+   TEST(!storage.IsDownloadInProgress(), ());
+ }
+ 
+-UNIT_CLASS_TEST(StorageDownloadTest, ResumeInterruptedDownload)
++UNIT_CLASS_TEST(StorageDownloadTest, RestorePartialDownload)
+ {
+-  std::string downloadPath;
+-
++  int64_t constexpr kChunkSize = 512 * 1024;
++  auto const version = version::FOR_TESTING_MWM1;
++  TEST(!PrepareDirToDownloadCountry(version, {}).empty(), ());
++  auto const downloadPath = GetFileDownloadPath(version, kWest, MapFileType::Map);
++  auto const content = SyntheticContent(kWest);
++  // Seed one completed chunk so the resume test does not depend on download timing.
+   {
+-    Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
+-    InitStorage(storage, [](CountryId const &, LocalFilePtr const) {}, [](CountryId const &) {},
+-                [](CountryId const &, downloader::Progress const &) { testing::StopEventLoop(); });
+-
+-    storage.DownloadNode(kWest);
+-    testing::RunEventLoop();
+-    downloadPath = DownloadPath(storage, kWest);
+-    // Destroying Storage cancels the transfer. HttpMapFilesDownloader passes
+-    // doCleanOnCancel = false, so the partial file and its resume data stay on disk.
++    FileWriter writer(downloadPath + DOWNLOADING_FILE_EXTENSION);
++    writer.Write(content.data(), kChunkSize);
+   }
+ 
+-  TEST(Platform::IsFileExistsByFullPath(downloadPath + DOWNLOADING_FILE_EXTENSION), (downloadPath));
+-  TEST(Platform::IsFileExistsByFullPath(downloadPath + RESUME_FILE_EXTENSION), (downloadPath));
+-
++  downloader::ChunksDownloadStrategy chunks({"test-server"});
++  chunks.InitChunks(content.size(), kChunkSize);
++  std::string url;
++  std::pair<int64_t, int64_t> range;
++  TEST_EQUAL(chunks.NextChunk(url, range), downloader::ChunksDownloadStrategy::ENextChunk, ());
++  TEST_EQUAL(range, std::make_pair(int64_t{0}, kChunkSize - 1), ());
++  chunks.ChunkFinished(true, range);
++  chunks.SaveChunks(content.size(), downloadPath + RESUME_FILE_EXTENSION);
++  settings::Set("DownloadQueue", kWest);
++
++  int64_t firstProgress = -1;
+   {
+     Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
+-    InitStorage(storage, [](CountryId const &, LocalFilePtr const) { testing::StopEventLoop(); });
++    InitStorage(storage, [](CountryId const &, LocalFilePtr const) { testing::StopEventLoop(); },
++                [](CountryId const &) {},
++                [&firstProgress](CountryId const & countryId, downloader::Progress const & progress)
++    {
++      if (countryId == kWest && firstProgress < 0)
++        firstProgress = progress.m_bytesDownloaded;
++    });
+ 
+     // Storage does not restore the saved queue by itself, it is an explicit application
+     // startup step (see Framework::LoadMapsSync).
+@@ -174,6 +258,7 @@ UNIT_CLASS_TEST(StorageDownloadTest, ResumeInterruptedDownload)
+     TEST(storage.IsDownloadInProgress(), ());
+     testing::RunEventLoop();
+ 
++    TEST_GREATER(firstProgress, kChunkSize, ());
+     TestDownloadedMap(storage, kWest);
+   }
+ 
+@@ -181,6 +266,290 @@ UNIT_CLASS_TEST(StorageDownloadTest, ResumeInterruptedDownload)
+   TEST(!Platform::IsFileExistsByFullPath(downloadPath + RESUME_FILE_EXTENSION), (downloadPath));
+ }
+ 
++UNIT_CLASS_TEST(StorageDownloadTest, ValidationCallbackAfterStorageDestruction)
++{
++  bool didDownload = false;
++  {
++    Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
++    InitStorage(storage, [&didDownload](CountryId const &, LocalFilePtr const) { didDownload = true; });
++
++    SeedReadyFile(storage);
++    QueueValidation(storage);
++    // Queue the GUI completion before destroying its owner, without executing it.
++    WaitForFileThread();
++  }
++
++  DrainFileAndGui();
++  TEST(!didDownload, ());
++}
++
++UNIT_CLASS_TEST(StorageDownloadTest, CancelDuringValidation)
++{
++  bool didDownload = false;
++  Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
++  InitStorage(storage, [&didDownload](CountryId const &, LocalFilePtr const) { didDownload = true; });
++  SeedReadyFile(storage);
++  FileThreadBlocker blocker;
++  QueueValidation(storage);
++  storage.CancelDownloadNode(kWest);
++  TEST(!storage.IsDownloadInProgress(), ());
++  blocker.Release();
++  DrainFileAndGui();
++  TEST(!didDownload, ());
++  TEST_EQUAL(storage.CountryStatusEx(kWest), Status::NotDownloaded, ());
++  TEST(!Platform::IsFileExistsByFullPath(DownloadPath(storage, kWest)), ());
++}
++
++UNIT_CLASS_TEST(StorageDownloadTest, ClearDuringValidation)
++{
++  bool didDownload = false;
++  Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
++  InitStorage(storage, [&didDownload](CountryId const &, LocalFilePtr const) { didDownload = true; });
++  SeedReadyFile(storage);
++  FileThreadBlocker blocker;
++  QueueValidation(storage);
++  storage.Clear();
++  TEST(!storage.IsDownloadInProgress(), ());
++  blocker.Release();
++  DrainFileAndGui();
++  TEST(!didDownload, ());
++  TEST(!Platform::IsFileExistsByFullPath(DownloadPath(storage, kWest)), ());
++}
++
++UNIT_CLASS_TEST(StorageDownloadTest, ClearQueuedPartialDownloads)
++{
++  Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
++  InitStorage(storage, [](CountryId const &, LocalFilePtr const) {});
++  TEST(!PrepareDirToDownloadCountry(storage.GetCurrentDataVersion(), {}).empty(), ());
++
++  // A queued country can retain partial files from an interrupted session.
++  auto const queuedPath = DownloadPath(storage, kEast);
++  for (auto const extension : {DOWNLOADING_FILE_EXTENSION, RESUME_FILE_EXTENSION})
++  {
++    FileWriter writer(queuedPath + extension);
++    writer.Write("partial", 7);
++  }
++
++  storage.DownloadNode(kWest);
++  storage.DownloadNode(kEast);
++  TEST_EQUAL(storage.CountryStatusEx(kEast), Status::InQueue, ());
++  storage.Clear();
++
++  TEST(!storage.IsDownloadInProgress(), ());
++  std::string savedQueue;
++  TEST(settings::Get("DownloadQueue", savedQueue), ());
++  TEST(savedQueue.empty(), (savedQueue));
++  for (auto const & country : {kWest, kEast})
++  {
++    TEST_EQUAL(storage.CountryStatusEx(country), Status::NotDownloaded, (country));
++    auto const readyPath = DownloadPath(storage, country);
++    for (auto const extension : {"", DOWNLOADING_FILE_EXTENSION, RESUME_FILE_EXTENSION})
++    {
++      auto const path = readyPath + extension;
++      TEST(!Platform::IsFileExistsByFullPath(path), (path));
++    }
++  }
++}
++
++UNIT_CLASS_TEST(StorageDownloadTest, RestoreUnvalidatedReadyFile)
++{
++  base::ScopedLogAbortLevelChanger const ignoreErrors(LCRITICAL);
++  FileThreadBlocker blocker;
++  {
++    Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
++    InitStorage(storage, [](CountryId const &, LocalFilePtr const) {});
++    SeedReadyFile(storage, kWest, true);
++    QueueValidation(storage);
++  }
++
++  bool didDownload = false;
++  Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
++  InitStorage(storage, [&didDownload](CountryId const &, LocalFilePtr const) { didDownload = true; });
++  settings::Set("DownloadQueue", kWest);
++  storage.RestoreDownloadQueue();
++  TEST(storage.IsDownloadInProgress(), ());
++  blocker.Release();
++  DrainFileAndGui();
++  TEST(!didDownload, ());
++  TEST_EQUAL(storage.CountryStatusEx(kWest), Status::DownloadFailed, ());
++  TEST(!Platform::IsFileExistsByFullPath(DownloadPath(storage, kWest)), ());
++}
++
++UNIT_CLASS_TEST(StorageDownloadTest, ValidationFailureCleansUpBeforeLogging)
++{
++  // Inspect the state where Debug logging would abort, for both hash and read errors.
++  static std::string readyPath;
++  static bool failureNotified;
++  static bool cleanedBeforeError;
++  static size_t errors;
++  auto const oldLogger =
++      base::SetLogMessageFn([](base::LogLevel level, base::SrcPoint const & src, std::string const & message)
++  {
++    if (level == LERROR)
++    {
++      ++errors;
++      cleanedBeforeError = failureNotified && !Platform::IsFileExistsByFullPath(readyPath);
++      return;
++    }
++    base::LogMessageTests(level, src, message);
++  });
++  SCOPE_GUARD(restoreLogger, [&]() { base::SetLogMessageFn(oldLogger); });
++
++  for (bool const removeFile : {false, true})
++  {
++    failureNotified = false;
++    cleanedBeforeError = false;
++    errors = 0;
++    Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
++    InitStorage(storage, [](CountryId const &, LocalFilePtr const) { TEST(false, ("Invalid map was registered")); },
++                [&storage](CountryId const & countryId)
++    {
++      if (countryId == kWest && storage.CountryStatusEx(countryId) == Status::DownloadFailed)
++        failureNotified = true;
++    });
++    SeedReadyFile(storage, kWest, true);
++    readyPath = DownloadPath(storage, kWest);
++    if (removeFile)
++      TEST(Platform::RemoveFileIfExists(readyPath), ());
++    QueueValidation(storage);
++    DrainFileAndGui();
++    TEST_EQUAL(errors, 1, (removeFile));
++    TEST(cleanedBeforeError, (removeFile));
++    TEST(!storage.IsDownloadInProgress(), (removeFile));
++  }
++}
++
++UNIT_CLASS_TEST(StorageDownloadTest, ValidationIsDownloadInProgress)
++{
++  Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
++  InitStorage(storage, [](CountryId const &, LocalFilePtr const) {});
++  SeedReadyFile(storage);
++  FileThreadBlocker blocker;
++  QueueValidation(storage);
++  TEST(storage.IsDownloadInProgress(), ());
++  TEST_EQUAL(storage.CountryStatusEx(kWest), Status::Downloading, ());
++  blocker.Release();
++  DrainFileAndGui();
++  TEST(!storage.IsDownloadInProgress(), ());
++  TestDownloadedMap(storage, kWest);
++}
++
++UNIT_CLASS_TEST(StorageDownloadTest, CancelThenNewValidation)
++{
++  size_t downloaded = 0;
++  Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
++  InitStorage(storage, [&downloaded](CountryId const &, LocalFilePtr const) { ++downloaded; });
++  SeedReadyFile(storage);
++  QueueValidation(storage);
++  WaitForFileThread();
++  storage.CancelDownloadNode(kWest);
++  SeedReadyFile(storage);
++  QueueValidation(storage);
++  DrainFileAndGui();
++  TEST_EQUAL(downloaded, 1, ());
++  TEST_EQUAL(storage.CountryStatusEx(kWest), Status::OnDisk, ());
++  TestDownloadedMap(storage, kWest);
++}
++
++UNIT_CLASS_TEST(StorageDownloadTest, FailedValidationCallbackAfterRetry)
++{
++  for (bool const removeFile : {false, true})
++  {
++    size_t downloaded = 0;
++    Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
++    InitStorage(storage, [&downloaded](CountryId const &, LocalFilePtr const) { ++downloaded; });
++    SeedReadyFile(storage, kWest, true);
++    if (removeFile)
++      TEST(Platform::RemoveFileIfExists(DownloadPath(storage, kWest)), ());
++    QueueValidation(storage);
++    WaitForFileThread();
++    storage.CancelDownloadNode(kWest);
++    SeedReadyFile(storage);
++    QueueValidation(storage);
++    DrainFileAndGui();
++    TEST_EQUAL(downloaded, 1, (removeFile));
++    TestDownloadedMap(storage, kWest);
++    storage.DeleteNode(kWest);
++  }
++}
++
++UNIT_CLASS_TEST(StorageDownloadTest, DuplicateDownloadDuringValidation)
++{
++  size_t started = 0;
++  size_t downloaded = 0;
++  Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
++  InitStorage(storage, [&downloaded](CountryId const &, LocalFilePtr const) { ++downloaded; });
++  storage.SetStartDownloadingCallback([&started]() { ++started; });
++  SeedReadyFile(storage);
++  FileThreadBlocker blocker;
++  QueueValidation(storage);
++  storage.DownloadNode(kWest);
++  TEST_EQUAL(started, 1, ());
++  blocker.Release();
++  DrainFileAndGui();
++  TEST_EQUAL(downloaded, 1, ());
++  TestDownloadedMap(storage, kWest);
++}
++
++UNIT_CLASS_TEST(StorageDownloadTest, GroupProgressIncludesValidatedCountry)
++{
++  Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
++  InitStorage(storage, [](CountryId const &, LocalFilePtr const) {});
++  SeedReadyFile(storage);
++  SeedReadyFile(storage, kEast);
++  FileThreadBlocker beforeFirstValidation;
++  QueueValidation(storage);
++  int64_t bytesTotal = 0;
++  std::string savedQueue;
++  GetPlatform().RunTask(Platform::Thread::File, [&storage, &bytesTotal, &savedQueue]()
++  {
++    GetPlatform().RunTask(Platform::Thread::Gui, [&storage, &bytesTotal, &savedQueue]()
++    {
++      NodeAttrs attrs;
++      storage.GetNodeAttrs(kGroup, attrs);
++      bytesTotal = attrs.m_downloadingProgress.m_bytesTotal;
++      settings::TryGet("DownloadQueue", savedQueue);
++      testing::StopEventLoop();
++    });
++  });
++  FileThreadBlocker beforeSecondValidation;
++  QueueValidation(storage, kEast);
++  beforeFirstValidation.Release();
++  testing::RunEventLoop();
++  beforeSecondValidation.Release();
++  DrainFileAndGui();
++  TEST_EQUAL(bytesTotal, static_cast<int64_t>(SyntheticSize(kWest) + SyntheticSize(kEast)), ());
++  TEST_EQUAL(savedQueue, kEast, ());
++}
++
++UNIT_CLASS_TEST(StorageDownloadTest, CancelRestoredFileFromStartCallback)
++{
++  bool didDownload = false;
++  Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());
++  InitStorage(storage, [&didDownload](CountryId const &, LocalFilePtr const) { didDownload = true; });
++  SeedReadyFile(storage);
++  storage.SetStartDownloadingCallback([&storage]() { storage.CancelDownloadNode(kWest); });
++  storage.DownloadNode(kWest);
++  DrainFileAndGui();
++  TEST(!didDownload, ());
++  TEST(!storage.IsDownloadInProgress(), ());
++  TEST_EQUAL(storage.CountryStatusEx(kWest), Status::NotDownloaded, ());
++}
++
++UNIT_CLASS_TEST(StorageDownloadTest, DownloadWithoutHash)
++{
++  auto const json = R"({"id": "Countries", "v": )" + strings::to_string(version::FOR_TESTING_MWM1) + R"(, "g": [)" +
++                    MakeLeaf(kWest, {}) + "]}";
++  bool didDownload = false;
++  Storage storage(json, std::make_unique<TestMapFilesDownloader>());
++  InitStorage(storage, [&didDownload](CountryId const &, LocalFilePtr const) { didDownload = true; });
++  SeedReadyFile(storage);
++  storage.DownloadNode(kWest);
++  DrainFileAndGui();
++  TEST(didDownload, ());
++  TestDownloadedMap(storage, kWest);
++}
++
+ UNIT_CLASS_TEST(StorageDownloadTest, DownloadAndDeleteGroup)
+ {
+   Storage storage(CountriesJson(), std::make_unique<TestMapFilesDownloader>());

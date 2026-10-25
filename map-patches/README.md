@@ -74,3 +74,55 @@ Installed and verified on 2026-10-25:
 These are device/runtime and component-layout checks, not an on-road GPS
 navigation replay. Continuous real-car following still needs vehicle testing.
 The phone's saved maps and bookmarks were retained through normal RPM upgrades.
+
+## Selected sailfish-1-core fixes (2026-10-25)
+
+`organicmaps-core-fixes.patch` applies after `organicmaps-projection-ui.patch`
+(base `d3d00c6`). It carries these independent downstream commits:
+
+- `2c25c6a2`: upstream `51a0f178`, routing cache generations, guarded road
+  projection during rebuilds and removal of unavailable alternative routes.
+- `96b0f557`: upstream `647ff124`, per-download validation lifetime, cancellation,
+  retries and saved-file revalidation, including the upstream regression tests.
+- `249a71c7`: the incremental GeoClue changes from `6d4b3a89`, ignoring late
+  callbacks after Stop(), selecting available GeoClue plugins and identifying
+  GeoClue 1 separately. The phone has only the GeoClue 1 plugin.
+
+No files under `sailfish/` or `qt/qt_common/` differ from `d3d00c6`. The exported
+navigation snapshots, projected layout/rendering policy and existing exact-size
+GL constructor remain intact. The full core branch and its raster tile changes
+are not merged.
+
+For focused aarch64 SDK tests, configure the existing Sailfish build with
+`-DCMAKE_PROJECT_INCLUDE=/path/to/harbour-sailplay/tests/map_core_test_hook.cmake`
+and build targets `sailplay_core_async`, `sailplay_core_blake3`,
+`sailplay_core_storage`, `sailplay_core_routes`, `sailplay_core_location`.
+This test-only hook uses the existing Qt5 event loop; it does not replace the
+production Qt configuration. Remove the hook with `cmake -U CMAKE_PROJECT_INCLUDE`
+after building. The location probe injects a valid fix into the real GeoClue
+adapter and checks ignored callbacks before Start()/after Stop() and restart.
+
+Storage tests need the upstream localhost test server on port 24568. All tests
+must use isolated HOME/XDG_CONFIG_HOME/MWM_WRITABLE_DIR directories, with
+MWM_RESOURCES_DIR pointing to read-only map resources. Never use the user's
+map directory as a test writable directory.
+
+Verification for the selected core fixes:
+
+- Built Organic Maps `2026.10.25-5` from `249a71c7` with the existing aarch64
+  Sailfish SDK and Qt5.6. No new Qt or graphics interface was introduced.
+- On JollaPhone2026: 7 async-router, 30 routing-manager, 17 download-validation
+  and 5 BLAKE3 tests passed. The GeoClue lifecycle probe also passed. The map
+  tests use the Qt event loop required by upstream's map_tests target.
+- Test data, settings and HTTP fixtures stayed in unique private `/tmp`
+  directories; no real maps were downloaded, deleted or rewritten by tests.
+- Package SHA256:
+  `8c80a7c39936e6653df20006508bd8a6bfce1c305952896b9f9bcb57e72a276f`.
+- Library SHA256:
+  `85a96ce795da4d17fbd343e66e687e06a44110c35c6252b94908963e5baebddb`.
+
+The new map RPM is installed on JollaPhone2026. Normal application startup,
+accepted idle export snapshots, rejection after process exit, and projected
+map panning after phone display-off passed again. Sailplay remains 0.1.1-56.
+The previous 2026.10.25-2 RPM is retained locally for rollback. Actual on-road
+GPS guidance and the vehicle instrument display are not claimed by these tests.
