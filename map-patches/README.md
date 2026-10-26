@@ -126,3 +126,25 @@ accepted idle export snapshots, rejection after process exit, and projected
 map panning after phone display-off passed again. Sailplay remains 0.1.1-56.
 The previous 2026.10.25-2 RPM is retained locally for rollback. Actual on-road
 GPS guidance and the vehicle instrument display are not claimed by these tests.
+
+
+## Projected planning layout (2026-10-26)
+
+`organicmaps-planning-layout.patch` records the QML-only changes after 249a71c7.
+Projected pages ignore the physical phone camera cutout and soft-key margins.
+A new projected launch skips saved-route restoration without deleting the saved
+route or changing ordinary phone startup. Route summaries wrap inside a bounded
+panel, map buttons are smaller, and the duplicate bottom toolbar is hidden while
+planning. URL activation requests focus without restoring physical fullscreen
+geometry, preserving the assigned split viewport.
+
+Organic Maps 2026.10.26-5 (222037a1) was installed on JollaPhone2026.
+`tests/map_planning_layout_integration.py` passed with a private test profile,
+a seeded saved route and external route URL: initial route restoration stayed
+off, split surface 1138x688 and expanded surface 1780x720 both retained scale 1.
+Captured frames were inspected for margins and overlapping toolbars. Normal
+phone action-button sizes remain unchanged. This is device compositor validation;
+on-road navigation and vehicle visual acceptance remain unverified.
+
+RPM SHA256: b6f74f02d5e4e0dddb94469c743e7782a9b441c3a0c1c270009c9cf5140b4809.
+Library SHA256: 2d90e3647415943d1562e2717176a228d2f6bb5bd815bb477855cfb9d445c0e2.

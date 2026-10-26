@@ -1,0 +1,329 @@
+diff --git a/sailfish/qml/organicmaps.qml b/sailfish/qml/organicmaps.qml
+index f8ba8292..d0e5282f 100644
+--- a/sailfish/qml/organicmaps.qml
++++ b/sailfish/qml/organicmaps.qml
+@@ -27,8 +27,21 @@ ApplicationWindow {
+         }
+     }
+     allowedOrientations: defaultAllowedOrientations
++    // The virtual car output has no phone camera cutout.
++    defaultPageCutoutMode: sailplayProjected ? 0 : CutoutMode.AvoidLandscapeCutout
+     Component.onDestruction: downloadNotification.close()
+-    Component.onCompleted: if (mapsStorage.moveFailed) Toast.showLong(appInfo.localized("move_maps_error"))
++    Component.onCompleted: {
++        // Phone soft keys reserve a strip even in landscape. The car has its own
++        // navigation and touch controls; change only this projected window.
++        if (sailplayProjected && appWindow["_softKeyBar"]) {
++            appWindow["_softKeyBar"].visible = false
++            appWindow["_softKeyBar"].height = 0
++        }
++        if (sailplayProjected)
++            console.log("SAILPLAY_SOFTKEY_LAYOUT", !!appWindow["_softKeyBar"])
++        if (mapsStorage.moveFailed)
++            Toast.showLong(appInfo.localized("move_maps_error"))
++    }
+ 
+     ShareAction {
+         id: fileShare
+@@ -47,7 +60,14 @@ ApplicationWindow {
+ 
+     Connections {
+         target: urlHandler
+-        onActivated: activate()
++        onActivated: {
++            // ApplicationWindow.activate() also restores the physical full-screen
++            // geometry. The car compositor already owns this window's viewport.
++            if (sailplayProjected)
++                appWindow.__quickWindow.requestActivate()
++            else
++                activate()
++        }
+         onCancelDownloadsRequested: downloads.cancelAll()
+     }
+ 
+diff --git a/sailfish/qml/pages/MapPage.qml b/sailfish/qml/pages/MapPage.qml
+index a440c09f..a7dd3b50 100644
+--- a/sailfish/qml/pages/MapPage.qml
++++ b/sailfish/qml/pages/MapPage.qml
+@@ -44,6 +44,9 @@ Page {
+     // For the navigation and downloader layouts that keep the Android sizes.
+     readonly property real androidDp: myPositionButton.androidDp
+     readonly property real buttonMargin: Theme.paddingMedium
++    readonly property real mapButtonSize: projected
++        ? Math.min(Theme.itemSizeMedium, Math.max(Theme.iconSizeMedium + Theme.paddingSmall, height * 0.13))
++        : Theme.itemSizeMedium
+     // While the user types on a keepsUserInput page, the action waits for it to close rather than drop the input.
+     property var pendingAction
+     // A long tap on the empty map toggles the map buttons, except while a route is planned or followed.
+@@ -115,13 +118,40 @@ Page {
+     }
+     Component.onCompleted: {
+         appSettings.applyMapAppearance(mapIsDark)
+-        map.routing.restoreSavedRoute()
++        // Soft-key aware Silica versions expose this typed page property.
++        // Overlay mode removes their rotated strip from the car map viewport.
++        if (projected && "softKeys" in page)
++            page["softKeys"] = Qt.createQmlObject('import Sailfish.Silica 1.0; SoftKeys { overlay: true }', page)
++        if (!projected)
++            map.routing.restoreSavedRoute()
+         // A recording goes on after a restart.
+         if (map.trackRecording)
+             recordingNotification.publish()
+     }
+     Component.onDestruction: recordingNotification.close()
+ 
++    // Geometry-only diagnostics; never log route points or place names.
++    Timer {
++        id: layoutAudit
++        interval: 350
++        running: page.projected
++        onTriggered: if (page.projected) console.log("SAILPLAY_MAP_LAYOUT", JSON.stringify({
++            width: page.width, height: page.height, routeActive: map.routing.active,
++            routeOpen: routePanel.open, bottomTools: bottomButtons.visible,
++            buttonSize: page.mapButtonSize, routeWidth: routePanel.width * routePanel.scale
++        }))
++    }
++    Connections {
++        target: page
++        onWidthChanged: layoutAudit.restart()
++        onHeightChanged: layoutAudit.restart()
++    }
++    Connections {
++        target: map.routing
++        onPointsChanged: layoutAudit.restart()
++        onNavigatingChanged: layoutAudit.restart()
++    }
++
+     // Recording keeps the device awake.
+     KeepAlive {
+         enabled: map.trackRecording || map.routing.navigating
+@@ -249,6 +279,7 @@ Page {
+     }
+ 
+     MapButton {
++        size: page.mapButtonSize
+         visible: !page.navigating && !page.choosingPosition && !page.fullscreen
+         anchors {
+             top: parent.top
+@@ -288,6 +319,7 @@ Page {
+         }
+ 
+         MapButton {
++            size: page.mapButtonSize
+             id: zoomInButton
+             visible: appSettings.zoomButtons
+             enabled: rightButtons.fits(zoomInButton)
+@@ -297,6 +329,7 @@ Page {
+             onClicked: map.zoomIn()
+         }
+         MapButton {
++            size: page.mapButtonSize
+             id: zoomOutButton
+             visible: appSettings.zoomButtons
+             enabled: rightButtons.fits(zoomOutButton)
+@@ -313,6 +346,7 @@ Page {
+         }
+         // Indexed by MapItem.MyPositionMode.
+         MapButton {
++            size: page.mapButtonSize
+             id: myPositionButton
+             readonly property var icons: ["", "ic_location_off", "ic_not_follow", "ic_follow", "ic_follow_and_rotate"]
+ 
+@@ -332,19 +366,23 @@ Page {
+     // on Android.
+     Row {
+         id: bottomButtons
+-        readonly property real inset: page.buttonMargin * (page.isPortrait ? 2 : 1)
++        readonly property real inset: page.buttonMargin * (page.isPortrait && !page.projected ? 2 : 1)
+ 
+         visible: !page.navigating && !page.choosingPosition && !page.fullscreen
++                 && (!page.projected || !map.routing.active)
+         // Positioned by x: switching between left and horizontalCenter anchors on rotation can leave both set.
+-        x: page.isPortrait ? (parent.width - width) / 2 : inset
++        x: page.isPortrait && !page.projected ? (parent.width - width) / 2 : inset
+         anchors {
+             bottom: parent.bottom
+             bottomMargin: page.buttonMargin
+         }
+-        spacing: (Math.min(parent.width, 6 * menuButton.width) - 2 * inset - 4 * menuButton.width) / 3
++        spacing: page.projected ? page.buttonMargin
++                 : (Math.min(parent.width, 6 * menuButton.width) - 2 * inset - 4 * menuButton.width) / 3
+ 
+         MapButton {
++            size: page.mapButtonSize
+             square: true
++            visible: !page.projected
+             // The promos of the help button.
+             source: Qt.resolvedUrl(appSettings.helpPromo === AppSettings.PromoCrowdfunding
+                                    ? "../../icons/help/ic_crowdfunding.png"
+@@ -354,18 +392,21 @@ Page {
+             onClicked: pageStack.push(Qt.resolvedUrl("HelpPage.qml"))
+         }
+         MapButton {
++            size: page.mapButtonSize
+             square: true
+             source: "image://theme/icon-m-search"
+             description: appInfo.localized("search")
+             onClicked: page.openSearch()
+         }
+         MapButton {
++            size: page.mapButtonSize
+             square: true
+             source: "image://theme/icon-m-favorite"
+             description: appInfo.localized("bookmarks")
+             onClicked: page.openBookmarks()
+         }
+         MapButton {
++            size: page.mapButtonSize
+             id: menuButton
+             square: true
+             source: "image://theme/icon-m-menu"
+@@ -400,6 +441,7 @@ Page {
+ 
+     // Under the navigation panel while navigating.
+     MapButton {
++        size: page.mapButtonSize
+         id: recordingButton
+         anchors {
+             top: page.navigating ? navigationTopPanel.top : parent.top
+@@ -450,6 +492,7 @@ Page {
+             spacing: page.buttonMargin
+ 
+             MapButton {
++                size: page.mapButtonSize
+                 // A search left from before navigation clears with a tap, so it shows the clear icon like
+                 // ic_routing_search_off on Android.
+                 source: quickSearch.key !== "" ? quickSearch.icon(quickSearch.key)
+@@ -472,6 +515,7 @@ Page {
+                 model: quickSearch.expanded ? quickSearch.keys : []
+ 
+                 MapButton {
++                    size: page.mapButtonSize
+                     source: quickSearch.icon(modelData)
+                     monochrome: false
+                     description: appInfo.localized(modelData)
+@@ -480,6 +524,7 @@ Page {
+             }
+         }
+         MapButton {
++            size: page.mapButtonSize
+             source: "image://theme/icon-m-favorite"
+             description: appInfo.localized("bookmarks")
+             onClicked: page.openBookmarks()
+@@ -742,6 +787,7 @@ Page {
+ 
+     RoutePanel {
+         id: routePanel
++        projected: page.projected
+         routing: map.routing
+         placePage: map.placePage
+         onSearchClicked: page.openSearch()
+diff --git a/sailfish/qml/pages/RoutePanel.qml b/sailfish/qml/pages/RoutePanel.qml
+index 97ebfc1a..85713091 100644
+--- a/sailfish/qml/pages/RoutePanel.qml
++++ b/sailfish/qml/pages/RoutePanel.qml
+@@ -11,6 +11,10 @@ MapPanel {
+     id: panel
+ 
+     // MapItem.routing; the uncreatable C++ type can't be a property type in Qt 5.6.
++    property bool projected: false
++    readonly property real uiScale: projected
++        ? Math.max(0.1, Math.min(1, parent.height / (600 * Theme.pixelRatio), parent.width / (1050 * Theme.pixelRatio))) : 1
++    readonly property real actionSize: Theme.itemSizeSmall
+     property QtObject routing
+     property QtObject placePage
+     readonly property bool shouldShow: routing.active && !routing.navigating && !placePage.open
+@@ -19,7 +23,7 @@ MapPanel {
+                                       && routing.points[routing.points.length - 1].type === Routing.Finish
+     readonly property bool landscape: parent.width > parent.height
+     // The map space the sheet covers from the bottom; none beside it in landscape.
+-    readonly property real bottomInset: landscape ? 0 : visibleSize
++    readonly property real bottomInset: landscape ? 0 : visibleSize * uiScale
+ 
+     // Empty slots and stops are picked like any place: from search, bookmarks or the map.
+     signal searchClicked()
+@@ -57,7 +61,11 @@ MapPanel {
+         })
+     }
+ 
+-    width: landscape ? Math.round(parent.width / 2) : parent.width
++    scale: uiScale
++    transformOrigin: Item.BottomLeft
++    width: projected
++        ? (landscape ? Math.min(parent.width * 0.42, parent.height * 0.75) : parent.width) / uiScale
++        : landscape ? Math.round(parent.width / 2) : parent.width
+     modal: false
+     spacing: 0
+     onShouldShowChanged: open = shouldShow
+@@ -134,6 +142,8 @@ MapPanel {
+                     }
+                 }
+                 IconButton {
++                    width: panel.actionSize
++                    height: panel.actionSize
+                     id: closeButton
+                     anchors {
+                         right: parent.right
+@@ -165,8 +175,17 @@ MapPanel {
+                         running: routing.building
+                     }
+                     // "24 min • (walk) 810 m" for transit.
++                    Label {
++                        width: parent.width
++                        visible: panel.projected && routing.built
++                        text: routing.summary + (routing.arrival ? " • " + routing.arrival : "")
++                              + (routing.walkingDistance ? " • " + routing.walkingDistance : "")
++                        font.bold: true
++                        font.pixelSize: Theme.fontSizeSmall
++                        wrapMode: Text.Wrap
++                    }
+                     Row {
+-                        visible: routing.built
++                        visible: routing.built && !panel.projected
+                         spacing: Theme.paddingSmall
+ 
+                         Label {
+@@ -282,6 +301,8 @@ MapPanel {
+                     }
+ 
+                     IconButton {
++                        width: panel.actionSize
++                        height: panel.actionSize
+                         enabled: routing.canReverse
+                         icon.source: "image://theme/icon-m-transfer"
+                         icon.sourceSize: Qt.size(Theme.iconSizeMedium, Theme.iconSizeMedium)
+@@ -289,6 +310,8 @@ MapPanel {
+                         onClicked: routing.reverseRoute()
+                     }
+                     IconButton {
++                        width: panel.actionSize
++                        height: panel.actionSize
+                         id: optionsButton
+                         // A badge for avoided roads.
+                         readonly property int avoidedCount: [Routing.Toll, Routing.Dirty, Routing.Ferry,
+@@ -508,12 +531,16 @@ MapPanel {
+         height: Theme.itemSizeMedium
+ 
+         IconButton {
++            width: panel.actionSize
++            height: panel.actionSize
+             anchors.verticalCenter: parent.verticalCenter
+             icon.source: "image://theme/icon-m-search"
+             Accessible.name: appInfo.localized("search")
+             onClicked: panel.searchClicked()
+         }
+         IconButton {
++            width: panel.actionSize
++            height: panel.actionSize
+             anchors.verticalCenter: parent.verticalCenter
+             icon.source: "image://theme/icon-m-favorite"
+             Accessible.name: appInfo.localized("bookmarks")
+@@ -521,6 +548,8 @@ MapPanel {
+         }
+         // Saves the route as a track, once per built route.
+         IconButton {
++            width: panel.actionSize
++            height: panel.actionSize
+             anchors.verticalCenter: parent.verticalCenter
+             icon.source: "image://theme/icon-m-downloads"
+             Accessible.name: appInfo.localized("save")
