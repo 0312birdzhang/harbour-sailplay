@@ -1,3 +1,22 @@
+diff --git a/sailfish/map_item.cpp b/sailfish/map_item.cpp
+index 84e28e9b..c3cc0025 100644
+--- a/sailfish/map_item.cpp
++++ b/sailfish/map_item.cpp
+@@ -629,7 +629,13 @@ void MapItem::CreateEngine()
+ 
+   m_skin = std::make_unique<gui::Skin>(gui::ResolveGuiSkinFile("default"), m_visualScale);
+   m_skin->Resize(p.m_surfaceWidth, p.m_surfaceHeight);
+-  m_skin->ForEach([&p](gui::EWidget widget, gui::Position const & pos) { p.m_widgetsInitInfo[widget] = pos; });
++  bool const projected = qgetenv("WAYLAND_DISPLAY").contains("imira-comp") &&
++                         qgetenv("SAILPLAY_NAVIGATION_EXPORT") == "1";
++  m_skin->ForEach([&p, projected](gui::EWidget widget, gui::Position const & pos)
++  {
++    if (!projected || widget != gui::WIDGET_COPYRIGHT)
++      p.m_widgetsInitInfo[widget] = pos;
++  });
+ 
+   m_framework.SetMyPositionModeListener([this](location::EMyPositionMode mode, bool /* routingActive */)
+   { OnMyPositionModeChanged(mode); });
 diff --git a/sailfish/qml/organicmaps.qml b/sailfish/qml/organicmaps.qml
 index f8ba8292..d0e5282f 100644
 --- a/sailfish/qml/organicmaps.qml
@@ -42,7 +61,7 @@ index f8ba8292..d0e5282f 100644
      }
  
 diff --git a/sailfish/qml/pages/MapPage.qml b/sailfish/qml/pages/MapPage.qml
-index a440c09f..a7dd3b50 100644
+index a440c09f..05e62435 100644
 --- a/sailfish/qml/pages/MapPage.qml
 +++ b/sailfish/qml/pages/MapPage.qml
 @@ -44,6 +44,9 @@ Page {
@@ -97,14 +116,16 @@ index a440c09f..a7dd3b50 100644
      // Recording keeps the device awake.
      KeepAlive {
          enabled: map.trackRecording || map.routing.navigating
-@@ -249,6 +279,7 @@ Page {
+@@ -249,7 +279,8 @@ Page {
      }
  
      MapButton {
+-        visible: !page.navigating && !page.choosingPosition && !page.fullscreen
 +        size: page.mapButtonSize
-         visible: !page.navigating && !page.choosingPosition && !page.fullscreen
++        visible: !page.projected && !page.navigating && !page.choosingPosition && !page.fullscreen
          anchors {
              top: parent.top
+             topMargin: page.topInset + page.buttonMargin
 @@ -288,6 +319,7 @@ Page {
          }
  
@@ -218,6 +239,20 @@ index a440c09f..a7dd3b50 100644
          routing: map.routing
          placePage: map.placePage
          onSearchClicked: page.openSearch()
+diff --git a/sailfish/qml/pages/NavigationBottomPanel.qml b/sailfish/qml/pages/NavigationBottomPanel.qml
+index b7455972..aa6b59aa 100644
+--- a/sailfish/qml/pages/NavigationBottomPanel.qml
++++ b/sailfish/qml/pages/NavigationBottomPanel.qml
+@@ -94,7 +94,8 @@ Item {
+                         id: speedNumber
+                         anchors.horizontalCenter: parent.horizontalCenter
+                         value: navigation.speed || ""
+-                        units: navigation.speedUnits || ""
++                        units: sailplayProjected ? (appSettings.units === 0 ? "km/h" : "mph")
++                                                  : navigation.speedUnits || ""
+                         valueColor: speedView.camAlert ? Theme.lightPrimaryColor
+                                   : navigation.speedLimitExceeded ? "#f51e30" : Theme.primaryColor
+                         unitsColor: speedView.camAlert ? Theme.lightPrimaryColor : Theme.secondaryColor
 diff --git a/sailfish/qml/pages/RoutePanel.qml b/sailfish/qml/pages/RoutePanel.qml
 index 97ebfc1a..85713091 100644
 --- a/sailfish/qml/pages/RoutePanel.qml

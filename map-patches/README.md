@@ -148,3 +148,13 @@ on-road navigation and vehicle visual acceptance remain unverified.
 
 RPM SHA256: b6f74f02d5e4e0dddb94469c743e7782a9b441c3a0c1c270009c9cf5140b4809.
 Library SHA256: 2d90e3647415943d1562e2717176a228d2f6bb5bd815bb477855cfb9d445c0e2.
+
+
+### Projected controls follow-up
+
+Organic Maps 2026.10.26-6 (abcdd8c3) hides the top-left layer control and the
+native renderer copyright-logo widget in projected mode. The existing projected
+help-logo suppression remains in place. The navigation speed label uses km/h
+for metric settings and mph for imperial settings; ordinary phone UI is unchanged.
+RPM SHA256: 759aba9d67addb58600120e30317172eccc890b68c4ec6f87e5e2be2a603cf3e.
+Installed library SHA256: bc82144ac406296e7bd7152924d3dfeeed815e486e15d385769dd37b91ee4e72.
