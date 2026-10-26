@@ -93,3 +93,25 @@ zero and forward, resume, track changes, and rejection of stale track/service
 replies. Position replies convert microseconds directly to UI seconds; duration
 still converts Amber metadata milliseconds to seconds. Run
 `tests/music_position_integration.py` on Sailfish as the session user.
+
+
+## Car lyrics and control placement (0.1.1-57)
+
+The split music card displays the current timed lyric; the expanded car music
+page adds the next line. The song header, transport buttons, progress and lyrics
+are centered together, with a bounded width on wide displays. Lyrics follow the
+queried MPRIS position, including pause and seek, and clear on track/service
+changes; late results for an old track are ignored.
+
+`player-lyrics.py` uses MPRIS `xesam:asText` when provided. For Mconnect it can
+also read its existing `mconnect.sqlite` lyrics cache in SQLite read-only mode,
+matching the exact platform/song hash published as the MPRIS track ID. It does
+not modify the database, activate the phone UI, download lyrics, or select
+songs by potentially ambiguous titles. A song with no cached/exported lyrics
+keeps the normal music controls; support is not universal across players.
+LRC and decoded QRC/KRC timing are supported, as are cached per-song offsets.
+
+Device validation parsed all six existing cached lyric entries and confirmed
+landscape/portrait video startup. The Linux unittest suite passed 217 tests.
+Actual car-side lyric appearance and the new control placement still need
+visual confirmation in a projection session.

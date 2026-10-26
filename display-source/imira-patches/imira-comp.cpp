@@ -1089,9 +1089,9 @@ public:
             }
             QQuickItem *viewport = c.item->parentItem();
             viewport->setPosition(m_dashboard
-                ? QPointF(map ? gap : mapWidth + 2 * gap, top) : QPointF(0, 0));
+                ? QPointF(map ? 4 * scale : mapWidth + 2 * gap, top) : QPointF(0, 0));
             viewport->setSize(m_dashboard
-                ? QSizeF(map ? mapWidth : aw - mapWidth - 3 * gap, m_height - 2 * top)
+                ? QSizeF(map ? mapWidth + 12 * scale : aw - mapWidth - 3 * gap, m_height - 2 * top)
                 : QSizeF(aw, m_height));
             if (m_dashboard) {
                 c.visible = map || music;

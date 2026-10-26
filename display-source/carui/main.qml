@@ -120,7 +120,8 @@ Window {
                         property int appIndex: parent.parent.pageIndex * root.pageSize + index - 1
                         property bool oem: appIndex === -1
                         property var entry: appIndex >= 0 && appIndex < root.apps.length ? root.apps[appIndex] : null
-                        visible: oem || entry !== null
+                        opacity: oem || entry !== null ? 1 : 0
+                        enabled: oem || entry !== null
                         width: parent.cellWidth; height: parent.cellHeight
                         property real iconSize: Math.min(156, width * 0.55, height * 0.55)
                         property real labelSize: Math.min(31, iconSize * 0.23)
@@ -175,7 +176,7 @@ Window {
         }
         Rectangle {
             visible: !carController.musicActive
-            x: 16; y: parent.verticalGap; width: parent.mapWidth; height: parent.height - 2 * parent.verticalGap
+            x: 4; y: parent.verticalGap; width: parent.mapWidth + 12; height: parent.height - 2 * parent.verticalGap
             radius: 22; color: carPalette.card
             Text { anchors.centerIn: parent; width: parent.width - 40; wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter; color: carPalette.secondary; font.pixelSize: 26
@@ -212,15 +213,16 @@ Window {
             MusicPlayer {
                 id: lockscreenMusic
                 compact: !carController.musicActive
-                width: parent.width - 64; x: 32
-                y: Math.max(12, (musicCard.height - (compact ? 106 : 140) - height) / 2)
+                width: Math.min(parent.width - 64, compact ? parent.width : 1000)
+                x: (parent.width - width) / 2
+                y: Math.max(12, (musicCard.height - height - musicProgress.height - lyricsArea.height - 12) / 2)
                 albumArtSource: musicCard.artwork
                 onClicked: musicCard.openMusic()
             }
             Item {
                 id: musicProgress
                 z: 2
-                x: 32; width: parent.width - 64; height: carController.musicActive ? 112 : 90
+                x: lockscreenMusic.x; width: lockscreenMusic.width; height: carController.musicActive ? 100 : 72
                 y: lockscreenMusic.y + lockscreenMusic.height + 4
                 visible: lockscreenMusic.visible && !lockscreenMusic.idleCard
                 property var player: lockscreenMusic.mprisController
@@ -306,6 +308,53 @@ Window {
                     anchors.right: parent.right; anchors.rightMargin: 8
                     y: carController.musicActive ? 76 : 58; color: carPalette.secondary; font.pixelSize: 24
                     text: musicProgress.durationSeconds > 0 ? musicProgress.timeText(musicProgress.durationSeconds) : "--:--"
+                }
+            }
+            Item {
+                id: lyricsArea
+                x: lockscreenMusic.x; width: lockscreenMusic.width
+                y: musicProgress.y + musicProgress.height + 8
+                height: currentLine.text ? (carController.musicActive ? 100 : 54) : 0
+                clip: true
+                property var lines: []
+                property int offsetMs: 0
+                property string identity: musicProgress.trackKey
+                property int currentIndex: -1
+                onIdentityChanged: { lines = []; currentIndex = -1; load() }
+                function load() {
+                    var p = musicProgress.player
+                    if (p && p.currentService && p.metaData.trackId)
+                        carController.requestPlayerLyrics(p.currentService, String(p.metaData.trackId), identity)
+                }
+                function update() {
+                    var seconds = musicProgress.positionSeconds + offsetMs / 1000
+                    var i = -1
+                    while (i + 1 < lines.length && lines[i + 1][0] <= seconds) ++i
+                    currentIndex = i
+                }
+                Timer { interval: 5000; running: musicCard.visible; repeat: true; triggeredOnStart: true; onTriggered: lyricsArea.load() }
+                Connections { target: musicProgress; onPositionSecondsChanged: lyricsArea.update() }
+                Connections {
+                    target: carController
+                    onPlayerLyricsAvailable: {
+                        if (key !== lyricsArea.identity) return
+                        lyricsArea.lines = rows; lyricsArea.offsetMs = offsetMs; lyricsArea.update()
+                    }
+                }
+                Text {
+                    id: currentLine
+                    width: parent.width; horizontalAlignment: Text.AlignHCenter
+                    color: carPalette.text; font.pixelSize: carController.musicActive ? 34 : 26
+                    elide: Text.ElideRight
+                    text: lyricsArea.currentIndex >= 0 && lyricsArea.currentIndex < lyricsArea.lines.length
+                        ? lyricsArea.lines[lyricsArea.currentIndex][1] : ""
+                }
+                Text {
+                    y: 48; width: parent.width; visible: carController.musicActive
+                    horizontalAlignment: Text.AlignHCenter; color: carPalette.secondary; font.pixelSize: 26
+                    elide: Text.ElideRight
+                    text: lyricsArea.currentIndex + 1 < lyricsArea.lines.length && lyricsArea.currentIndex >= 0
+                        ? lyricsArea.lines[lyricsArea.currentIndex + 1][1] : ""
                 }
             }
             Text {

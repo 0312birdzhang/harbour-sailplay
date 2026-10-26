@@ -10,6 +10,10 @@
 #include <QQuickView>
 #include <QObject>
 #include <QProcess>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QSettings>
@@ -793,6 +797,28 @@ public:
         for (int i=64;i<files.size();++i) QFile::remove(files.at(i).absoluteFilePath());
         return QUrl();
     }
+    Q_INVOKABLE void requestPlayerLyrics(const QString &service, const QString &track, const QString &key) {
+        if (!service.startsWith(QLatin1String("org.mpris.MediaPlayer2.")) || m_lyricsPending.contains(key)) return;
+        m_lyricsPending.insert(key);
+        auto *process = new QProcess(this);
+        auto *timeout = new QTimer(process);
+        timeout->setSingleShot(true);
+        connect(timeout, &QTimer::timeout, process, &QProcess::kill);
+        connect(process, static_cast<void(QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished), this,
+                [this, process, key](int code, QProcess::ExitStatus status) {
+            m_lyricsPending.remove(key);
+            if (code == 0 && status == QProcess::NormalExit) {
+                const QJsonObject data = QJsonDocument::fromJson(process->readAllStandardOutput()).object();
+                emit playerLyricsAvailable(key, data.value("lines").toArray().toVariantList(), data.value("offsetMs").toInt());
+            }
+            process->deleteLater();
+        });
+        connect(process, &QProcess::errorOccurred, this, [this, process, key](QProcess::ProcessError error) {
+            if (error == QProcess::FailedToStart) { m_lyricsPending.remove(key); process->deleteLater(); }
+        });
+        process->start(QStringLiteral("python3"), {QStringLiteral("/opt/sailplay/scripts/player-lyrics.py"), service, track});
+        timeout->start(3000);
+    }
     Q_INVOKABLE void requestPlayerPosition(const QString &service, const QString &trackKey) {
         if (!service.startsWith(QLatin1String("org.mpris.MediaPlayer2."))) return;
         const QString key = service + QLatin1Char('|') + trackKey;
@@ -1085,6 +1111,7 @@ public:
     }
 
 signals:
+    void playerLyricsAvailable(const QString &key, const QVariantList &rows, int offsetMs);
     void playerPositionAvailable(const QString &service, const QString &trackKey, double seconds);
     void themeSettingsChanged();
     void rememberedMusicChanged();
@@ -1100,6 +1127,7 @@ signals:
 
 private:
     QSet<QString> m_positionPending;
+    QSet<QString> m_lyricsPending;
     QVariantMap m_status;
     void setStatus(const QString &key, const QVariant &value)
     {
