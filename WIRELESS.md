@@ -188,3 +188,29 @@ it refuses an existing compositor and should be run as the session user with
 a bounded CPU wake lease. This is phone-side virtual display validation;
 physical head-unit interaction, other resolutions, Qt6 and non-Qt input
 clients require separate testing.
+
+
+### Detached projected applications (0.1.1-58)
+
+`QProcess::startDetached` clients are not members of the display pipeline's
+process groups. Closing the compositor alone can leave a navigation backend,
+location subscription and keep-alive requests running. Before stopping display
+components the pipeline now sends TERM to clients with both
+`WAYLAND_DISPLAY=imira-comp-0` and a non-empty `CARLIFE_APP_KEY`, excluding the
+separately managed keyboard. The process start time is rechecked before each
+signal; a bounded two-second grace period precedes KILL for surviving clients.
+Normal phone apps and the music service on the phone output are not selected.
+
+Startup also clears orphaned marked clients after obtaining the exclusive
+display lock. A systemd ExecStopPost helper performs the same cleanup after
+service exit, only if it can obtain that lock. It never clears an independently
+active projection session. Display close is idempotent.
+
+On-device validation used real Organic Maps with a private profile and separate
+ordinary-output control process: closing the pipeline removed the projected
+map, retained the ordinary process, and a second close succeeded. Tests did not
+unlock the phone or change its saved routes/maps. This proves process cleanup;
+long-term standby consumption still needs field observation. The map card now
+starts directly at the dock boundary; its compositor viewport uses the same
+zero inset. The installed map package was updated from 2026.10.25-5 to the
+previously validated 2026.10.26-6 containing projected cutout/soft-key fixes.

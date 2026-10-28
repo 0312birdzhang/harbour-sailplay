@@ -82,6 +82,62 @@ class AnnexBFrames:
         return bytes([1,s[1],s[2],s[3],255,225])+struct.pack('>H',len(s))+s+b'\x01'+struct.pack('>H',len(p))+p
 
 
+def projected_apps(proc='/proc'):
+    """PID/start-time pairs belonging exclusively to our virtual Wayland output.
+
+    A detached Qt client can outlive its compositor. Require both the output
+    and launcher marker; never infer ownership from its executable name.
+    """
+    result = {}
+    for name in os.listdir(proc):
+        if not name.isdigit():
+            continue
+        base = '{}/{}'.format(proc, name)
+        try:
+            with open(base + '/environ', 'rb') as source:
+                env = dict(v.split(b'=', 1) for v in source.read().split(b'\0') if b'=' in v)
+            if (env.get(b'WAYLAND_DISPLAY') != b'imira-comp-0'
+                    or not env.get(b'CARLIFE_APP_KEY')
+                    or env.get(b'CARLIFE_APP_KEY') == b'sailplay-input-method'):
+                continue
+            with open(base + '/stat') as source:
+                stat = source.read().rsplit(')', 1)[-1].split()
+            if stat[0] != 'Z':
+                result[int(name)] = stat[19]
+        except (OSError, ValueError, IndexError):
+            continue
+    return result
+
+
+def stop_projected_apps(grace=2):
+    """Stop detached projected clients while the caller owns the display lock."""
+    owned = projected_apps()
+    for pid, started in owned.items():
+        if projected_apps().get(pid) != started:
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+            print('Projection app cleanup TERM pid={}'.format(pid), flush=True)
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + grace
+    pending = owned
+    while pending and time.monotonic() < deadline:
+        current = projected_apps()
+        pending = {pid:started for pid,started in owned.items() if current.get(pid) == started}
+        if pending:
+            time.sleep(.05)
+    current = projected_apps()
+    for pid, started in pending.items():
+        if current.get(pid) != started:
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+            print('Projection app cleanup KILL pid={}'.format(pid), flush=True)
+        except ProcessLookupError:
+            pass
+
+
 class DisplayPipeline:
     def __init__(self,width=1920,height=720,fps=30):
         self.width,self.height,self.fps=width,height,fps
@@ -117,6 +173,8 @@ class DisplayPipeline:
             os.close(self.lock_fd)
             self.lock_fd=None
             raise RuntimeError('existing compositor active; refusing conflicting display pipeline')
+        # Recover detached clients left by a previous crashed display session.
+        stop_projected_apps()
         if not os.path.exists('/run/display/wayland-0'):
             raise RuntimeError('lipstick display unavailable')
         os.mkfifo(self.fifo,0o666)
@@ -194,6 +252,9 @@ class DisplayPipeline:
                 raise TimeoutError('capture produced no frames')
 
     def close(self):
+        # Keep compositor and session bus alive for Qt/location teardown first.
+        if self.comp is not None and self.lock_fd is not None:
+            stop_projected_apps()
         for process in reversed(self.processes):
             try:
                 os.killpg(process.pid,signal.SIGTERM)
@@ -206,10 +267,14 @@ class DisplayPipeline:
             except ProcessLookupError:
                 pass
             process.wait()
+        self.processes = []
+        self.comp = self.ui = self.capture = None
         if self.fd is not None:
             os.close(self.fd)
+            self.fd = None
         for log in self.logs:
             log.close()
+        self.logs = []
         if os.path.exists(self.fifo):
             os.unlink(self.fifo)
         if self.lock_fd is not None:

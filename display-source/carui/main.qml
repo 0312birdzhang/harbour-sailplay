@@ -176,7 +176,7 @@ Window {
         }
         Rectangle {
             visible: !carController.musicActive
-            x: 4; y: parent.verticalGap; width: parent.mapWidth + 12; height: parent.height - 2 * parent.verticalGap
+            x: 0; y: parent.verticalGap; width: parent.mapWidth + 16; height: parent.height - 2 * parent.verticalGap
             radius: 22; color: carPalette.card
             Text { anchors.centerIn: parent; width: parent.width - 40; wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter; color: carPalette.secondary; font.pixelSize: 26
