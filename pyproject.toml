@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -19,4 +19,7 @@ python_files = "test_*.py"
 addopts = "-q"
 
 [tool.setuptools]
-packages = ["carplay_proto", "android_auto"]
+packages = ["carplay_proto", "android_auto", "sailplay_sdk"]
+
+[tool.setuptools.package-data]
+sailplay_sdk = ["interfaces/*.xml"]

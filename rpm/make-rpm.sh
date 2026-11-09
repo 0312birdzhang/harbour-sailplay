@@ -4,8 +4,8 @@ REPO=/parentroot/mnt/d/code/sfos-carlife/harbour-sailplay
 WORK=$(mktemp -d /tmp/sailplay-rpm.XXXXXX)
 STAGE=$WORK/harbour-sailplay-0.1.1
 mkdir -p "$STAGE/rpm/payload" "$STAGE/display-source/carui"
-cp -r "$REPO/carplay_proto" "$REPO/android_auto" "$STAGE/"
-find "$STAGE/carplay_proto" "$STAGE/android_auto" -type d -name __pycache__ -exec rm -rf {} +
+cp -r "$REPO/carplay_proto" "$REPO/android_auto" "$REPO/sailplay_sdk" "$REPO/sdk" "$STAGE/"
+find "$STAGE/carplay_proto" "$STAGE/android_auto" "$STAGE/sailplay_sdk" "$STAGE/sdk" -type d -name __pycache__ -exec rm -rf {} +
 mkdir -p "$STAGE/scripts" "$STAGE/diagnostics"
 for name in projection-service.py android-auto-phone.py restore-projection-network.py stop-projected-apps.py player-lyrics.py keyboard-server.py wireless-probe.py wireless-phone-advertise.py bluetooth-monitor.py wifi-session-probe.py pulse-capture.py media-control.py reload-audio-policy.py reconnect-car.py prepare-media-compat.py prepare-viewport-compat.py extract-artwork.py inspect-accessory-certificate.py; do
     cp "$REPO/scripts/$name" "$STAGE/scripts/"
@@ -36,4 +36,4 @@ PY
 cd "$WORK"
 tar cjf harbour-sailplay-0.1.1.tar.bz2 harbour-sailplay-0.1.1
 rpmbuild -ta --target aarch64 --define 'debug_package %{nil}' --define '__os_install_post %{nil}' harbour-sailplay-0.1.1.tar.bz2
-test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.1-59.aarch64.rpm"
+test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.1-60.aarch64.rpm"

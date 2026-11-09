@@ -1,6 +1,6 @@
 Name: harbour-sailplay
 Version: 0.1.1
-Release: 59
+Release: 60
 Summary: SailfishOS wireless CarPlay and Android Auto phone with virtual display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
@@ -24,6 +24,8 @@ Qt Quick launcher and statically linked x264 capture binary. Experimental
 vehicle integration with continuous video, absolute HID touch, and encrypted playback audio.
 Includes a phone-side wireless Android Auto backend with WPP bootstrap, AAP TLS,
 negotiated H.264/PCM/AAC media, input and exclusive dual-protocol session ownership.
+Includes SDK v1 application/session XML, Python provider and client helpers,
+Qt/QML bindings and a background reference application.
 
 %prep
 %setup -q
@@ -32,7 +34,16 @@ negotiated H.264/PCM/AAC media, input and exclusive dual-protocol session owners
 
 %install
 mkdir -p %{buildroot}/opt/sailplay %{buildroot}/opt/sailplay/carui
-cp -r carplay_proto android_auto scripts diagnostics %{buildroot}/opt/sailplay/
+cp -r carplay_proto android_auto sailplay_sdk scripts diagnostics %{buildroot}/opt/sailplay/
+find %{buildroot}/opt/sailplay/sailplay_sdk -type f -exec chmod 0644 {} +
+find %{buildroot}/opt/sailplay/sailplay_sdk -type d -exec chmod 0755 {} +
+mkdir -p %{buildroot}/usr/share/sailplay-sdk
+cp -r sdk/qt sdk/examples %{buildroot}/usr/share/sailplay-sdk/
+find %{buildroot}/usr/share/sailplay-sdk -type f -exec chmod 0644 {} +
+find %{buildroot}/usr/share/sailplay-sdk -type d -exec chmod 0755 {} +
+install -m 0644 sdk/README.md %{buildroot}/usr/share/sailplay-sdk/README.md
+install -D -m 0644 sailplay_sdk/interfaces/org.sailplay.App1.xml %{buildroot}/usr/share/dbus-1/interfaces/org.sailplay.App1.xml
+install -D -m 0644 sailplay_sdk/interfaces/org.sailplay.Session1.xml %{buildroot}/usr/share/dbus-1/interfaces/org.sailplay.Session1.xml
 install -m 2755 rpm/payload/imira-comp %{buildroot}/opt/sailplay/imira-comp
 install -m 2755 rpm/payload/carlife-capture %{buildroot}/opt/sailplay/carlife-capture
 install -m 0755 rpm/payload/carui %{buildroot}/opt/sailplay/carui/carui
@@ -72,6 +83,7 @@ systemctl daemon-reload || :
 %dir /opt/sailplay
 /opt/sailplay/carplay_proto
 /opt/sailplay/android_auto
+/opt/sailplay/sailplay_sdk
 /opt/sailplay/scripts
 /opt/sailplay/diagnostics
 /opt/sailplay/carui
@@ -85,3 +97,6 @@ systemctl daemon-reload || :
 /etc/polkit-1/rules.d/50-sailplay.rules
 /usr/share/applications/harbour-sailplay.desktop
 /usr/share/icons/hicolor/172x172/apps/harbour-sailplay.png
+/usr/share/sailplay-sdk
+/usr/share/dbus-1/interfaces/org.sailplay.App1.xml
+/usr/share/dbus-1/interfaces/org.sailplay.Session1.xml

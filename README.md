@@ -11,6 +11,7 @@ connection, visible applications and display settings.
 
 ## Documentation
 
+- SDK v1 application/session contracts, Qt/Python bindings and runnable examples. [Application SDK](sdk/README.md)
 - [Development status and source layout](DEVELOPMENT.md): implementation status, repository structure and historical version notes.
 - [Wireless implementation notes](WIRELESS.md): connection, media and display lifecycle details.
 - [Accessory authentication](ACCESSORY_AUTH.md): legacy RSA and alternate P-256 certificate encodings, Honda investigation and validation limits.

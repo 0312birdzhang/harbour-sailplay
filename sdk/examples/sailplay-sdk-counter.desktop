@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Sailplay SDK counter
+NoDisplay=true
+Exec=/usr/bin/python3 /usr/share/sailplay-sdk/examples/counter-service.py
+ExecDBus=/usr/bin/python3 /usr/share/sailplay-sdk/examples/counter-service.py
+X-Sailplay-Service=org.example.SailplayCounter
+X-Sailplay-ObjectPath=/org/sailplay/v1/App
+X-Sailplay-ApiVersion=1
+
+[X-Sailjail]
+OrganizationName=org.example
+ApplicationName=SailplayCounter
+Permissions=

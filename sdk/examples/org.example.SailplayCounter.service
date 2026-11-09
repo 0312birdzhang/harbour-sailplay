@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=org.example.SailplayCounter
+Exec=/usr/bin/python3 /usr/share/sailplay-sdk/examples/counter-service.py
