@@ -1,6 +1,8 @@
 # Sailplay
 
-Wireless CarPlay phone/source implementation for SailfishOS, tested on Xiaomi Pad 5 (nabu) and JollaPhone2026 with Toyota HSAE head units.
+Wireless CarPlay phone/source implementation for SailfishOS, with an experimental
+wireless Android Auto source backend. CarPlay has been tested on Xiaomi Pad 5
+(nabu) and JollaPhone2026 with Toyota HSAE head units.
 
 Sailplay connects over Bluetooth and Wi-Fi to project a dedicated car interface,
 with application launching, reverse touch input, music playback controls and a
@@ -42,6 +44,47 @@ Root installation uses an interactive `devel-su` password prompt. Device credent
 
 Wireless CarPlay does not require Internet access, DNS resolution or a SIM card. ConnMan `ready` is sufficient; `online` is not required. If Connect reports an error (including `NoCarrier`), Sailplay checks the actual supplicant association and probes the iAP2-provided CarPlay endpoint bound to that Wi-Fi interface. A verified local connection continues into AirPlay; stale IPs, association to another SSID and unreachable endpoints retain the normal retry path.
 
+## Android Auto
+
+Select **Automatic**, **CarPlay** or **Android Auto** in the phone application's
+projection settings and reconnect to apply. Automatic starts both backends and
+prefers CarPlay for a head unit advertising both protocols. One session owns the
+Wi-Fi handover, display, audio and input at a time.
+
+The new phone-side backend follows DiAuto's WPP and AAP implementations. It
+connects to the paired head unit's Bluetooth WPP service, joins the supplied
+network through ConnMan and opens the supplied TCP endpoint. The phone acts as
+the TLS server inside AAP. Service discovery determines the channel IDs, H.264
+resolution, frame rate, audio format and touch coordinates. Media transmission
+obeys the receiver's ACK window and starts from an IDR after focus recovery.
+
+Current media support includes H.264 Baseline, PCM playback, and 48 kHz stereo
+AAC-LC with raw or ADTS framing. The installation generates a private self-signed
+TLS identity. Physical Bluetooth/Wi-Fi handover, OEM certificate policies and
+Android/vehicle display and audio output require receiver testing. Microphone,
+phone calls and Android Auto instrument navigation are future integration work.
+
+Host interoperability checks used DiAuto revision `71e6558`, compiling its
+original WPP, TLS, service-discovery, control and video-reassembly code with
+Android platform adapters. The checks covered both WPP handshake variants,
+PCM/AAC media, landscape/portrait video, touch, keys and focus recovery. FFmpeg
+decoded the assembled H.264 and captured audio streams.
+
+Device checks on 2026-11-09 used the installed aarch64 RPM on JollaPhone2026
+running Sailfish OS 5.3.0.15. Its native compositor, H.264 capture and PulseAudio
+producers sent media through an SSH reverse TCP tunnel to the DiAuto JVM
+receiver. Landscape PCM, landscape AAC and portrait PCM cases produced 952
+independently decoded video frames in total, with decoded test-tone audio and
+successful focus/keyframe recovery. Device audio state, UI settings and service
+activation were restored. Test resources were cleaned after each case.
+
+An explicitly selected DiAuto TCP endpoint can also be used on the current
+network for protocol testing. Use the address and port reported by the receiver.
+
+```sh
+devel-su /bin/sh -c 'python3 /opt/sailplay/scripts/android-auto-phone.py --tcp HU_ADDRESS HU_PORT'
+```
+
 ## Tests
 
 Run the protocol tests on Linux:
@@ -56,6 +99,13 @@ The device uses system OpenSSL and PulseAudio; development tests use Python
 cryptography. Live display integration checks and device-specific requirements
 are described in [WIRELESS.md](WIRELESS.md).
 
+## Donate
+
+If you find Sailplay useful, please consider supporting its development.
+
+- Donate via PayPal. [PayPal](https://www.paypal.com/paypalme/birdzhang)
+- Sign up using my AgentRouter referral link. [AgentRouter](https://agentrouter.org/register?aff=1Ze8)
+
 ## Acknowledgements
 
 Sailplay builds on and learns from the following projects:
@@ -65,6 +115,7 @@ Sailplay builds on and learns from the following projects:
 - [sailfish-weather](https://github.com/sailfishos/sailfish-weather): weather components and the Events view weather integration reference.
 - [zzmusic](https://github.com/ZeroX-S/zzmusic): a reference for music artwork handling.
 - [DiPlay](https://github.com/shihabal3amri/DiPlay): a CarPlay receiver used for interoperability testing and audio/input investigation.
+- The Android Auto WPP, AAP, TLS and media implementation follows DiAuto's head-unit code. [DiAuto](https://github.com/shihabal3amri/DiAuto)
 - [Qt](https://www.qt.io/) and Sailfish Silica / Amber.Mpris: the application UI, Wayland compositor and music controls.
 - [x264](https://www.videolan.org/developers/x264.html): software H.264 video encoding.
 - [FFmpeg](https://ffmpeg.org/): AAC audio encoding.

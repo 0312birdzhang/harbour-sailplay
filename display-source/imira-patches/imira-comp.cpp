@@ -1450,6 +1450,16 @@ private:
             char data[64];ssize_t n;
             while ((n=recv(m_privateFd,data,sizeof(data)-1,0))>0) {
                 data[n]=0;int down,x,y;char extra;
+                int key;
+                if (sscanf(data,"K %d %d%c",&down,&key,&extra)==2) {
+                    if (down<0 || down>1 || (key!=KEY_BACK && key!=KEY_UP
+                            && key!=KEY_DOWN && key!=KEY_LEFT && key!=KEY_RIGHT
+                            && key!=KEY_ENTER && key!=KEY_TAB && key!=KEY_SPACE
+                            && key!=KEY_BACKSPACE)) continue;
+                    input_event ev={};ev.type=EV_KEY;ev.code=key;ev.value=down;
+                    keyEvent(ev);
+                    continue;
+                }
                 if (sscanf(data,"T %d %d %d%c",&down,&x,&y,&extra)!=3
                         || down<0 || down>1 || x<0 || x>=m_w || y<0 || y>=m_h) continue;
                 m_pos=QPointF(x,y);m_cursor->setPosition(m_pos);

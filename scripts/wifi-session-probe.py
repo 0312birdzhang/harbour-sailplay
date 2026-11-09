@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Connect to the supplied HU AP temporarily, with an independent restoration process."""
 import argparse
+import atexit
 import json
 import os
 import plistlib
@@ -40,20 +41,20 @@ def main():
     parser.add_argument('--trace-supplicant', action='store_true')
     parser.add_argument('--restore-debug')
     parser.add_argument('--restore-clock')
+    parser.add_argument('--session-id')
     parser.add_argument('--sustained', action='store_true')
     parser.add_argument('--force-wpa2', action='store_true')
     parser.add_argument('--log-file')
     parser.add_argument('--restore', nargs=2, metavar=('OLD', 'TARGET'))
     parser.add_argument('--restore-after', type=int, default=45)
     args = parser.parse_args()
-    media_lock = None
+    media_lease = None
     if not args.restore:
-        import fcntl
-        media_lock = os.open('/run/sailplay-media.lock', os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        from carplay_proto.session import SessionBusy, SessionLease
+        media_lease = SessionLease('carplay')
         try:
-            fcntl.flock(media_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(media_lock)
+            media_lease.acquire()
+        except SessionBusy:
             message = 'Existing media handover active; duplicate StartSession ignored'
             print(message, flush=True)
             from carplay_proto.runtime_logging import private_handler
@@ -63,6 +64,7 @@ def main():
                 handler.handle(logging.LogRecord('wifi-airplay', logging.INFO, '', 0, message, (), None))
                 handler.close()
             return
+        atexit.register(media_lease.close)
     if args.log_file:
         original_log=args.log_file
         args.log_file += '.'+str(os.getpid())
@@ -86,6 +88,10 @@ def main():
     DBusGMainLoop(set_as_default=True)
     from carplay_proto.networkdbus import network_object, network_interface
     bus = dbus.SystemBus()
+    if media_lease is not None:
+        from carplay_proto.networksession import restore_previous_network
+        restore_previous_network(media_lease, bus)
+        media_lease.phase('connecting')
     manager = network_interface(network_object(bus, 'net.connman', '/'), 'net.connman.Manager')
     loop = GLib.MainLoop()
     from carplay_proto.wifiretry import ReassociationWindow
@@ -101,6 +107,15 @@ def main():
             except OSError:
                 return 0.0
         while True:
+            if args.session_id:
+                from carplay_proto.session import current_owner
+                try:
+                    owner = current_owner()
+                except ValueError:
+                    owner = {}
+                if owner.get('id') and owner['id'] != args.session_id:
+                    print('Retired CarPlay restore job superseded by another projection session', flush=True)
+                    return
             if not args.restore_clock:
                 time.sleep(args.restore_after)
                 break
@@ -115,21 +130,26 @@ def main():
             time.sleep(min(remaining, 1))
         print('RESTORE Wi-Fi safety timer expired at {:.3f}'.format(time.monotonic()), flush=True)
         old, target = args.restore
-        if args.restore_debug:
-            network_interface(network_object(bus, 'fi.w1.wpa_supplicant1','/fi/w1/wpa_supplicant1'),
-                           'org.freedesktop.DBus.Properties').Set('fi.w1.wpa_supplicant1', 'DebugLevel', dbus.String(args.restore_debug, variant_level=1))
+        from carplay_proto.session import SessionBusy, SessionLease
+        restoration = SessionLease('carplay')
         try:
-            service(target).Disconnect()
-        except dbus.DBusException:
-            pass
-        if args.forget_target:
-            try:
-                service(target).Remove()
-            except dbus.DBusException:
-                pass
-        service(old).Connect(reply_handler=lambda: loop.quit(), error_handler=lambda error: loop.quit())
-        GLib.timeout_add_seconds(30, lambda: (loop.quit(), False)[1])
-        loop.run()
+            if not restoration.acquire(expected=args.session_id):
+                return
+        except SessionBusy:
+            return
+        try:
+            # An older RPM's timer has no identity. Its saved paths are valid
+            # only until a newer backend has taken ownership of the network.
+            plan = restoration.previous.get('network') or {}
+            if not args.session_id and restoration.previous.get('id') and (
+                    plan.get('old') != old or plan.get('target') != target):
+                return
+            if restoration.state.get('network') is None and not restoration.previous.get('id'):
+                restoration.plan_network(old, target, forget=args.forget_target, debug=args.restore_debug)
+            from carplay_proto.networksession import restore_network
+            restore_network(restoration, bus)
+        finally:
+            restoration.close()
         return
     with open(args.session) as stream:
         session = json.load(stream)
@@ -288,12 +308,20 @@ def main():
     restore_command = ['systemd-run', '--unit=sailplay-wifi-restore-{}'.format(os.getpid()),
                     sys.executable, os.path.abspath(__file__), '--restore', old, target,
                     '--restore-after', str(args.restore_after)]
-    restore_clock = '/tmp/sailplay-wifi-restore-clock'
-    descriptor = os.open(restore_clock, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    restore_clock = '/tmp/sailplay-wifi-restore-clock-' + media_lease.identity
+    descriptor = os.open(restore_clock, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    restore_clock_inode = os.fstat(descriptor).st_ino
     os.fchmod(descriptor, 0o600)
     os.utime(descriptor, None)
     os.close(descriptor)
-    restore_command += ['--restore-clock', restore_clock]
+    def cleanup_clock():
+        try:
+            if os.lstat(restore_clock).st_ino == restore_clock_inode:
+                os.unlink(restore_clock)
+        except FileNotFoundError:
+            pass
+    atexit.register(cleanup_clock)
+    restore_command += ['--restore-clock', restore_clock, '--session-id', media_lease.identity]
     if args.sustained:
         restore_command.append('--sustained')
     if args.direct_passphrase and not target_props.get('Favorite'):
@@ -303,6 +331,10 @@ def main():
                                            'org.freedesktop.DBus.Properties')
         previous_debug = str(debug_properties.Get('fi.w1.wpa_supplicant1', 'DebugLevel'))
         restore_command += ['--restore-debug', previous_debug]
+    if not already_connected:
+        media_lease.plan_network(old, target,
+            forget=args.direct_passphrase and not target_props.get('Favorite'),
+            debug=previous_debug if args.trace_supplicant else None)
     if not already_connected:
         subprocess.run(restore_command, check=True,
                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -321,6 +353,7 @@ def main():
         if wpa2_retry.started:
             return
         wpa2_retry.started = True
+        media_lease.phase('projecting')
         os.utime(restore_clock, None)
         from carplay_proto.rtspclient import connect
         props = service(target).GetProperties()
@@ -538,6 +571,14 @@ def main():
         except dbus.DBusException as error:
             print('ConnMan agent cleanup after daemon change: '+error.get_dbus_name(),flush=True)
         agent.remove_from_connection()
+        try:
+            from carplay_proto.networksession import restore_network
+            restore_network(media_lease, bus)
+        except Exception as error:
+            print('CarPlay Wi-Fi restoration deferred to its recovery job: ' + type(error).__name__, flush=True)
+        finally:
+            media_lease.close()
+            cleanup_clock()
 
 
 if __name__ == '__main__':

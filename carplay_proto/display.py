@@ -1,4 +1,4 @@
-"""Own a temporary Sailife compositor/UI/capture pipeline for CarPlay."""
+"""Own a temporary Sailife compositor/UI/capture pipeline for projection."""
 import os
 import fcntl
 import select
@@ -139,8 +139,10 @@ def stop_projected_apps(grace=2):
 
 
 class DisplayPipeline:
-    def __init__(self,width=1920,height=720,fps=30):
+    def __init__(self,width=1920,height=720,fps=30,encoded_width=None,encoded_height=None):
         self.width,self.height,self.fps=width,height,fps
+        self.encoded_width = encoded_width or width
+        self.encoded_height = encoded_height or height
         self.processes=[]
         self.logs=[]
         self.ui=None
@@ -158,7 +160,7 @@ class DisplayPipeline:
         self.processes.append(process)
         return process
 
-    def start(self):
+    def start(self,stop=None):
         # BusyBox pgrep -x matches argv, not the short executable name.
         # Serialize startup too: the compositor socket can appear before the
         # process check and a second compositor truncates the shared framebuffer.
@@ -184,6 +186,8 @@ class DisplayPipeline:
                          '/opt/sailplay/imira-comp --width {} --height {} --fps {}'.format(self.width,self.height,self.fps))
         deadline=time.monotonic()+8
         while not os.path.exists('/run/user/100000/imira-comp-0'):
+            if stop is not None and stop.is_set():
+                raise InterruptedError('projection startup stopped')
             if comp.poll() is not None or time.monotonic()>deadline:
                 raise RuntimeError('virtual compositor failed to start')
             time.sleep(.1)
@@ -192,6 +196,8 @@ class DisplayPipeline:
                     'python3 /opt/sailplay/scripts/keyboard-server.py')
         deadline=time.monotonic()+8
         while not os.path.exists('/run/user/100000/sailplay-maliit/socket'):
+            if stop is not None and stop.is_set():
+                raise InterruptedError('projection startup stopped')
             if keyboard.poll() is not None or time.monotonic()>deadline:
                 raise RuntimeError('private keyboard failed to start')
             time.sleep(.1)
@@ -201,8 +207,8 @@ class DisplayPipeline:
                     'WAYLAND_DISPLAY=imira-comp-0 /opt/sailplay/carui/carui /opt/sailplay/carui/main.qml {} {}'.format(self.width,self.height))
         self.capture=self.launch('capture','env XDG_RUNTIME_DIR=/run/user/100000 /opt/sailplay/carlife-capture '
                     '--input shm --out '+self.fifo+' --width {} --height {} --fps {} --bitrate {}'.format(
-                        self.width,self.height,self.fps,4000000*self.fps//30))
-        print('Sailife virtual UI/capture started; dedicated CarPlay FIFO',flush=True)
+                        self.encoded_width,self.encoded_height,self.fps,4000000*self.fps//30))
+        print('Sailife virtual UI/capture started; dedicated projection FIFO',flush=True)
         return self
 
     def check_health(self):

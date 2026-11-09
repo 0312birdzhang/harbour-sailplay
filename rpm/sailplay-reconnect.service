@@ -6,6 +6,6 @@ Wants=bluetooth.service connman.service
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/python3 /opt/sailplay/scripts/reconnect-car.py
-TimeoutStartSec=60
+TimeoutStartSec=90
 StandardOutput=journal
 StandardError=journal

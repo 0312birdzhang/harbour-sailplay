@@ -433,6 +433,9 @@ class CarUiController : public QObject
     Q_PROPERTY(int projectionFps READ projectionFps NOTIFY projectionSettingsChanged)
     Q_PROPERTY(QStringList projectionResolutions READ projectionResolutions NOTIFY projectionSettingsChanged)
     Q_PROPERTY(int maximumFps READ maximumFps NOTIFY projectionSettingsChanged)
+    Q_PROPERTY(int projectionProtocolIndex READ projectionProtocolIndex NOTIFY projectionProtocolChanged)
+    Q_PROPERTY(QString activeProjectionProtocol READ activeProjectionProtocol NOTIFY projectionProtocolChanged)
+    Q_PROPERTY(QString projectionConnectionState READ projectionConnectionState NOTIFY projectionProtocolChanged)
     Q_PROPERTY(bool dashboardActive READ dashboardActive NOTIFY currentAppChanged)
     Q_PROPERTY(bool dayTheme READ dayTheme NOTIFY themeSettingsChanged)
     Q_PROPERTY(QString dayStart READ dayStart NOTIFY themeSettingsChanged)
@@ -467,6 +470,13 @@ public:
             if (displayStamp != m_displayStamp) {
                 m_displayStamp = displayStamp;
                 emit projectionSettingsChanged();
+            }
+            const QDateTime protocolStamp = QFileInfo(QDir::homePath() + QStringLiteral("/.config/sailplay/projection.ini")).lastModified();
+            const QDateTime connectionStamp = QFileInfo(QStringLiteral("/run/sailplay-projection.ini")).lastModified();
+            if (protocolStamp != m_protocolStamp || connectionStamp != m_connectionStamp) {
+                m_protocolStamp = protocolStamp;
+                m_connectionStamp = connectionStamp;
+                emit projectionProtocolChanged();
             }
         });
         timer->start(1000);
@@ -918,6 +928,44 @@ public:
         ::close(fd);
     }
 
+    int projectionProtocolIndex() const
+    {
+        QSettings settings(QDir::homePath() + QStringLiteral("/.config/sailplay/projection.ini"), QSettings::IniFormat);
+        const QStringList protocols = {QStringLiteral("auto"), QStringLiteral("carplay"), QStringLiteral("android-auto")};
+        return qMax(0, protocols.indexOf(settings.value(QStringLiteral("Projection/protocol"), QStringLiteral("auto")).toString()));
+    }
+
+    QString projectionConnectionState() const
+    {
+        QSettings state(QStringLiteral("/run/sailplay-projection.ini"), QSettings::IniFormat);
+        return state.value(QStringLiteral("Projection/state"), QStringLiteral("idle")).toString();
+    }
+
+    QString activeProjectionProtocol() const
+    {
+        if (projectionConnectionState() == QStringLiteral("idle")) return QString();
+        QSettings state(QStringLiteral("/run/sailplay-projection.ini"), QSettings::IniFormat);
+        const QString protocol = state.value(QStringLiteral("Projection/protocol")).toString();
+        if (protocol == QStringLiteral("carplay")) return QStringLiteral("CarPlay");
+        if (protocol == QStringLiteral("android-auto")) return QStringLiteral("Android Auto");
+        return QString();
+    }
+
+    Q_INVOKABLE void setProjectionProtocol(int index)
+    {
+        if (index < 0 || index > 2) return;
+        QDir().mkpath(QDir::homePath() + QStringLiteral("/.config/sailplay"));
+        QSettings settings(QDir::homePath() + QStringLiteral("/.config/sailplay/projection.ini"), QSettings::IniFormat);
+        const QStringList protocols = {QStringLiteral("auto"), QStringLiteral("carplay"), QStringLiteral("android-auto")};
+        settings.setValue(QStringLiteral("Projection/protocol"), protocols.at(index));
+        settings.sync();
+        if (settings.status() != QSettings::NoError) {
+            m_serviceError = tr("Could not save projection settings");
+            emit serviceRunningChanged();
+        }
+        emit projectionProtocolChanged();
+    }
+
     Q_INVOKABLE void setServiceRunning(bool running)
     {
         controlService(running ? QStringLiteral("StartUnit") : QStringLiteral("StopUnit"));
@@ -1118,6 +1166,7 @@ signals:
     void dashboardSettingsChanged();
     void artworkAvailable(const QString &key, const QUrl &localUrl);
     void projectionSettingsChanged();
+    void projectionProtocolChanged();
     void tilesChanged();
     void rowsChanged();
     void dockChanged();
@@ -1271,6 +1320,8 @@ private:
     QString m_lastHiddenApp;
     QDateTime m_configStamp;
     QDateTime m_displayStamp;
+    QDateTime m_protocolStamp;
+    QDateTime m_connectionStamp;
     bool m_serviceRunning = false;
     bool m_serviceBusy = false;
     QString m_serviceState = QStringLiteral("unknown");

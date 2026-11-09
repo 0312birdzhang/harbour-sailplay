@@ -1,7 +1,7 @@
 Name: harbour-sailplay
 Version: 0.1.1
-Release: 58
-Summary: SailfishOS wireless CarPlay phone and virtual vehicle display
+Release: 59
+Summary: SailfishOS wireless CarPlay and Android Auto phone with virtual display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
 BuildArch: aarch64
@@ -22,6 +22,8 @@ Wireless phone-role CarPlay integration with Bluetooth iAP2, ConnMan handover,
 AirPlay pairing and encrypted H.264 video, including its own compositor,
 Qt Quick launcher and statically linked x264 capture binary. Experimental
 vehicle integration with continuous video, absolute HID touch, and encrypted playback audio.
+Includes a phone-side wireless Android Auto backend with WPP bootstrap, AAP TLS,
+negotiated H.264/PCM/AAC media, input and exclusive dual-protocol session ownership.
 
 %prep
 %setup -q
@@ -30,7 +32,7 @@ vehicle integration with continuous video, absolute HID touch, and encrypted pla
 
 %install
 mkdir -p %{buildroot}/opt/sailplay %{buildroot}/opt/sailplay/carui
-cp -r carplay_proto scripts diagnostics %{buildroot}/opt/sailplay/
+cp -r carplay_proto android_auto scripts diagnostics %{buildroot}/opt/sailplay/
 install -m 2755 rpm/payload/imira-comp %{buildroot}/opt/sailplay/imira-comp
 install -m 2755 rpm/payload/carlife-capture %{buildroot}/opt/sailplay/carlife-capture
 install -m 0755 rpm/payload/carui %{buildroot}/opt/sailplay/carui/carui
@@ -69,6 +71,7 @@ systemctl daemon-reload || :
 %defattr(-,root,root,-)
 %dir /opt/sailplay
 /opt/sailplay/carplay_proto
+/opt/sailplay/android_auto
 /opt/sailplay/scripts
 /opt/sailplay/diagnostics
 /opt/sailplay/carui

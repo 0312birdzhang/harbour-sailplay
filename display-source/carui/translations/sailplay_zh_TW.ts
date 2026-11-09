@@ -3,6 +3,34 @@
   <context>
     <name>Sailplay</name>
     <message>
+      <source>Projection protocol</source>
+      <translation>投影協議</translation>
+    </message>
+    <message>
+      <source>Automatic</source>
+      <translation>自動</translation>
+    </message>
+    <message>
+      <source>Automatic prefers CarPlay when a car offers both protocols. Reconnect after changing the protocol.</source>
+      <translation>車輛同時提供兩種協議時，自動模式優先選擇 CarPlay。變更協議後請重新連線。</translation>
+    </message>
+    <message>
+      <source>Connecting</source>
+      <translation>正在連線</translation>
+    </message>
+    <message>
+      <source>Projecting</source>
+      <translation>正在投影</translation>
+    </message>
+    <message>
+      <source>Restoring Wi-Fi</source>
+      <translation>正在恢復 Wi-Fi</translation>
+    </message>
+    <message>
+      <source>Waiting for car</source>
+      <translation>等待車機</translation>
+    </message>
+    <message>
       <source>%1 fps</source>
       <translation>%1 影格/秒</translation>
     </message>

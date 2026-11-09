@@ -3,6 +3,34 @@
   <context>
     <name>Sailplay</name>
     <message>
+      <source>Projection protocol</source>
+      <translation>Протокол проекции</translation>
+    </message>
+    <message>
+      <source>Automatic</source>
+      <translation>Автоматически</translation>
+    </message>
+    <message>
+      <source>Automatic prefers CarPlay when a car offers both protocols. Reconnect after changing the protocol.</source>
+      <translation>Автоматический режим выбирает CarPlay, если автомобиль поддерживает оба протокола. После смены протокола подключитесь заново.</translation>
+    </message>
+    <message>
+      <source>Connecting</source>
+      <translation>Подключение</translation>
+    </message>
+    <message>
+      <source>Projecting</source>
+      <translation>Проекция активна</translation>
+    </message>
+    <message>
+      <source>Restoring Wi-Fi</source>
+      <translation>Восстановление Wi-Fi</translation>
+    </message>
+    <message>
+      <source>Waiting for car</source>
+      <translation>Ожидание автомобиля</translation>
+    </message>
+    <message>
       <source>%1 fps</source>
       <translation>%1 кадр/с</translation>
     </message>

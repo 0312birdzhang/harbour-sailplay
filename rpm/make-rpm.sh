@@ -4,10 +4,10 @@ REPO=/parentroot/mnt/d/code/sfos-carlife/harbour-sailplay
 WORK=$(mktemp -d /tmp/sailplay-rpm.XXXXXX)
 STAGE=$WORK/harbour-sailplay-0.1.1
 mkdir -p "$STAGE/rpm/payload" "$STAGE/display-source/carui"
-cp -r "$REPO/carplay_proto" "$STAGE/"
-find "$STAGE/carplay_proto" -type d -name __pycache__ -exec rm -rf {} +
+cp -r "$REPO/carplay_proto" "$REPO/android_auto" "$STAGE/"
+find "$STAGE/carplay_proto" "$STAGE/android_auto" -type d -name __pycache__ -exec rm -rf {} +
 mkdir -p "$STAGE/scripts" "$STAGE/diagnostics"
-for name in stop-projected-apps.py player-lyrics.py keyboard-server.py wireless-probe.py wireless-phone-advertise.py bluetooth-monitor.py wifi-session-probe.py pulse-capture.py media-control.py reload-audio-policy.py reconnect-car.py prepare-media-compat.py prepare-viewport-compat.py extract-artwork.py inspect-accessory-certificate.py; do
+for name in projection-service.py android-auto-phone.py restore-projection-network.py stop-projected-apps.py player-lyrics.py keyboard-server.py wireless-probe.py wireless-phone-advertise.py bluetooth-monitor.py wifi-session-probe.py pulse-capture.py media-control.py reload-audio-policy.py reconnect-car.py prepare-media-compat.py prepare-viewport-compat.py extract-artwork.py inspect-accessory-certificate.py; do
     cp "$REPO/scripts/$name" "$STAGE/scripts/"
 done
 cp "$REPO/diagnostics/corolla-accessory-key.json" "$STAGE/diagnostics/"
@@ -24,7 +24,16 @@ cp "$REPO/rpm/harbour-sailplay.spec" "$REPO/rpm/sailplay.service" "$STAGE/rpm/"
 cp "$REPO/rpm/sailplay-xpolicy.conf" "$STAGE/rpm/"
 cp "$REPO/rpm/50-sailplay.rules" "$STAGE/rpm/"
 cp "$REPO/rpm/sailplay-reconnect.service" "$STAGE/rpm/"
+python3 - "$STAGE" <<'PY'
+import pathlib
+import sys
+
+for path in pathlib.Path(sys.argv[1]).rglob('*.py'):
+    data = path.read_bytes()
+    if b'\r\n' in data:
+        path.write_bytes(data.replace(b'\r\n', b'\n'))
+PY
 cd "$WORK"
 tar cjf harbour-sailplay-0.1.1.tar.bz2 harbour-sailplay-0.1.1
 rpmbuild -ta --target aarch64 --define 'debug_package %{nil}' --define '__os_install_post %{nil}' harbour-sailplay-0.1.1.tar.bz2
-test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.1-58.aarch64.rpm"
+test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.1-59.aarch64.rpm"

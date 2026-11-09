@@ -85,6 +85,39 @@ ApplicationWindow {
                         enabled: !carController.serviceBusy
                         onClicked: carController.setServiceRunning(!checked)
                     }
+                    ComboBox {
+                        label: qsTranslate("Sailplay", "Projection protocol")
+                        currentIndex: carController.projectionProtocolIndex
+                        enabled: !carController.serviceBusy
+                        menu: ContextMenu {
+                            MenuItem { text: qsTranslate("Sailplay", "Automatic"); onClicked: carController.setProjectionProtocol(0) }
+                            MenuItem { text: "CarPlay"; onClicked: carController.setProjectionProtocol(1) }
+                            MenuItem { text: "Android Auto"; onClicked: carController.setProjectionProtocol(2) }
+                        }
+                    }
+                    Label {
+                        x: Theme.horizontalPageMargin
+                        width: parent.width - 2 * Theme.horizontalPageMargin
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: Theme.fontSizeSmall
+                        color: Theme.secondaryColor
+                        text: qsTranslate("Sailplay", "Automatic prefers CarPlay when a car offers both protocols. Reconnect after changing the protocol.")
+                    }
+                    Label {
+                        x: Theme.horizontalPageMargin
+                        width: parent.width - 2 * Theme.horizontalPageMargin
+                        wrapMode: Text.WordWrap
+                        color: Theme.highlightColor
+                        text: {
+                            var states = { connecting: qsTranslate("Sailplay", "Connecting"),
+                                           projecting: qsTranslate("Sailplay", "Projecting"),
+                                           restoring: qsTranslate("Sailplay", "Restoring Wi-Fi"),
+                                           idle: qsTranslate("Sailplay", "Waiting for car") }
+                            var state = states[carController.projectionConnectionState] || carController.projectionConnectionState
+                            return carController.activeProjectionProtocol ? carController.activeProjectionProtocol + " — " + state
+                                                                          : qsTranslate("Sailplay", "Waiting for car")
+                        }
+                    }
                     Button {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: carController.serviceBusy ? qsTranslate("Sailplay", "Processing…")
