@@ -2,7 +2,12 @@
 set -eu
 : "${SAILPLAY_HOST:?Set SAILPLAY_HOST to the tablet address}"
 cd /mnt/d/code/sfos-carlife
-sshpass -e scp harbour-sailplay-0.1.1-60.aarch64.rpm "defaultuser@${SAILPLAY_HOST}":/tmp/harbour-sailplay.rpm
+SPEC=harbour-sailplay/rpm/harbour-sailplay.spec
+VERSION=$(awk '$1 == "Version:" { print $2 }' "$SPEC")
+RELEASE=$(awk '$1 == "Release:" { print $2 }' "$SPEC")
+PACKAGE=${1:-harbour-sailplay-$VERSION-$RELEASE.aarch64.rpm}
+test -f "$PACKAGE"
+sshpass -e scp "$PACKAGE" "defaultuser@${SAILPLAY_HOST}":/tmp/harbour-sailplay.rpm
 sshpass -e ssh "defaultuser@${SAILPLAY_HOST}" sh -s <<'REMOTE'
 cat > /tmp/sailplay-install.sh <<'ROOT'
 #!/bin/sh

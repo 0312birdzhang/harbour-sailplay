@@ -64,12 +64,38 @@ their cached state when the service owner changes and obtain a new snapshot
 after reconnecting. Clients subscribe before requesting the first snapshot and
 keep the highest revision received within that instance.
 
+The SDK sources use GPL-3.0-or-later. The RPM installs the notice in
+`/usr/share/sailplay-sdk/LICENSE`. Application integrations carry that notice
+with their embedded provider. [License](../LICENSE)
+
 ## Session ownership and lifecycle
 
 Each presentation belongs to the unique D-Bus name that opened it. Other
 callers receive `org.sailplay.Error1.NotOwner` when accessing that session.
 State and request-completion signals are addressed to the owning caller.
 The provider releases sessions when their caller disconnects from the bus.
+
+Qt and Python session clients acquire a unique temporary
+`org.sailplay.Client.c<uuid>` name before activating the backend. They keep the
+name through backend-owner changes and release it on close. On a supplied bus,
+each client releases only its own name. Sessions and signals continue to use
+the caller's unique bus owner.
+
+Sailjail providers need scoped outgoing permissions for the directed SDK
+signals. Add these rules to the application's additional permission profile.
+
+```text
+dbus-user.call org.sailplay.Client.*=org.sailplay.Session1.StateChanged@/org/sailplay/v1/*
+dbus-user.call org.sailplay.Client.*=org.sailplay.Session1.RequestFinished@/org/sailplay/v1/*
+dbus-user.call org.sailplay.Client.*=org.sailplay.Navigation1.GuidanceChanged@/org/sailplay/v1/*
+dbus-user.call org.sailplay.Client.*=org.freedesktop.DBus.Properties.PropertiesChanged@/org/sailplay/v1/*
+```
+
+The installed Sailfish D-Bus proxy uses the caller's well-known name to apply
+these permissions to its unique owner. A sandboxed SDK client also needs
+`dbus-user.own org.sailplay.Client.*` in its permission profile. Clients making
+raw D-Bus calls should acquire a name in that namespace before backend
+activation and retain it until their sessions close.
 
 Closing a view should call `Close`. `SetActive(false)` keeps the session while
 its presentation is hidden. Applications decide the lifetime of playback,
@@ -197,8 +223,27 @@ The provider embeds the canonical XML for introspection and argument checks.
 Equal state retains its revision. `sessionCount`, `activeSessionCount` and
 `sessionsChanged` support the application's exit policy. State and activity
 signals are directed to their session owner. Caller loss releases its leases.
-Application actions receive the defined `NotSupported` error from this state
-and lease provider. Media control uses MPRIS.
+Media control uses MPRIS.
+
+Register application actions with `setActionHandler` before starting the
+provider. A handler receives a backend invocation token and typed parameters
+on the provider's Qt thread. `Invoke` acknowledges acceptance before dispatch.
+Call `complete(token, result)` or `fail(token, code, message)` when work ends.
+`complete(token, result, state)` also checks the admitted revision before
+publishing the replacement state. Exceptions from an action finish it with
+`Failed`. Unsupported actions receive `NotSupported`.
+
+`pendingCount` includes accepted work after its presentation closes.
+`pendingChanged` supports the backend's exit policy. Each session admits 64
+pending requests, and the Qt provider admits 4096 across live and closed
+sessions. Publication and completion run on the provider's Qt thread.
+
+Qt navigation providers initialize complete guidance with
+`SailplayProvider::navigationGuidance()`, include it under `navigation`,
+advertise the `navigation` capability and register `navigation.stop` before
+`start`. Their caller-owned sessions export the canonical Navigation1 XML,
+typed snapshots and directed guidance updates. The CMake provider retains
+finite-distance validation when linked into an application using fast-math.
 
 The SDK also provides a CMake `sailplay_sdk_provider` target. Its embedded XML
 comes from `SAILPLAY_SDK_INTERFACES`, the repository interfaces directory or the
@@ -321,9 +366,12 @@ contract under another existing application identity. The example backend
 accepts `--service` and `--application-id` for that integration check.
 
 Navigation1 and its template remain an experimental SDK extension. Native
-Mconnect uses the media session provider for its window/core separation. A
-shared map backend with independent renderers, Sailjail renderer permissions
-and Content1 templates remain subsequent stages.
+Mconnect uses the media session provider for its window/core separation.
+Organic Maps retains one framework, route, location source and writable state,
+while its phone window can be released and rebuilt. Its car presentation uses
+the navigation template. Dedicated map canvas rendering, Sailjail renderer
+permissions and Content1 templates remain subsequent stages.
+[Organic Maps integration](https://github.com/0312birdzhang/harbour-sailplay/tree/master/sdk/integrations/organicmaps)
 
 ## Validation
 
@@ -348,3 +396,15 @@ music host checks hidden activity, player replacement and backend replacement.
 The Mconnect integration adds native window and work lifetime regression suites
 and repeated release/reload of the installed Silica QML tree. Installed and
 physical phone/car verification are recorded separately in `todo.md`.
+
+`tests/sdk_navigation_provider_test.pro` checks native Navigation1 signatures,
+typed guidance, caller ownership, asynchronous completion, revision conflicts,
+pending limits and accepted work after view closure or caller loss.
+`tests/map_backend_probe.pro` checks viewport ownership, repeated QML release,
+native driving and walking maneuver values, units and Unicode bounds.
+
+`tests/map_backend_lifecycle_probe.cpp` builds through the existing test-only
+map CMake hook. It uses the production Sailfish bridge, full phone QML and an
+isolated copy of an installed offline map. It verifies window Close handling,
+repeated renderer destruction/recreation, route progress and recording
+statistics with the phone closed, saved recordings and explicit stop.

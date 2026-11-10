@@ -1,6 +1,6 @@
 Name: harbour-sailplay
 Version: 0.1.1
-Release: 62
+Release: 64
 Summary: SailfishOS wireless CarPlay and Android Auto phone with virtual display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
@@ -42,6 +42,7 @@ cp -r sdk/qt sdk/examples %{buildroot}/usr/share/sailplay-sdk/
 find %{buildroot}/usr/share/sailplay-sdk -type f -exec chmod 0644 {} +
 find %{buildroot}/usr/share/sailplay-sdk -type d -exec chmod 0755 {} +
 install -m 0644 sdk/README.md %{buildroot}/usr/share/sailplay-sdk/README.md
+install -m 0644 LICENSE %{buildroot}/usr/share/sailplay-sdk/LICENSE
 install -D -m 0644 sailplay_sdk/interfaces/org.sailplay.App1.xml %{buildroot}/usr/share/dbus-1/interfaces/org.sailplay.App1.xml
 install -D -m 0644 sailplay_sdk/interfaces/org.sailplay.Session1.xml %{buildroot}/usr/share/dbus-1/interfaces/org.sailplay.Session1.xml
 install -D -m 0644 sailplay_sdk/interfaces/org.sailplay.Navigation1.xml %{buildroot}/usr/share/dbus-1/interfaces/org.sailplay.Navigation1.xml

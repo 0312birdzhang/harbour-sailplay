@@ -1,0 +1,238 @@
+#include "sailfish/app_info.hpp"
+#include "sailfish/app_settings.hpp"
+#include "sailfish/bookmark_editor.hpp"
+#include "sailfish/bookmarks_io.hpp"
+#include "sailfish/bookmarks_model.hpp"
+#include "sailfish/countries_model.hpp"
+#include "sailfish/framework_access.hpp"
+#include "sailfish/map_item.hpp"
+#include "sailfish/map_surface.hpp"
+#include "sailfish/maps_storage.hpp"
+#include "sailfish/opening_hours_editor.hpp"
+#include "sailfish/osm_account.hpp"
+#include "sailfish/phone_presentation.hpp"
+#include "sailfish/place_editor.hpp"
+#include "sailfish/place_page.hpp"
+#include "sailfish/routing.hpp"
+#include "sailfish/search_model.hpp"
+#include "sailfish/url_handler.hpp"
+
+#include "map/framework.hpp"
+#include "map/gps_tracker.hpp"
+
+#include "platform/platform.hpp"
+#include "platform/distance.hpp"
+
+#include <QDateTime>
+#include <QDir>
+#include <QElapsedTimer>
+#include <QEventLoop>
+#include <QGuiApplication>
+#include <QQmlComponent>
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QPointer>
+#include <QQuickWindow>
+#include <QStandardPaths>
+#include <QSurfaceFormat>
+#include <QThread>
+
+#include <clocale>
+#include <cstdio>
+#include <cstdlib>
+#include <functional>
+#include <memory>
+
+#include <sailfishapp.h>
+
+namespace
+{
+Framework * g_framework = nullptr;
+
+void Check(bool condition, char const * message)
+{
+  if (!condition)
+  {
+    std::fprintf(stderr, "MAP_LIFECYCLE_CHECK_FAILED %s\n", message);
+    std::exit(EXIT_FAILURE);
+  }
+}
+
+void WaitFor(std::function<bool()> const & ready, int timeoutMs = 10000)
+{
+  QElapsedTimer timer;
+  timer.start();
+  while (!ready() && timer.elapsed() < timeoutMs)
+  {
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    QThread::msleep(10);
+  }
+  Check(ready(), "event deadline exceeded");
+}
+
+double RemainingMeters(QJsonObject const & navigation)
+{
+  platform::Distance const distance(navigation.value("remainingDistance").toDouble(),
+      static_cast<platform::Distance::Units>(navigation.value("remainingDistanceUnit").toInt()));
+  return distance.To(platform::Distance::Units::Meters).GetDistance();
+}
+
+void RegisterTypes()
+{
+  qmlRegisterUncreatableType<sailfish::MapItem>("app.organicmaps", 1, 0, "MapItem", "Use mapCore");
+  qmlRegisterType<sailfish::MapSurface>("app.organicmaps", 1, 0, "MapSurface");
+  qmlRegisterType<sailfish::CountriesModel>("app.organicmaps", 1, 0, "CountriesModel");
+  qmlRegisterType<sailfish::SearchModel>("app.organicmaps", 1, 0, "SearchModel");
+  qmlRegisterType<sailfish::BookmarkCategoriesModel>("app.organicmaps", 1, 0, "BookmarkCategoriesModel");
+  qmlRegisterType<sailfish::BookmarksModel>("app.organicmaps", 1, 0, "BookmarksModel");
+  qmlRegisterType<sailfish::BookmarkEditor>("app.organicmaps", 1, 0, "BookmarkEditor");
+  qmlRegisterType<sailfish::PlaceEditor>("app.organicmaps", 1, 0, "PlaceEditor");
+  qmlRegisterType<sailfish::PlaceCategories>("app.organicmaps", 1, 0, "PlaceCategories");
+  qmlRegisterType<sailfish::OpeningHoursEditor>("app.organicmaps", 1, 0, "OpeningHoursEditor");
+  qmlRegisterUncreatableType<sailfish::PlacePage>("app.organicmaps", 1, 0, "PlacePage", "Owned by MapItem");
+  qmlRegisterUncreatableType<sailfish::Routing>("app.organicmaps", 1, 0, "Routing", "Owned by MapItem");
+  qmlRegisterUncreatableType<sailfish::AppSettings>("app.organicmaps", 1, 0, "AppSettings", "Use appSettings");
+  qmlRegisterUncreatableType<sailfish::BookmarksIO>("app.organicmaps", 1, 0, "BookmarksIO", "Use bookmarksIO");
+}
+}  // namespace
+
+namespace sailfish
+{
+Framework & GetFramework()
+{
+  return *g_framework;
+}
+}  // namespace sailfish
+
+__attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv[])
+{
+  QGuiApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+  QSurfaceFormat format;
+  format.setRenderableType(QSurfaceFormat::OpenGLES);
+  format.setVersion(3, 0);
+  format.setDepthBufferSize(24);
+  format.setStencilBufferSize(8);
+  QSurfaceFormat::setDefaultFormat(format);
+  std::unique_ptr<QGuiApplication> application(SailfishApp::application(argc, argv));
+  application->setQuitOnLastWindowClosed(false);
+  application->setOrganizationName("app.organicmaps");
+  application->setApplicationName("organicmaps");
+  std::setlocale(LC_NUMERIC, "C");
+  Check(argc == 2, "pass the installed or candidate QML directory");
+  Check(!qEnvironmentVariableIsEmpty("MWM_WRITABLE_DIR"), "use an isolated writable profile");
+  auto const writable = QDir(QString::fromUtf8(qgetenv("MWM_WRITABLE_DIR"))).absolutePath();
+  Check(writable.startsWith("/tmp/sailplay-map-device."), "writable profile must be this fixture's temporary directory");
+  Check(QStandardPaths::writableLocation(QStandardPaths::ConfigLocation).startsWith("/tmp/sailplay-map-device."),
+        "use this fixture's isolated configuration");
+  QString const qmlRoot = QString::fromLocal8Bit(argv[1]);
+
+  Framework framework;
+  g_framework = &framework;
+  framework.SetupMeasurementSystem();
+  sailfish::BookmarksNotifier::LoadBookmarks(framework);
+  RegisterTypes();
+  sailfish::AppInfo appInfo;
+  sailfish::AppSettings appSettings(framework);
+  sailfish::OsmAccount osmAccount;
+  sailfish::BookmarksIO bookmarksIO(framework);
+  sailfish::MapsStorage mapsStorage(framework);
+  sailfish::DownloadStatus downloads(framework.GetStorage());
+  sailfish::UrlHandler urlHandler(framework, bookmarksIO);
+  sailfish::MapItem mapCore;
+  QQmlEngine::setObjectOwnership(&mapCore, QQmlEngine::CppOwnership);
+  auto const setup = [&](QQmlContext * context)
+  {
+    context->setContextProperty("appInfo", &appInfo);
+    context->setContextProperty("appSettings", &appSettings);
+    context->setContextProperty("osmAccount", &osmAccount);
+    context->setContextProperty("bookmarksIO", &bookmarksIO);
+    context->setContextProperty("mapsStorage", &mapsStorage);
+    context->setContextProperty("downloads", &downloads);
+    context->setContextProperty("urlHandler", &urlHandler);
+    context->setContextProperty("mapCore", &mapCore);
+    context->setContextProperty("sailplayProjected", false);
+  };
+  sailfish::PhonePresentation presentation(QUrl::fromLocalFile(qmlRoot + "/organicmaps.qml"), setup);
+  QQmlEngine backendEngine;
+  setup(backendEngine.rootContext());
+  QQmlComponent backendComponent(&backendEngine, QUrl::fromLocalFile(qmlRoot + "/Backend.qml"));
+  std::unique_ptr<QObject> backendObject(backendComponent.create());
+  Check(backendObject != nullptr, "windowless backend QML failed");
+  Check(!framework.IsDrapeEngineCreated() && mapCore.window() == nullptr, "cold backend created a renderer");
+  Check(!mapCore.trackRecording(), "isolated profile already has a recording");
+
+  int engines = 0;
+  int recordingUpdates = 0;
+  QObject::connect(&mapCore, &sailfish::MapItem::engineCreated, [&] { ++engines; });
+  QObject::connect(&mapCore, &sailfish::MapItem::recordingStatsChanged, [&] { ++recordingUpdates; });
+  auto * routing = mapCore.routing();
+  routing->setVoiceEnabled(false);
+  location::GpsInfo fix;
+  fix.m_source = location::EUser;
+  fix.m_latitude = 23.130158;
+  fix.m_longitude = 113.621144;
+  fix.m_horizontalAccuracy = 5;
+  fix.m_speed = 15;
+  fix.m_timestamp = QDateTime::currentMSecsSinceEpoch() / 1000.0;
+  static_cast<location::LocationObserver &>(mapCore).OnLocationUpdated(fix);
+  Check(framework.GetCurrentPosition().has_value(), "headless location has no authoritative position");
+  routing->planRoute(sailfish::Routing::Vehicle,
+                    {QVariantMap{{"lat", fix.m_latitude}, {"lon", fix.m_longitude}, {"name", "Start"}},
+                     QVariantMap{{"lat", 23.137}, {"lon", 113.632}, {"name", QString::fromUtf8("测试目的地 🌍")}}});
+  WaitFor([&] { return !routing->building(); }, 60000);
+  Check(routing->canStart(), "offline route failed to build");
+  routing->acceptDisclaimer();
+  routing->start();
+  WaitFor([&] { return routing->navigating(); }, 60000);
+  mapCore.setSimulatingLocation(true);
+  mapCore.startTrackRecording();
+  WaitFor([&] { return !framework.IsTrackRecordingEmpty(); });
+
+  QPointer<QQmlEngine> phoneEngine;
+  for (int cycle = 0; cycle < 3; ++cycle)
+  {
+    Check(presentation.Show(), "full phone QML failed to load");
+    for (auto * window : QGuiApplication::allWindows())
+      window->hide();
+    WaitFor([&] { return mapCore.window() != nullptr && framework.IsDrapeEngineCreated(); });
+    Check(mapCore.parent() == nullptr && mapCore.parentItem() != nullptr, "phone changed backend QObject ownership");
+    auto const point = framework.GetCurrentPosition();
+    int const previousUpdates = recordingUpdates;
+    double const previousRemaining = RemainingMeters(routing->NavigationSnapshot());
+    Check(previousRemaining > 0, "active route has no remaining distance");
+    auto * window = mapCore.window();
+    auto * engine = static_cast<QQuickView *>(window)->engine();
+    Check(!phoneEngine || phoneEngine == engine, "phone reopening replaced the retained QML engine");
+    phoneEngine = engine;
+    QPointer<QQuickWindow> phoneWindow(window);
+    window->close();
+    WaitFor([&] { return !presentation.isOpen(); });
+    Check(phoneWindow.isNull() && phoneEngine, "phone closure did not release the view while retaining its engine");
+    Check(mapCore.window() == nullptr && mapCore.parentItem() == nullptr && !framework.IsDrapeEngineCreated(),
+          "window closure retained the phone renderer");
+    Check(routing->navigating() && routing->HasBackgroundWork() && mapCore.trackRecording(),
+          "phone closure stopped shared work");
+    WaitFor([&]
+    {
+      return framework.GetCurrentPosition() != point && recordingUpdates > previousUpdates &&
+             RemainingMeters(routing->NavigationSnapshot()) < previousRemaining - 1;
+    });
+    Check(!mapCore.recordingSummary().isEmpty(), "headless recording statistics stopped");
+    Check(routing->NavigationSnapshot().value("state").toString() == "active", "headless guidance stopped");
+  }
+  Check(engines == 3, "unexpected renderer recreation count");
+  Check(mapCore.saveAndStopTrackRecording(), "background recording could not be saved");
+  mapCore.setSimulatingLocation(false);
+  routing->close();
+  Check(!routing->navigating() && !routing->active() && !mapCore.trackRecording(), "explicit stop retained work");
+  Check(presentation.Show(), "phone failed to reopen after stop");
+  for (auto * window : QGuiApplication::allWindows())
+    window->hide();
+  Check(!routing->active(), "phone reopening restored explicitly stopped navigation");
+  presentation.Close();
+  WaitFor([&] { return !bookmarksIO.busy() && !routing->HasBackgroundWork(); });
+  Check(!framework.IsDrapeEngineCreated(), "final closure retained the renderer");
+  std::puts("MAP_BACKEND_LIFECYCLE_PASS full-phone-qml window-close reopen same-core drape-release headless-gps "
+            "offline-route-progress recording-statistics saved-recording explicit-stop");
+  return EXIT_SUCCESS;
+}

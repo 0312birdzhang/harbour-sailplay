@@ -1,12 +1,12 @@
 diff --git a/apps/mconnect/docs/sailplay-background.md b/apps/mconnect/docs/sailplay-background.md
-index 47e49e8..b004fe2 100644
+index 47e49e8..a1c50cf 100644
 --- a/apps/mconnect/docs/sailplay-background.md
 +++ b/apps/mconnect/docs/sailplay-background.md
 @@ -1,6 +1,6 @@
  # Sailplay native background playback
- 
+
 -Updated on 2026-11-06 for the native release 40 source.
-+Updated on 2026-11-10 for the native release 52 source.
++Updated on 2026-11-10 for the native release 53 source.
  `harbour-mconnect --background` enters `mconnect-silica`, which initializes
  native storage, account services, the playback runtime and MPRIS. Playback
  memory restores paused. MPRIS Play and explicit UI controls use the same native
@@ -17,12 +17,12 @@ index 47e49e8..b004fe2 100644
 -raises the window. Queue, position and accounts belong to the existing runtime
 +raises the window. Reopening recreates the released QML tree. Queue, position and accounts belong to the existing runtime
  throughout activation.
- 
+
  MPRIS retains `org.mpris.MediaPlayer2.harbour_mconnect`, the existing
-@@ -28,10 +28,25 @@ MPRIS retains `org.mpris.MediaPlayer2.harbour_mconnect`, the existing
+@@ -28,10 +28,32 @@ MPRIS retains `org.mpris.MediaPlayer2.harbour_mconnect`, the existing
  the same foreground presentation path. Artwork uses the native private cache
  and loopback decoder.
- 
+
 -Minimizing retains the runtime. Explicitly closing the foreground view exits
 -the application. Shutdown releases MPRIS, closes native work, unregisters the
 -Silica objects/name and finally releases the root activation name.
@@ -31,7 +31,7 @@ index 47e49e8..b004fe2 100644
 +playback, download queue, login operation, local scan, lyric load or accepted
 +core/bridge request needs it. Hidden car sessions retain their lease. Pausing
 +playback keeps a leased core paused.
- 
+
 -Native activation, MPRIS and bridge fixtures passed on the host. The release 40
 -Sailfish RPM and device lifecycle validation remain pending. The earlier
 -`sailplay-background-validation.md` records historical packaged-host evidence.
@@ -39,6 +39,13 @@ index 47e49e8..b004fe2 100644
 +Caller-owned `org.sailplay.Session1` objects provide revisioned media snapshots,
 +activity and explicit close. Owner loss releases the caller's sessions. Media
 +commands use the existing MPRIS interface.
++
++The Sailjail profile allows the directed SDK signal members to temporary
++`org.sailplay.Client.*` names acquired by the Qt and Python clients. Sessions
++and signals retain the caller's unique bus owner. The clients hold their
++temporary name through backend replacement and release it when they close.
++The scoped members include the standard `PropertiesChanged` notification for
++Session1 `Active` alongside state, request completion and navigation guidance.
 +
 +When the phone presentation, sessions and work have all ended, a ten-second
 +idle grace permits exit. The timer inspects current work and leases again at
@@ -80,9 +87,26 @@ index fac19ea..0e8f79a 100644
 +X-Sailplay-ObjectPath=/org/sailplay/v1/App
 +X-Sailplay-Presentation=template
 +X-Sailplay-Capabilities=media;
- 
+
  [X-Sailjail]
  OrganizationName=org.sailfishos
+diff --git a/apps/mconnect/elinux/harbour-mconnect.profile b/apps/mconnect/elinux/harbour-mconnect.profile
+index 51005cb..bcc4679 100644
+--- a/apps/mconnect/elinux/harbour-mconnect.profile
++++ b/apps/mconnect/elinux/harbour-mconnect.profile
+@@ -2,6 +2,12 @@
+ dbus-user.own org.sailfishos.Mconnect.Core
+ dbus-user.own org.sailfishos.Mconnect.Silica
+
++# Directed SDK updates to the caller's temporary client name.
++dbus-user.call org.sailplay.Client.*=org.sailplay.Session1.StateChanged@/org/sailplay/v1/*
++dbus-user.call org.sailplay.Client.*=org.sailplay.Session1.RequestFinished@/org/sailplay/v1/*
++dbus-user.call org.sailplay.Client.*=org.sailplay.Navigation1.GuidanceChanged@/org/sailplay/v1/*
++dbus-user.call org.sailplay.Client.*=org.freedesktop.DBus.Properties.PropertiesChanged@/org/sailplay/v1/*
++
+ # Silica reads the active profile and its feedback settings.
+ dbus-user.call com.nokia.profiled=com.nokia.profiled.get_profile@/com/nokia/profiled
+ dbus-user.call com.nokia.profiled=com.nokia.profiled.get_profiles@/com/nokia/profiled
 diff --git a/apps/mconnect/elinux/silica/CMakeLists.txt b/apps/mconnect/elinux/silica/CMakeLists.txt
 index 1b201d5..cc5ea20 100644
 --- a/apps/mconnect/elinux/silica/CMakeLists.txt
@@ -105,7 +129,7 @@ index 1b201d5..cc5ea20 100644
 +set(MCONNECT_SAILPLAY_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sailplay-sdk/sdk/qt" CACHE PATH "Sailplay Qt SDK source")
 +add_subdirectory("${MCONNECT_SAILPLAY_SDK_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/sailplay-sdk")
 +install(FILES "${MCONNECT_SAILPLAY_SDK_DIR}/../../LICENSE" DESTINATION share/licenses/harbour-mconnect RENAME sailplay-sdk-LICENSE)
- 
+
  add_library(mconnect_native_ui STATIC bridge.cpp bridge.h)
  apply_standard_settings(mconnect_native_ui)
 @@ -49,7 +54,7 @@ set_target_properties(mconnect-silica PROPERTIES
@@ -115,7 +139,7 @@ index 1b201d5..cc5ea20 100644
 -target_link_libraries(mconnect-silica PRIVATE mconnect_native_ui mconnect_native_core mconnect_audio
 +target_link_libraries(mconnect-silica PRIVATE mconnect_native_ui mconnect_native_core mconnect_audio sailplay_sdk_provider
    Qt5::Quick Qt5::Qml PkgConfig::SAILFISHAPP)
- 
+
  if(MCONNECT_BUILD_TESTS OR MCONNECT_BUILD_COVER_TESTS)
 @@ -59,11 +64,11 @@ if(MCONNECT_BUILD_TESTS OR MCONNECT_BUILD_COVER_TESTS)
    foreach(module qq_account qq kugou kugou_content kugou_account kugou_library
@@ -253,13 +277,13 @@ index 002277a..a70f083 100644
 +#include "native_presentation.h"
  #include "native_runtime.h"
 +#include "sailplayprovider.h"
- 
+
  namespace {
  volatile std::sig_atomic_t stopping = 0;
 @@ -401,27 +404,15 @@ bool ValidateDownloadRows(QObject* page) {
  }
  }
- 
+
 -class WindowControl : public QObject {
 -  Q_OBJECT
 -  Q_CLASSINFO("D-Bus Interface", "org.sailfishos.Mconnect.Silica")
@@ -378,15 +402,15 @@ index 32a3995..c99a91e 100644
 +#include <QScopedValueRollback>
  #include <QTimer>
  #include <QUuid>
- 
+
 @@ -94,6 +95,7 @@ void NativeCoreService::publish(const QString& topic, const QVariant& value) {
  }
- 
+
  QString NativeCoreService::execute(const QString& method, const QVariantMap& arguments) {
 +  QScopedValueRollback<int> executing(executing_, executing_ + 1);
    return method == "_readTransfer" ? encode(transferPart(arguments)) : encode(dispatch_(method, arguments));
  }
- 
+
 diff --git a/apps/mconnect/elinux/silica/native_core.h b/apps/mconnect/elinux/silica/native_core.h
 index d78fb2c..2510ef1 100644
 --- a/apps/mconnect/elinux/silica/native_core.h
@@ -441,12 +465,12 @@ index 5a47221..75a9c7d 100644
 @@ -1,4 +1,5 @@
  #include "native_login.h"
 +#include <QScopedValueRollback>
- 
+
  #include <QBuffer>
  #include <QDateTime>
 @@ -57,6 +58,7 @@ NativeLogin::NativeLogin(NativeMusicServices& music, QObject* parent, int lifeti
  }
- 
+
  QVariantMap NativeLogin::begin(const QString& platform, const QString& clientSession, const QString& variant) {
 +  QScopedValueRollback<bool> running(running_, true);
    NativeServicePlatform(platform);
@@ -454,7 +478,7 @@ index 5a47221..75a9c7d 100644
    if (!variant.isEmpty() && (platform != "kugou" || !QStringList{"lite", "android"}.contains(variant))) {
 @@ -101,6 +103,7 @@ void NativeLogin::status(const QString& value) {
  }
- 
+
  void NativeLogin::check() {
 +  QScopedValueRollback<bool> running(running_, true);
    const auto generation = generation_;
@@ -633,7 +657,7 @@ index cbb040e..b7a0b8a 100644
 +++ b/apps/mconnect/elinux/silica/native_runtime.cpp
 @@ -1,6 +1,7 @@
  #include "native_runtime.h"
- 
+
  #include <QRegularExpression>
 +#include <QScopedValueRollback>
  #include <QUrl>
@@ -641,7 +665,7 @@ index cbb040e..b7a0b8a 100644
  #include <cmath>
 @@ -86,12 +87,18 @@ QStringList NativeCoreRuntime::requestNames() const {
  }
- 
+
  QVariant NativeCoreRuntime::dispatch(const QString& method, const QVariantMap& arguments) {
 +  QScopedValueRollback<int> executing(executing_, executing_ + 1);
    if (closed_) throw NativeRequestFailure(QStringLiteral("请求已取消"));
@@ -649,14 +673,14 @@ index cbb040e..b7a0b8a 100644
    if (request == requests_.cend()) throw NativeRequestFailure(QStringLiteral("请求参数无效"), true);
    return request.value()(arguments);
  }
- 
+
 +bool NativeCoreRuntime::hasOngoingWork() const {
 +  return !closed_ && (executing_ > 0 || service_.hasPendingWork() || player_.hasOngoingWork() ||
 +      downloads_.hasOngoingWork() || login_.hasOngoingWork() || local_.hasOngoingWork() || lyrics_.hasOngoingWork());
 +}
 +
  QVariantMap NativeCoreRuntime::song(const QVariantMap& arguments) { return results_.song(arguments, player_.currentSong()); }
- 
+
  QString NativeCoreRuntime::artworkSource() const {
 diff --git a/apps/mconnect/elinux/silica/native_runtime.h b/apps/mconnect/elinux/silica/native_runtime.h
 index 38b472e..c5e1cb4 100644
@@ -679,25 +703,30 @@ index 38b472e..c5e1cb4 100644
    QVariantMap songInfo(const QVariantMap& arguments);
    QVariantMap discoverySongs(const QVariantMap& arguments);
 diff --git a/apps/mconnect/rpm/harbour-mconnect.spec b/apps/mconnect/rpm/harbour-mconnect.spec
-index 1e658dc..f8258dc 100644
+index 1e658dc..a295fe6 100644
 --- a/apps/mconnect/rpm/harbour-mconnect.spec
 +++ b/apps/mconnect/rpm/harbour-mconnect.spec
 @@ -10,9 +10,9 @@ Name:       harbour-mconnect
- 
+
  Summary:    Multi-platform music player for Sailfish OS
  Version:    1.6.0
 -Release:    51
-+Release:    52
++Release:    53
  Group:      Applications/System
 -License:    MIT
 +License:    MIT and GPLv3+
  URL:        https://github.com/Hjdd14/Mconnect-Music_connect
  Source0:    %{name}-%{version}.tar.bz2
  Source100:  harbour-mconnect.yaml
-@@ -98,6 +98,11 @@ desktop-file-install --delete-original       \
+@@ -98,6 +98,16 @@ desktop-file-install --delete-original       \
  # >> files
  # Spectacle preserves this RPM metadata footer during YAML regeneration.
  %changelog
++* Tue Nov 10 2026 BirdZhang - 1.6.0-53
++- Permit directed Sailplay SDK signals to caller-owned temporary client names.
++- Permit Session1 Active property notifications through the same scoped path.
++- Embed the current typed navigation and asynchronous action provider.
++
 +* Tue Nov 10 2026 BirdZhang - 1.6.0-52
 +- Release the phone QML presentation while retaining playback and accepted work.
 +- Export Sailplay media state and caller-owned sessions through the existing identity.
@@ -707,7 +736,7 @@ index 1e658dc..f8258dc 100644
  - Select download directories with the Sailfish folder picker.
  - Validate folder write access before saving the existing download root setting.
 diff --git a/apps/mconnect/rpm/harbour-mconnect.yaml.in b/apps/mconnect/rpm/harbour-mconnect.yaml.in
-index bf33ffa..d0f4a24 100644
+index bf33ffa..081a0f7 100644
 --- a/apps/mconnect/rpm/harbour-mconnect.yaml.in
 +++ b/apps/mconnect/rpm/harbour-mconnect.yaml.in
 @@ -1,9 +1,9 @@
@@ -715,7 +744,7 @@ index bf33ffa..d0f4a24 100644
  Summary: Multi-platform music player for Sailfish OS
  Version: 1.6.0
 -Release: 51
-+Release: 52
++Release: 53
  Group: Applications/System
 -License: MIT
 +License: MIT and GPLv3+
@@ -1015,15 +1044,15 @@ index 840771b..39ffb0e 100644
      return QVariantMap{{"backend", "cpp-qq-catalog"}, {"songs", QVariantList{song("first"), song("second")}}};
    }, []() { return false; }, [](const QVariantMap&) { return QString(); });
 diff --git a/apps/mconnect/tools/verify-rpm.py b/apps/mconnect/tools/verify-rpm.py
-index 5d007e8..6699f2f 100644
+index 5d007e8..5eb102e 100644
 --- a/apps/mconnect/tools/verify-rpm.py
 +++ b/apps/mconnect/tools/verify-rpm.py
 @@ -15,7 +15,7 @@ def rpm(*arguments):
- 
- 
+
+
  identity = rpm('-qp', '--qf', '%{NAME} %{VERSION} %{RELEASE} %{ARCH}').split()
 -assert identity == ['harbour-mconnect', '1.6.0', '51', 'aarch64'], identity
-+assert identity == ['harbour-mconnect', '1.6.0', '52', 'aarch64'], identity
++assert identity == ['harbour-mconnect', '1.6.0', '53', 'aarch64'], identity
  files = rpm('-qlp').splitlines()
  for name in files:
      assert '..' not in PurePosixPath(name).parts, name
@@ -1037,3 +1066,13 @@ index 5d007e8..6699f2f 100644
              'Categories=AudioVideo;Audio;Music;Player;', 'Icon=harbour-mconnect',
              'X-Nemo-Application-Type=generic', '[X-Sailjail]',
              'OrganizationName=org.sailfishos', 'ApplicationName=Mconnect',
+@@ -161,6 +164,9 @@ with tempfile.TemporaryDirectory(prefix='mconnect-rpm-check-') as temporary:
+     silica_profile = root / 'etc/sailjail/permissions/harbour-mconnect-silica.profile'
+     assert silica_profile.read_text() == 'include /etc/sailjail/permissions/harbour-mconnect.profile\n'
+     profile_lines = profile.read_text().splitlines()
++    for member in ('org.sailplay.Session1.StateChanged', 'org.sailplay.Session1.RequestFinished',
++                   'org.sailplay.Navigation1.GuidanceChanged', 'org.freedesktop.DBus.Properties.PropertiesChanged'):
++        assert 'dbus-user.call org.sailplay.Client.*=' + member + '@/org/sailplay/v1/*' in profile_lines
+     for value in (
+         'dbus-user.own org.sailfishos.Mconnect.Core',
+         'dbus-user.own org.sailfishos.Mconnect.Silica',

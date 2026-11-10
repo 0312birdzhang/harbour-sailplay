@@ -97,7 +97,10 @@ def main():
         wait(lambda: activated.ready or bool(activated_errors))
         assert activated.ready and not activated_errors, activated_errors
         assert activated.state['value'] == 0
+        activated_name = activated._client_name
+        assert spy.get_name_owner(activated_name) == activated.bus.get_unique_name()
         activated.close()
+        assert not spy.name_has_owner(activated_name)
         backend = start()
         existing = 'org.example.ExistingApp'
         spy.request_name(existing, dbus.bus.NAME_FLAG_DO_NOT_QUEUE)
@@ -113,6 +116,10 @@ def main():
         car.open()
         phone.open()
         wait(lambda: car.ready and phone.ready)
+        car_name, phone_name = car._client_name, phone._client_name
+        assert car_name != phone_name
+        assert spy.get_name_owner(car_name) == car.bus.get_unique_name()
+        assert spy.get_name_owner(phone_name) == phone.bus.get_unique_name()
         assert not errors and car.revision == phone.revision == 1
         assert car.state['value'] == phone.state['value'] == 0
         check_xml(car.bus, service, APP_PATH, APP_INTERFACE)
@@ -173,6 +180,7 @@ def main():
         bad.close()
         phone_path = phone.session_path
         phone.close()
+        assert not spy.name_has_owner(phone_name) and spy.name_has_owner(car_name)
         wait(lambda: session_gone(spy, service, phone_path))
         assert car.ready and car.state['value'] == 9
 
@@ -185,6 +193,8 @@ def main():
         assert completions[-1][1][3] == ERROR_PREFIX + 'Disconnected'
         backend = start(30)
         wait(lambda: car.ready and car.instance_id != instance)
+        assert car._client_name == car_name
+        assert spy.get_name_owner(car_name) == car.bus.get_unique_name()
         assert car.revision == 1 and car.state['value'] == 30
         car.invoke('increment', {'amount': 2}, car.revision)
         wait(lambda: len(completions) == 7 and car.state['value'] == 32)
@@ -194,7 +204,7 @@ def main():
               'final_value': int(car.state['value']), 'request_completions': len(completions),
               'caller_isolation': True, 'unicast_state': True, 'canonical_introspection': True,
               'stale_revision_rejected': True, 'backend_reconnected': True, 'background_activation': True,
-              'accepted_work_survived_view_close': True}), flush=True)
+              'accepted_work_survived_view_close': True, 'named_client_lifecycle': True}), flush=True)
     finally:
         for client in clients:
             client.close()

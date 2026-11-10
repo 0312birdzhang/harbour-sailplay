@@ -68,6 +68,7 @@ private:
     QString m_path;
     QString m_presentation;
     QStringList m_required;
+    QString m_clientName;
     QString m_owner;
     QString m_sessionPath;
     QString m_applicationId;

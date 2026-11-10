@@ -86,27 +86,47 @@ def apply(checkout, check=False):
     patch = (HERE / 'lifecycle.patch').read_bytes()
     if digest(patch) != manifest['patch_sha256']:
         raise RuntimeError('Lifecycle patch differs from the integration manifest')
+    native = {}
     if original:
-        subprocess.run(['git', 'apply', '--check', '-'], input=patch, cwd=str(checkout), check=True)
+        # Validate exact patch bytes outside the checkout's line-ending and attribute rules.
+        with tempfile.TemporaryDirectory(prefix='sailplay-mconnect-patch-') as staging_name:
+            staging = Path(staging_name).resolve()
+            for record in manifest['files']:
+                source = target_path(checkout, record['path'])
+                if snapshots[source] is not None:
+                    target = target_path(staging, record['path'])
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(snapshots[source])
+            command = ['git', '-c', 'core.autocrlf=false', '-c', 'core.eol=lf',
+                       '-c', 'core.attributesFile=' + os.devnull, 'apply']
+            subprocess.run(command + ['--check', '-'], input=patch, cwd=str(staging), check=True)
+            if not check:
+                subprocess.run(command + ['-'], input=patch, cwd=str(staging), check=True)
+                for record in manifest['files']:
+                    value = contents(target_path(staging, record['path']))
+                    if digest(value) != record['after_sha256']:
+                        raise RuntimeError('Prepared patch file differs ' + record['path'])
+                    native[target_path(checkout, record['path'])] = value
     if check:
         return {'source': 'applied' if patched else 'baseline', 'checked_files': len(snapshots)}
     for target, previous in snapshots.items():
         if contents(target) != previous:
             raise RuntimeError('Integration target changed during verification ' + str(target))
     created_directories = []
+    written_targets = []
     try:
-        if original:
-            subprocess.run(['git', 'apply', '-'], input=patch, cwd=str(checkout), check=True)
-        for target, value in overlay.items():
+        for target, value in list(native.items()) + list(overlay.items()):
             if contents(target) != snapshots[target]:
-                raise RuntimeError('SDK overlay changed during application ' + str(target))
+                raise RuntimeError('Integration target changed during application ' + str(target))
             if contents(target) != value:
                 write_atomic(target, value, created_directories)
+                written_targets.append(target)
         for target, expected in expected_after.items():
             if digest(contents(target)) != expected:
                 raise RuntimeError('Applied file differs ' + str(target))
     except Exception:
-        for target, previous in snapshots.items():
+        for target in reversed(written_targets):
+            previous = snapshots[target]
             if digest(contents(target)) == expected_after[target]:
                 if previous is None:
                     target.unlink()

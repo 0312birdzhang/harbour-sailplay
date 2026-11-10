@@ -15,7 +15,8 @@ DBUS_INTERFACES += $$SAILPLAY_SDK_INTERFACES/org.sailplay.App1.xml \
                    $$SAILPLAY_SDK_INTERFACES/org.sailplay.Navigation1.xml
 
 sailplay_contracts.files = $$SAILPLAY_SDK_INTERFACES/org.sailplay.App1.xml \
-                          $$SAILPLAY_SDK_INTERFACES/org.sailplay.Session1.xml
+                          $$SAILPLAY_SDK_INTERFACES/org.sailplay.Session1.xml \
+                          $$SAILPLAY_SDK_INTERFACES/org.sailplay.Navigation1.xml
 sailplay_contracts.prefix = /sailplay-sdk/interfaces
 sailplay_contracts.base = $$SAILPLAY_SDK_INTERFACES
 RESOURCES += sailplay_contracts

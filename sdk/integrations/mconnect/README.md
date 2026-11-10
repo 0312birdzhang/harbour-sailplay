@@ -2,7 +2,7 @@
 
 This patch targets the existing native C++/Silica 1.6.0-51 migration tree in
 `flutter-sailfishos/apps/mconnect`. `baseline.json` identifies each changed
-source file before and after integration. The integration produces release 52.
+source file before and after integration. The integration produces release 53.
 
 The native migration tree contains earlier local work beyond the upstream
 checkout at `82f09c4`. Use the native checkout matching the recorded hashes.
@@ -20,12 +20,14 @@ python3 sdk/integrations/mconnect/apply.py /path/to/flutter-sailfishos
 ```
 
 The script validates the source and patch hashes and copies the Qt provider,
-canonical App1/Session1 XML and SDK license into `elinux/sailplay-sdk`. Repeating
-the command verifies the applied state. Differing source or overlay files stop
-application. Git applies the validated patch bytes from memory. Source checks
-run again before application. Rollback after a failure restores files whose
-bytes still match the integration output and preserves concurrently modified
-files.
+canonical App1/Session1/Navigation1 XML and SDK license into `elinux/sailplay-sdk`.
+Repeating the command verifies the applied state. Differing source or overlay
+files stop application. Git prepares the validated patch in an isolated tree
+with explicit LF settings. The installer checks every prepared hash, rechecks
+the source and writes the native files and eight SDK records atomically.
+Rollback after a failure restores this invocation's written files when their
+bytes still match the integration output. Concurrently created or modified
+files retain their contents.
 
 The application CMake build uses this overlay by default. An external SDK tree
 can be selected with `MCONNECT_SAILPLAY_SDK_DIR`, pointing at its `sdk/qt` folder.
@@ -38,6 +40,12 @@ The existing application identity owns App1 and caller-owned Session1 objects.
 SDK state contains a typed `media` dictionary with the native player snapshot.
 Playback commands use MPRIS. The SDK provider rejects unavailable actions with
 the v1 `NotSupported` error.
+
+The Sailjail profile permits directed SDK state, completion, guidance and
+Session1 property-change members to the clients' temporary
+`org.sailplay.Client.*` names. The Qt and Python clients acquire their name
+before activating the backend. Sessions
+retain the caller's unique bus owner for ownership checks and signal delivery.
 
 Direct and D-Bus startup supply Wayland and Maliit defaults before Qt loads its
 platform and input plugins.

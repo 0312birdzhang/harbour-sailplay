@@ -1,13 +1,13 @@
 {
   "baseline": "Native C++/Silica migration 1.6.0-51 with preceding local migration work",
-  "upstream_commit": "82f09c497eb757ed210f606fc23b15ef55f8d8fb",
-  "release": "1.6.0-52",
-  "patch_sha256": "93ab16dbb6342be0c636a04ec6553eb6ef0a60a4ae0f97b2059282297a7b7d5b",
+  "upstream_commit": "82f09c4",
+  "release": "1.6.0-53",
+  "patch_sha256": "0ca1746a984deddf2b011362e7f5db773311e58e4044f27156a9d35eafacf2f3",
   "files": [
     {
       "path": "apps/mconnect/docs/sailplay-background.md",
       "before_sha256": "392a519e18246e74a19ddb5b24063aa9692e167f6100afb88b2c590837a0407f",
-      "after_sha256": "fc5954d339359dea10c9ecd00374fda1a0366982abb6f08cd07a6ff70588464f"
+      "after_sha256": "de529ef2a13b40873f7b5e3c6c17943222007b877732fc37ca0cd3fe303d91a3"
     },
     {
       "path": "apps/mconnect/elinux/harbour-mconnect-silica.desktop",
@@ -18,6 +18,11 @@
       "path": "apps/mconnect/elinux/harbour-mconnect.desktop.in",
       "before_sha256": "3d104a858984dc905af56fdcd88e87ee6c2408e7d1d63845236b833cae95311d",
       "after_sha256": "f6b98262ee7977bc5c006f4baeb925f1b612dc2d88e092dfdd65dabb5d180e63"
+    },
+    {
+      "path": "apps/mconnect/elinux/harbour-mconnect.profile",
+      "before_sha256": "7390ca5ec846a4327fa35caa737d026287503c7737fac35b236357e14c398046",
+      "after_sha256": "2fe0b48cd79c1bb8708d47de2061702de88b47d04b44fa710ca5f2efa8c891ef"
     },
     {
       "path": "apps/mconnect/elinux/silica/CMakeLists.txt",
@@ -102,12 +107,12 @@
     {
       "path": "apps/mconnect/rpm/harbour-mconnect.spec",
       "before_sha256": "1f653fa2a22f145b079bd618dbdf2544add4b479d1a441a02b86433d1eff1bb5",
-      "after_sha256": "9d92ed81b26c40714e37d3c2d09374da945510a91981a69b62329d3e2c5291be"
+      "after_sha256": "183969d9a7c84d06d359c2aab125a062c9c230395d4a43698e92fb817cfaf3eb"
     },
     {
       "path": "apps/mconnect/rpm/harbour-mconnect.yaml.in",
       "before_sha256": "d3ceb10e0825ab257880a39fe89d0c76572dda6e3e67b2cf320b1a59dca82805",
-      "after_sha256": "fa60d8d6397437f6ccaf2f302b29f3f73bfa5818f4c9e3e7348d34038b0aeefd"
+      "after_sha256": "d5a419f49c0202354f67404c1340e40219899054e47f6225e7eea6e36c6fd91e"
     },
     {
       "path": "apps/mconnect/test/native_lifecycle_test.cc",
@@ -127,29 +132,29 @@
     {
       "path": "apps/mconnect/tools/verify-rpm.py",
       "before_sha256": "4bc1703484301a9112c4c9e1b842689190ddd53790fd4b7f421c60aeb1f8a10a",
-      "after_sha256": "9fd82c098a09a074356e5d0c2feaf38708fb5f37ef9136b111f610df05ea746a"
+      "after_sha256": "7e9d9d94f7420e4888116659c251acdaad4700ba30a66c533f6b5bd05e1b57f3"
     }
   ],
   "sdk_files": [
     {
       "source": "sdk/qt/sailplayprovider.h",
       "path": "apps/mconnect/elinux/sailplay-sdk/sdk/qt/sailplayprovider.h",
-      "sha256": "416043f4c77c48495e7942eb71ed0b27b4d0cb106a0c8684620455906722b2fe"
+      "sha256": "ccdf9b3c641041bf8f1e388cf6ad5591aea9896b05980ce314556b417a33e4b0"
     },
     {
       "source": "sdk/qt/sailplayprovider.cpp",
       "path": "apps/mconnect/elinux/sailplay-sdk/sdk/qt/sailplayprovider.cpp",
-      "sha256": "de0abbe438e3e5ee019b2282595bbe691d2c4cb724232da5d5cbc015ed3b0202"
+      "sha256": "7b86f3c138644e3750e7b4d2fab0016c598b4197b1858d0528f578b5670c6cf1"
     },
     {
       "source": "sdk/qt/CMakeLists.txt",
       "path": "apps/mconnect/elinux/sailplay-sdk/sdk/qt/CMakeLists.txt",
-      "sha256": "2ad6fbfb5f8250ebfa9a1e029261cbbfc2e5aa0b54bb145bcaf98f5aa48bf59c"
+      "sha256": "f20e1477b617c464ab9074f8a8630f647ac6f747a79d2f9aa48f1b62de52200d"
     },
     {
       "source": "sdk/qt/sailplay_contracts.qrc.in",
       "path": "apps/mconnect/elinux/sailplay-sdk/sdk/qt/sailplay_contracts.qrc.in",
-      "sha256": "f72be080fefecf5e510844fb40f32870115b8220a8fc865ef8785c79693293d5"
+      "sha256": "32af2598c70bbce689ce62186bfec0d2e7cbfc6898d9b6310a138332380753ae"
     },
     {
       "source": "sailplay_sdk/interfaces/org.sailplay.App1.xml",
@@ -160,6 +165,11 @@
       "source": "sailplay_sdk/interfaces/org.sailplay.Session1.xml",
       "path": "apps/mconnect/elinux/sailplay-sdk/sailplay_sdk/interfaces/org.sailplay.Session1.xml",
       "sha256": "bc01afc9736432f0417f675381484b78944b32e3bd6005e6b70da3c031c06b2b"
+    },
+    {
+      "source": "sailplay_sdk/interfaces/org.sailplay.Navigation1.xml",
+      "path": "apps/mconnect/elinux/sailplay-sdk/sailplay_sdk/interfaces/org.sailplay.Navigation1.xml",
+      "sha256": "597331bd20faac45d5204205f7f7fc58af9f6a04996d967913064abe81dbe010"
     },
     {
       "source": "LICENSE",

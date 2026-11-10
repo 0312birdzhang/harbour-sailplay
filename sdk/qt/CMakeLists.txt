@@ -12,5 +12,7 @@ qt5_add_resources(sailplay_provider_resources "${CMAKE_CURRENT_BINARY_DIR}/qmake
 add_library(sailplay_sdk_provider STATIC sailplayprovider.cpp sailplayprovider.h ${sailplay_provider_resources})
 set_target_properties(sailplay_sdk_provider PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 target_compile_features(sailplay_sdk_provider PUBLIC cxx_std_11)
+target_compile_options(sailplay_sdk_provider PRIVATE
+    $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-fno-fast-math>)
 target_include_directories(sailplay_sdk_provider PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(sailplay_sdk_provider PUBLIC Qt5::Core Qt5::DBus)

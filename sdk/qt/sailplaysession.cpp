@@ -6,7 +6,9 @@
 #include <QDBusMessage>
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
+#include <QDBusReply>
 #include <QDBusServiceWatcher>
+#include <QUuid>
 #include <limits>
 
 namespace {
@@ -56,6 +58,21 @@ void SailplaySession::open(const QString &service, const QString &path,
                            QStringLiteral("An application service and phone/car presentation are required"));
         return;
     }
+    const QString clientName = QStringLiteral("org.sailplay.Client.c")
+        + QUuid::createUuid().toString().remove(QLatin1Char('{')).remove(QLatin1Char('}')).remove(QLatin1Char('-'));
+    const uint doNotQueue = 4;
+    const QDBusReply<uint> named = m_bus.call(daemonCall(QStringLiteral("RequestName"),
+        QVariantList() << clientName << doNotQueue), QDBus::Block, 5000);
+    if (!named.isValid()) {
+        emit errorOccurred(named.error().name(), named.error().message());
+        return;
+    }
+    if (named.value() != 1) {
+        emit errorOccurred(errorPrefix + QStringLiteral("Failed"),
+                           QStringLiteral("Presentation client name is unavailable"));
+        return;
+    }
+    m_clientName = clientName;
     m_service = service;
     m_path = path;
     m_presentation = presentation;
@@ -277,5 +294,10 @@ void SailplaySession::close()
     m_service.clear();
     m_watcher->setWatchedServices(QStringList());
     ++m_generation;
+    if (!m_clientName.isEmpty()) {
+        const QString clientName = m_clientName;
+        m_clientName.clear();
+        m_bus.unregisterService(clientName);
+    }
     reset();
 }

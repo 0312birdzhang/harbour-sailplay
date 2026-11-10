@@ -264,5 +264,98 @@ class ClientOrderingTests(unittest.TestCase):
             self.assertEqual(idle.call_args[0][-1].name, ERROR_PREFIX + 'InvalidArgument')
 
 
+@unittest.skipUnless(importlib.util.find_spec('dbus') and importlib.util.find_spec('gi'),
+                     'Python D-Bus and GLib bindings are required')
+class ClientNameTests(unittest.TestCase):
+    def setUp(self):
+        import dbus
+        self.bus = Mock()
+        self.bus.request_name.return_value = dbus.bus.REQUEST_NAME_REPLY_PRIMARY_OWNER
+        self.daemon = Mock()
+        self.interface = patch('sailplay_sdk.client.dbus.Interface', return_value=self.daemon)
+        self.interface.start()
+        self.addCleanup(self.interface.stop)
+
+    def client(self, **callbacks):
+        from sailplay_sdk.client import SessionClient
+        client = SessionClient('org.example.SailplayCounter', bus=self.bus, **callbacks)
+        self.addCleanup(client.close)
+        return client
+
+    def test_name_is_acquired_before_backend_discovery(self):
+        import dbus
+        client = self.client()
+        self.assertRegex(client._client_name, r'^org\.sailplay\.Client\.c[0-9a-f]{32}$')
+        self.bus.request_name.assert_called_once_with(client._client_name, dbus.bus.NAME_FLAG_DO_NOT_QUEUE)
+        self.daemon.GetNameOwner.assert_not_called()
+        client.open()
+        self.daemon.GetNameOwner.assert_called_once()
+
+    def test_shared_bus_clients_release_only_their_own_names(self):
+        first, second = self.client(), self.client()
+        first_name, second_name = first._client_name, second._client_name
+        self.assertNotEqual(first_name, second_name)
+        first.close()
+        first.close()
+        self.bus.release_name.assert_called_once_with(first_name)
+        self.assertEqual(second._client_name, second_name)
+        second.close()
+        self.assertEqual([call.args[0] for call in self.bus.release_name.call_args_list],
+                         [first_name, second_name])
+        self.bus.close.assert_not_called()
+
+    def test_unacquired_name_is_preserved_on_failure(self):
+        import dbus
+        from sailplay_sdk.client import SessionClient
+        for result in (dbus.bus.REQUEST_NAME_REPLY_EXISTS, dbus.bus.REQUEST_NAME_REPLY_ALREADY_OWNER):
+            with self.subTest(result=result):
+                self.bus.request_name.return_value = result
+                with self.assertRaises(Fault):
+                    SessionClient('org.example.SailplayCounter', bus=self.bus)
+                self.bus.release_name.assert_not_called()
+                self.bus.add_signal_receiver.assert_not_called()
+                self.bus.close.assert_not_called()
+
+    def test_initialization_failure_releases_acquired_name_and_private_bus(self):
+        from sailplay_sdk.client import SessionClient
+        self.bus.add_signal_receiver.side_effect = RuntimeError('signal subscription failed')
+        with patch('sailplay_sdk.client.dbus.SessionBus', return_value=self.bus):
+            with self.assertRaisesRegex(RuntimeError, 'signal subscription failed'):
+                SessionClient('org.example.SailplayCounter')
+        self.bus.release_name.assert_called_once_with(self.bus.request_name.call_args.args[0])
+        self.bus.close.assert_called_once()
+
+    def test_backend_failure_and_reconnect_retain_client_name(self):
+        client = self.client(on_error=Mock())
+        name = client._client_name
+        client.open()
+        client._failed(client._epoch, RuntimeError('backend unavailable'))
+        client._connect = Mock()
+        client._owner_changed(client.service, '', ':1.99')
+        client._connect.assert_called_once_with(client._epoch, ':1.99')
+        self.assertEqual(client._client_name, name)
+        self.bus.release_name.assert_not_called()
+
+    def test_close_releases_name_after_callback_failure(self):
+        client = self.client(on_state=Mock(side_effect=RuntimeError('state callback failed')))
+        name = client._client_name
+        client.revision = 1
+        with self.assertRaisesRegex(RuntimeError, 'state callback failed'):
+            client.close()
+        self.bus.release_name.assert_called_once_with(name)
+        self.assertEqual(client._client_name, '')
+
+    def test_close_after_bus_loss_releases_private_connection(self):
+        import dbus
+        from sailplay_sdk.client import SessionClient
+        with patch('sailplay_sdk.client.dbus.SessionBus', return_value=self.bus):
+            client = SessionClient('org.example.SailplayCounter')
+        self.bus.release_name.side_effect = dbus.exceptions.DBusException('connection closed')
+        client.close()
+        client.close()
+        self.bus.close.assert_called_once()
+        self.assertEqual(client._client_name, '')
+
+
 if __name__ == '__main__':
     unittest.main()

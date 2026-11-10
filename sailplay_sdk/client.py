@@ -1,4 +1,6 @@
 """Asynchronous Python binding for an application's SDK presentation session."""
+import uuid
+
 import dbus
 from gi.repository import GLib
 
@@ -38,7 +40,12 @@ class SessionClient:
         self._wanted = False
         self._closed = False
         self._watch = None
+        self._client_name = ''
         try:
+            name = 'org.sailplay.Client.c' + uuid.uuid4().hex
+            if self.bus.request_name(name, dbus.bus.NAME_FLAG_DO_NOT_QUEUE) != dbus.bus.REQUEST_NAME_REPLY_PRIMARY_OWNER:
+                raise Fault('Failed', 'presentation client name is unavailable')
+            self._client_name = name
             self._watch = self.bus.add_signal_receiver(self._owner_changed, signal_name='NameOwnerChanged',
                 dbus_interface='org.freedesktop.DBus', bus_name='org.freedesktop.DBus', arg0=service)
             self._daemon = dbus.Interface(self.bus.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus',
@@ -46,6 +53,7 @@ class SessionClient:
         except Exception:
             if self._watch is not None:
                 self._watch.remove()
+            self._release_client_name()
             if self._own_bus:
                 self.bus.close()
             raise
@@ -228,7 +236,18 @@ class SessionClient:
         self._closed = True
         self._wanted = False
         self._epoch += 1
-        self._reset()
-        self._watch.remove()
-        if self._own_bus:
-            self.bus.close()
+        try:
+            self._reset()
+        finally:
+            self._watch.remove()
+            self._release_client_name()
+            if self._own_bus:
+                self.bus.close()
+
+    def _release_client_name(self):
+        name, self._client_name = self._client_name, ''
+        if name:
+            try:
+                self.bus.release_name(name)
+            except dbus.exceptions.DBusException:
+                pass

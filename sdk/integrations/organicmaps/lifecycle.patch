@@ -1,0 +1,1754 @@
+diff --git a/libs/map/framework.cpp b/libs/map/framework.cpp
+index 1749d93b..5bc28d50 100644
+--- a/libs/map/framework.cpp
++++ b/libs/map/framework.cpp
+@@ -231,6 +231,10 @@ void Framework::OnLocationUpdate(GpsInfo const & info)
+ #endif
+
+   m_routingManager.OnLocationUpdate(rInfo);
++  // Background clients can keep navigation and recording alive without a map presentation. Drape reports the
++  // matched arrow position while it exists. Otherwise the backend owns the current position from the fix.
++  if (!m_drapeEngine)
++    OnUserPositionChanged(mercator::FromLatLon(rInfo.m_latitude, rInfo.m_longitude), true);
+ }
+
+ void Framework::OnCompassUpdate(CompassInfo const & info)
+@@ -446,6 +450,7 @@ Framework::Framework(FrameworkParams const & params, bool loadMaps)
+
+ Framework::~Framework()
+ {
++  SetTrackRecordingUpdateHandler({});
+   GetPowerManager().UnsubscribeAll();
+
+   m_threadRunner.reset();
+@@ -1736,6 +1741,8 @@ m2::PointD Framework::P3dtoG(m2::PointD const & p) const
+
+ void Framework::CreateDrapeEngine(ref_ptr<dp::GraphicsContextFactory> contextFactory, DrapeCreationParams && params)
+ {
++  // Recording callbacks run on the GPS worker. Detach before replacing their render target.
++  GpsTracker::Instance().Disconnect();
+   auto idReadFn = [this](auto const & fn, m2::RectD const & r, int scale)
+   {
+     m_featuresFetcher.ForEachFeatureID(r, fn, scale);
+@@ -1877,6 +1884,8 @@ void Framework::CreateDrapeEngine(ref_ptr<dp::GraphicsContextFactory> contextFac
+   m_transitManager.SetDrapeEngine(make_ref(m_drapeEngine));
+   m_isolinesManager.SetDrapeEngine(make_ref(m_drapeEngine));
+   m_searchMarks.SetDrapeEngine(make_ref(m_drapeEngine));
++  if (m_routingManager.IsRoutingFollowing())
++    OnRouteFollow(m_routingManager.GetRouter());
+
+   InvalidateUserMarks();
+
+@@ -1932,6 +1941,8 @@ ref_ptr<df::DrapeEngine> Framework::GetDrapeEngine()
+
+ void Framework::DestroyDrapeEngine()
+ {
++  auto & tracker = GpsTracker::Instance();
++  tracker.Disconnect();
+   if (m_drapeEngine != nullptr)
+   {
+     m_drapeApi.SetDrapeEngine(nullptr);
+@@ -1943,9 +1954,10 @@ void Framework::DestroyDrapeEngine()
+     GetBookmarkManager().SetDrapeEngine(nullptr);
+
+     m_trafficManager.Teardown();
+-    GpsTracker::Instance().Disconnect();
+     m_drapeEngine.reset();
+   }
++  if (m_trackRecordingUpdateHandler && tracker.IsEnabled())
++    tracker.Connect(std::bind(&Framework::OnUpdateGpsTrackPointsCallback, this, _1, _2, _3));
+ }
+
+ void Framework::SetRenderingEnabled(ref_ptr<dp::GraphicsContextFactory> contextFactory)
+@@ -1978,17 +1990,19 @@ void Framework::StartTrackRecording()
+   auto & tracker = GpsTracker::Instance();
+   tracker.SetEnabled(true);
+   if (m_drapeEngine)
+-  {
+     m_drapeEngine->ClearGpsTrackPoints();
+-    tracker.Connect(std::bind(&Framework::OnUpdateGpsTrackPointsCallback, this, _1, _2, _3));
+-  }
++  tracker.Connect(std::bind(&Framework::OnUpdateGpsTrackPointsCallback, this, _1, _2, _3));
+ }
+
+ void Framework::SetTrackRecordingUpdateHandler(TrackRecordingUpdateHandler && trackRecordingDidUpdate)
+ {
++  auto & tracker = GpsTracker::Instance();
++  tracker.Disconnect();
+   m_trackRecordingUpdateHandler = std::move(trackRecordingDidUpdate);
++  if (tracker.IsEnabled() && (m_drapeEngine || m_trackRecordingUpdateHandler))
++    tracker.Connect(std::bind(&Framework::OnUpdateGpsTrackPointsCallback, this, _1, _2, _3));
+   if (m_trackRecordingUpdateHandler)
+-    m_trackRecordingUpdateHandler(GpsTracker::Instance().GetTrackStatistics());
++    m_trackRecordingUpdateHandler(tracker.GetTrackStatistics());
+ }
+
+ ElevationInfo const & Framework::GetTrackRecordingElevationInfo()
+@@ -2035,7 +2049,10 @@ void Framework::OnUpdateGpsTrackPointsCallback(std::vector<std::pair<size_t, loc
+                                                std::pair<size_t, size_t> const & toRemove,
+                                                TrackStatistics const & trackStatistics)
+ {
+-  ASSERT(m_drapeEngine, ());
++  if (m_trackRecordingUpdateHandler)
++    m_trackRecordingUpdateHandler(trackStatistics);
++  if (!m_drapeEngine)
++    return;
+
+   std::vector<df::GpsTrackPoint> pointsAdd;
+   pointsAdd.reserve(toAdd.size());
+@@ -2061,8 +2078,6 @@ void Framework::OnUpdateGpsTrackPointsCallback(std::vector<std::pair<size_t, loc
+
+   m_drapeEngine->UpdateGpsTrackPoints(std::move(pointsAdd), std::move(indicesRemove));
+
+-  if (m_trackRecordingUpdateHandler)
+-    m_trackRecordingUpdateHandler(trackStatistics);
+ }
+
+ void Framework::MarkMapStyle(MapStyle mapStyle)
+@@ -3872,7 +3887,9 @@ void Framework::OnRouteFollow(routing::RouterType type)
+   // GetRoutingSettings(type).m_matchRoute to the FollowRoute() instead of |isPedestrianRoute|.
+   // |isArrowGlued| parameter fully corresponds to |m_matchRoute| in RoutingSettings.
+   // For pedestrian and bicycle modes, use compass heading when stopped (isArrowGlued = false).
+-  m_drapeEngine->FollowRoute(scale, scale3d, enableAutoZoom, !(isPedestrianRoute || isBicycleRoute) /* isArrowGlued */);
++  if (m_drapeEngine)
++    m_drapeEngine->FollowRoute(scale, scale3d, enableAutoZoom,
++                               !(isPedestrianRoute || isBicycleRoute) /* isArrowGlued */);
+ }
+
+ // RoutingManager::Delegate
+diff --git a/libs/map/map_tests/CMakeLists.txt b/libs/map/map_tests/CMakeLists.txt
+index 3654fcbc..faf51e9c 100644
+--- a/libs/map/map_tests/CMakeLists.txt
++++ b/libs/map/map_tests/CMakeLists.txt
+@@ -11,6 +11,7 @@ set(SRC
+   extrapolator_tests.cpp
+   feature_getters_tests.cpp
+   framework_viewport_tests.cpp
++  framework_location_tests.cpp
+   gps_track_collection_test.cpp
+   gps_track_filter_test.cpp
+   gps_track_storage_test.cpp
+diff --git a/libs/map/map_tests/framework_location_tests.cpp b/libs/map/map_tests/framework_location_tests.cpp
+new file mode 100644
+index 00000000..3610947b
+--- /dev/null
++++ b/libs/map/map_tests/framework_location_tests.cpp
+@@ -0,0 +1,51 @@
++#include "testing/testing.hpp"
++
++#include "map/framework.hpp"
++
++#include "geometry/mercator.hpp"
++
++#include "platform/location.hpp"
++
++namespace framework_location_tests
++{
++UNIT_TEST(Framework_HeadlessRouteFollowNeedsNoRenderer)
++{
++  Framework framework({}, false /* loadMaps */);
++  auto & delegate = static_cast<RoutingManager::Delegate &>(framework);
++  for (auto type : {routing::RouterType::Vehicle, routing::RouterType::Pedestrian, routing::RouterType::Bicycle})
++    delegate.OnRouteFollow(type);
++  TEST(!framework.IsDrapeEngineCreated(), ());
++}
++
++UNIT_TEST(Framework_HeadlessLocationOwnsPosition)
++{
++  Framework framework({}, false /* loadMaps */);
++  TEST(!framework.IsDrapeEngineCreated(), ());
++  TEST(!framework.GetCurrentPosition(), ());
++  int updates = 0;
++  framework.SetUserPositionListener([&updates](bool hasPosition)
++  {
++    TEST(hasPosition, ());
++    ++updates;
++  });
++
++  location::GpsInfo info;
++  info.m_source = location::EUser;
++  info.m_horizontalAccuracy = 5;
++  info.m_timestamp = 1700000000;
++  for (double latitude : {22.5, 22.6, 22.7})
++  {
++    info.m_latitude = latitude;
++    info.m_longitude = 113.5;
++    info.m_timestamp += 1;
++    framework.OnLocationUpdate(info);
++    auto const position = framework.GetCurrentPosition();
++    TEST(position, ());
++    auto const expected = mercator::FromLatLon(info.m_latitude, info.m_longitude);
++    TEST_ALMOST_EQUAL_ABS(position->x, expected.x, 1e-8, ());
++    TEST_ALMOST_EQUAL_ABS(position->y, expected.y, 1e-8, ());
++  }
++  TEST_EQUAL(updates, 3, ());
++  TEST(!framework.IsDrapeEngineCreated(), ());
++}
++}  // namespace framework_location_tests
+diff --git a/libs/map/map_tests/routing_manager_tests.cpp b/libs/map/map_tests/routing_manager_tests.cpp
+index 269e377f..e1239d5f 100644
+--- a/libs/map/map_tests/routing_manager_tests.cpp
++++ b/libs/map/map_tests/routing_manager_tests.cpp
+@@ -747,6 +747,41 @@ UNIT_TEST(RoutingManager_EndpointReplacementDoesNotOptimize)
+   }
+ }
+
++UNIT_TEST(RoutingManager_CancelledSavedRouteLoadPreservesNewPoints)
++{
++  WithSavedRoute([](RoutingManager & manager, BookmarkManager &, TestGuiThread & guiThread)
++  {
++    manager.AddRoutePoint(MakeRoutePoint(RouteMarkType::Start, 0, 1.0), false /* optimize */);
++    manager.AddRoutePoint(MakeRoutePoint(RouteMarkType::Finish, 0, 2.0), false /* optimize */);
++    manager.SaveRoutePoints();
++    WaitForFileThread();
++
++    bool completed = false;
++    bool loaded = true;
++    bool canApply = true;
++    manager.LoadRoutePoints([&](bool success)
++    {
++      GetPlatform().RunTask(Platform::Thread::Gui, [&, success]
++      {
++        loaded = success;
++        completed = true;
++      });
++    }, [&] { return canApply; });
++    manager.RemoveRoutePoints();
++    manager.AddRoutePoint(MakeRoutePoint(RouteMarkType::Start, 0, 3.0), false /* optimize */);
++    manager.AddRoutePoint(MakeRoutePoint(RouteMarkType::Finish, 0, 4.0), false /* optimize */);
++    canApply = false;
++    while (!completed)
++      guiThread.RunNext();
++
++    TEST(!loaded, ());
++    auto const points = manager.GetRoutePoints();
++    TEST_EQUAL(points.size(), 2, ());
++    TEST_EQUAL(points.front().m_position, m2::PointD(3.0, 3.0), ());
++    TEST_EQUAL(points.back().m_position, m2::PointD(4.0, 4.0), ());
++  });
++}
++
+ UNIT_TEST(RoutingManager_SaveLoadRoutePointsPreservesOrder)
+ {
+   TestSavedRouteOrder(false /* myPositionStart */, 0 /* passedStops */, false /* hasCurrentPosition */,
+diff --git a/libs/map/routing_manager.cpp b/libs/map/routing_manager.cpp
+index fbec454c..7b69b327 100644
+--- a/libs/map/routing_manager.cpp
++++ b/libs/map/routing_manager.cpp
+@@ -1703,9 +1703,9 @@ bool RoutingManager::HasSavedRoutePoints() const
+   return GetPlatform().IsFileExistsByFullPath(fileName);
+ }
+
+-void RoutingManager::LoadRoutePoints(LoadRouteHandler const & handler)
++void RoutingManager::LoadRoutePoints(LoadRouteHandler const & handler, std::function<bool()> const & canApply)
+ {
+-  GetPlatform().RunTask(Platform::Thread::File, [this, handler]()
++  GetPlatform().RunTask(Platform::Thread::File, [this, handler, canApply]()
+   {
+     if (!HasSavedRoutePoints())
+     {
+@@ -1738,8 +1738,14 @@ void RoutingManager::LoadRoutePoints(LoadRouteHandler const & handler)
+       return;
+     }
+
+-    GetPlatform().RunTask(Platform::Thread::Gui, [this, handler, points = std::move(points)]() mutable
++    GetPlatform().RunTask(Platform::Thread::Gui, [this, handler, canApply, points = std::move(points)]() mutable
+     {
++      if (canApply && !canApply())
++      {
++        if (handler)
++          handler(false /* success */);
++        return;
++      }
+       ASSERT(m_bmManager != nullptr, ());
+       // If we have found my position and the saved route used the user's position, we use my position as start point.
+       bool routeUsedPosition = false;
+diff --git a/libs/map/routing_manager.hpp b/libs/map/routing_manager.hpp
+index 8260db8f..673180e6 100644
+--- a/libs/map/routing_manager.hpp
++++ b/libs/map/routing_manager.hpp
+@@ -283,7 +283,7 @@ public:
+   /// \brief It loads road points from file and delete file after loading.
+   /// The result of the loading will be sent via SafeCallback.
+   using LoadRouteHandler = platform::SafeCallback<void(bool success)>;
+-  void LoadRoutePoints(LoadRouteHandler const & handler);
++  void LoadRoutePoints(LoadRouteHandler const & handler, std::function<bool()> const & canApply = {});
+   /// \brief It saves route points to file.
+   void SaveRoutePoints();
+   /// \brief It deletes file with saved route points if it exists.
+diff --git a/qt/qt_common/qtoglcontextfactory.cpp b/qt/qt_common/qtoglcontextfactory.cpp
+index 75b02b76..f2e7226e 100644
+--- a/qt/qt_common/qtoglcontextfactory.cpp
++++ b/qt/qt_common/qtoglcontextfactory.cpp
+@@ -91,7 +91,16 @@ void QtOGLContextFactory::WaitForInitialization(dp::GraphicsContext * context)
+     m_contextsCreated.wait();
+   }
+   else
++  {
++    {
++      // Some EGL bridges share an unsynchronized map of fallback offscreen windows.
++      // Create their native surfaces serially before either renderer or the GUI uses them.
++      std::lock_guard lock(m_initializationMutex);
++      context->MakeCurrent();
++    }
+     m_contextsCreated.count_down();
++    m_contextsCreated.wait();
++  }
+ }
+
+ std::unique_ptr<QOffscreenSurface> QtOGLContextFactory::CreateSurface()
+diff --git a/qt/qt_common/qtoglcontextfactory.hpp b/qt/qt_common/qtoglcontextfactory.hpp
+index 2143365d..d57cac30 100644
+--- a/qt/qt_common/qtoglcontextfactory.hpp
++++ b/qt/qt_common/qtoglcontextfactory.hpp
+@@ -8,6 +8,7 @@
+ #include <functional>
+ #include <latch>
+ #include <memory>
++#include <mutex>
+
+ namespace qt
+ {
+@@ -47,6 +48,7 @@ private:
+   std::unique_ptr<QOffscreenSurface> m_uploadSurface;
+   bool m_preparedToShutdown = false;
+
++  std::mutex m_initializationMutex;
+   std::latch m_mainThreadReady = std::latch(1);
+   std::latch m_contextsCreated = std::latch(2);
+ };
+diff --git a/sailfish/CMakeLists.txt b/sailfish/CMakeLists.txt
+index 8b23ed0a..9943bc17 100644
+--- a/sailfish/CMakeLists.txt
++++ b/sailfish/CMakeLists.txt
+@@ -1,6 +1,8 @@
+ project(organicmaps_sailfish)
+
+ option(SAILFISH_HARBOUR "Build the Jolla Harbour package: harbour- name, no Sailjail profile and no voice" OFF)
++option(SAILPLAY "Export the shared navigation backend through the Sailplay SDK" OFF)
++set(SAILPLAY_SDK_QT_DIR /usr/share/sailplay-sdk/qt CACHE PATH "Sailplay Qt source SDK directory")
+ # libsailfishapp finds the data, desktop file and main QML by the executable name; Harbour requires its prefix.
+ if (SAILFISH_HARBOUR)
+   set(APP_NAME harbour-organicmaps)
+@@ -46,6 +48,8 @@ set(SRC
+   helpers.hpp
+   map_item.cpp
+   map_item.hpp
++  map_surface.cpp
++  map_surface.hpp
+   maps_storage.cpp
+   maps_storage.hpp
+   media_pause.cpp
+@@ -60,6 +64,8 @@ set(SRC
+   place_editor.hpp
+   place_page.cpp
+   place_page.hpp
++  phone_presentation.cpp
++  phone_presentation.hpp
+   prompt_player.cpp
+   prompt_player.hpp
+   routing.cpp
+@@ -102,6 +108,23 @@ target_link_libraries(${PROJECT_NAME}_lib
+     ${PULSE_LIBRARIES}
+ )
+
++set(SAILPLAY_METADATA "")
++if (SAILPLAY)
++  if (SAILFISH_HARBOUR)
++    message(FATAL_ERROR "The Sailplay backend requires the application's Sailjail service identity")
++  endif()
++  add_subdirectory("${SAILPLAY_SDK_QT_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/sailplay-sdk")
++  target_sources(${PROJECT_NAME}_lib PRIVATE sailplay_navigation.cpp sailplay_navigation.hpp)
++  target_link_libraries(${PROJECT_NAME}_lib PRIVATE sailplay_sdk_provider)
++  target_compile_definitions(${PROJECT_NAME}_lib PRIVATE OMIM_SAILPLAY)
++  set(SAILPLAY_SDK_LICENSE "${SAILPLAY_SDK_QT_DIR}/../../LICENSE")
++  if (NOT EXISTS "${SAILPLAY_SDK_LICENSE}")
++    set(SAILPLAY_SDK_LICENSE "${SAILPLAY_SDK_QT_DIR}/../LICENSE")
++  endif()
++  install(FILES "${SAILPLAY_SDK_LICENSE}" DESTINATION ${APP_DATA_DIR} RENAME sailplay-sdk-LICENSE)
++  set(SAILPLAY_METADATA "X-Sailplay-ApiVersion=1\nX-Sailplay-Service=${DBUS_SERVICE}\nX-Sailplay-ObjectPath=/org/sailplay/v1/App\nX-Sailplay-Presentation=template\nX-Sailplay-Capabilities=navigation;")
++endif()
++
+ add_executable(${PROJECT_NAME} main.cpp)
+ set_target_properties(${PROJECT_NAME} PROPERTIES
+   OUTPUT_NAME ${APP_NAME}
+diff --git a/sailfish/app.cpp b/sailfish/app.cpp
+index 70fd841b..09b7020b 100644
+--- a/sailfish/app.cpp
++++ b/sailfish/app.cpp
+@@ -6,15 +6,22 @@
+ #include "sailfish/countries_model.hpp"
+ #include "sailfish/framework_access.hpp"
+ #include "sailfish/map_item.hpp"
++#include "sailfish/map_surface.hpp"
+ #include "sailfish/maps_storage.hpp"
+ #include "sailfish/opening_hours_editor.hpp"
+ #include "sailfish/osm_account.hpp"
++#include "sailfish/phone_presentation.hpp"
+ #include "sailfish/place_editor.hpp"
+ #include "sailfish/place_page.hpp"
+ #include "sailfish/routing.hpp"
+ #include "sailfish/search_model.hpp"
+ #include "sailfish/url_handler.hpp"
+
++#ifdef OMIM_SAILPLAY
++#include "sailfish/sailplay_navigation.hpp"
++#include "sailplayprovider.h"
++#endif
++
+ #include "map/framework.hpp"
+
+ #include "platform/platform.hpp"
+@@ -26,7 +33,9 @@
+ #include <QDir>
+ #include <QEventLoop>
+ #include <QGuiApplication>
++#include <QQmlComponent>
+ #include <QQmlContext>
++#include <QQmlEngine>
+ #include <QQmlError>
+ #include <QQuickItem>
+ #include <QQuickView>
+@@ -66,9 +75,9 @@ void SetDefaultSurfaceFormat()
+
+ // The copy can take minutes, e.g. to a slow memory card, so its progress is shown meanwhile. Without text: the
+ // strings come from the platform, which may only start once the maps folder is known.
+-QString MoveMaps()
++QString MoveMaps(bool showProgress)
+ {
+-  if (!sailfish::MapsStorage::HasPendingMove())
++  if (!showProgress || !sailfish::MapsStorage::HasPendingMove())
+     return sailfish::MapsStorage::ApplyPendingMove([](double) {});
+
+   std::unique_ptr<QQuickView> view(SailfishApp::createView());
+@@ -90,11 +99,11 @@ QString MoveMaps()
+   return dir;
+ }
+
+-void SetupPlatform()
++void SetupPlatform(bool showProgress)
+ {
+   // Platform reads these on first use; the defaults match the installed RPM layout and Sailjail.
+   SetEnvIfUnset("MWM_RESOURCES_DIR", SailfishApp::pathTo(QStringLiteral("data")).toLocalFile());
+-  QString writableDir = MoveMaps();
++  QString writableDir = MoveMaps(showProgress);
+   if (writableDir.isEmpty())
+     writableDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+   QDir().mkpath(writableDir);
+@@ -107,7 +116,8 @@ void SetupPlatform()
+
+ void RegisterQmlTypes()
+ {
+-  qmlRegisterType<sailfish::MapItem>("app.organicmaps", 1, 0, "MapItem");
++  qmlRegisterUncreatableType<sailfish::MapItem>("app.organicmaps", 1, 0, "MapItem", "Use mapCore");
++  qmlRegisterType<sailfish::MapSurface>("app.organicmaps", 1, 0, "MapSurface");
+   qmlRegisterType<sailfish::CountriesModel>("app.organicmaps", 1, 0, "CountriesModel");
+   qmlRegisterType<sailfish::SearchModel>("app.organicmaps", 1, 0, "SearchModel");
+   qmlRegisterType<sailfish::BookmarkCategoriesModel>("app.organicmaps", 1, 0, "BookmarkCategoriesModel");
+@@ -134,24 +144,30 @@ Framework & GetFramework()
+ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv[])
+ {
+   SetDefaultSurfaceFormat();
++  SetEnvIfUnset("QT_QPA_PLATFORM", "wayland");
++  SetEnvIfUnset("WAYLAND_DISPLAY", "../../display/wayland-0");
++  SetEnvIfUnset("QT_IM_MODULE", "Maliit");
+
+   std::unique_ptr<QGuiApplication> app(SailfishApp::application(argc, argv));
++  app->setQuitOnLastWindowClosed(false);
+   // After the application, which sets the system locale: strtod() in platform/measurement_utils.cpp and
+   // search/latlon_match.cpp needs dots as decimal separators.
+   std::setlocale(LC_NUMERIC, "C");
+   app->setOrganizationName(QStringLiteral("app.organicmaps"));
+   app->setApplicationName(QStringLiteral("organicmaps"));
+
+-  QStringList const urls = app->arguments().mid(1);
++  QStringList urls = app->arguments().mid(1);
++  bool const background = urls.removeAll(QStringLiteral("--background")) > 0;
+   // Single instance: a second one would write the same settings, bookmarks and edits.
+   sailfish::DBusInbox dbusInbox;
+   if (!dbusInbox.Claim())
+   {
+-    sailfish::DBusInbox::OpenInRunningApp(urls);
++    if (!background || !urls.isEmpty())
++      sailfish::DBusInbox::OpenInRunningApp(urls);
+     return 0;
+   }
+
+-  SetupPlatform();
++  SetupPlatform(!background);
+
+   Framework framework;
+   framework.SetupMeasurementSystem();
+@@ -169,32 +185,130 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
+   sailfish::MapsStorage mapsStorage(framework);
+   sailfish::DownloadStatus downloads(framework.GetStorage());
+   sailfish::UrlHandler urlHandler(framework, bookmarksIO);
++  sailfish::MapItem mapCore;
++  QQmlEngine::setObjectOwnership(&mapCore, QQmlEngine::CppOwnership);
+   // The OpenStreetMap login in the browser returns by an om:// link.
+   QObject::connect(&urlHandler, &sailfish::UrlHandler::oauth2CodeReceived, &osmAccount,
+                    &sailfish::OsmAccount::LoginWithCode);
+-  dbusInbox.SetHandler(urlHandler);
+-  std::unique_ptr<QQuickView> view(SailfishApp::createView());
+-  view->rootContext()->setContextProperty(QStringLiteral("appInfo"), &appInfo);
+-  view->rootContext()->setContextProperty(QStringLiteral("appSettings"), &appSettings);
+-  view->rootContext()->setContextProperty(QStringLiteral("osmAccount"), &osmAccount);
+-  view->rootContext()->setContextProperty(QStringLiteral("bookmarksIO"), &bookmarksIO);
+-  view->rootContext()->setContextProperty(QStringLiteral("urlHandler"), &urlHandler);
+-  view->rootContext()->setContextProperty(QStringLiteral("mapsStorage"), &mapsStorage);
+-  view->rootContext()->setContextProperty(QStringLiteral("downloads"), &downloads);
+   bool const projected = qgetenv("WAYLAND_DISPLAY").contains("imira-comp") &&
+                          qgetenv("SAILPLAY_NAVIGATION_EXPORT") == "1";
+-  view->rootContext()->setContextProperty(QStringLiteral("sailplayProjected"), projected);
+-  // A local file loads synchronously.
+-  view->setSource(SailfishApp::pathToMainQml());
+-  if (view->status() != QQuickView::Ready)
++  auto const setupContext = [&](QQmlContext * context)
++  {
++    context->setContextProperty(QStringLiteral("appInfo"), &appInfo);
++    context->setContextProperty(QStringLiteral("appSettings"), &appSettings);
++    context->setContextProperty(QStringLiteral("osmAccount"), &osmAccount);
++    context->setContextProperty(QStringLiteral("bookmarksIO"), &bookmarksIO);
++    context->setContextProperty(QStringLiteral("urlHandler"), &urlHandler);
++    context->setContextProperty(QStringLiteral("mapsStorage"), &mapsStorage);
++    context->setContextProperty(QStringLiteral("downloads"), &downloads);
++    context->setContextProperty(QStringLiteral("mapCore"), &mapCore);
++    context->setContextProperty(QStringLiteral("sailplayProjected"), projected);
++  };
++  sailfish::PhonePresentation presentation(SailfishApp::pathToMainQml(), setupContext);
++  QObject::connect(&urlHandler, &sailfish::UrlHandler::activated, &presentation, [&] { presentation.Show(); });
++  QObject::connect(&urlHandler, &sailfish::UrlHandler::phoneCloseRequested, &presentation,
++                   &sailfish::PhonePresentation::Close, Qt::QueuedConnection);
++  QObject::connect(&urlHandler, &sailfish::UrlHandler::cancelDownloadsRequested, &downloads,
++                   &sailfish::DownloadStatus::cancelAll);
++  QObject::connect(&urlHandler, &sailfish::UrlHandler::stopTrackRecordingRequested, &mapCore, [&]
++  {
++    if (!presentation.isOpen() && mapCore.trackRecording())
++      mapCore.saveAndStopTrackRecording();
++  });
++
++  // Keep notifications and suspend inhibition with the backend when the phone tree is released.
++  QQmlEngine backendEngine;
++  setupContext(backendEngine.rootContext());
++  QQmlComponent backendComponent(&backendEngine, SailfishApp::pathTo(QStringLiteral("qml/Backend.qml")));
++  std::unique_ptr<QObject> backendObject(backendComponent.create());
++  if (!backendObject)
+   {
+-    for (auto const & error : view->errors())
++    for (auto const & error : backendComponent.errors())
+       LOG(LERROR, (error.toString().toStdString()));
+     return EXIT_FAILURE;
+   }
+-  view->show();
++
++#ifdef OMIM_SAILPLAY
++  QVariantMap guidance = sailfish::SailplayGuidance(mapCore.routing()->NavigationSnapshot());
++  auto const state = [&]
++  {
++    return QVariantMap{{"navigation", guidance},
++                       {"phoneOpen", presentation.isOpen()},
++                       {"navigating", mapCore.routing()->navigating()},
++                       {"building", mapCore.routing()->building()},
++                       {"recording", mapCore.trackRecording()},
++                       {"downloading", downloads.inProgress()}};
++  };
++  SailplayProvider provider(QStringLiteral(SAILFISH_APP_NAME), state(), {QStringLiteral("navigation")});
++  provider.setActionHandler(QStringLiteral("navigation.stop"),
++                            [&](qulonglong invocation, QVariantMap const & parameters)
++  {
++    if (!parameters.isEmpty())
++    {
++      provider.fail(invocation, "InvalidArgument", "navigation.stop takes no parameters");
++      return;
++    }
++    mapCore.routing()->close();
++    provider.complete(invocation, {{"stopped", true}});
++  });
++  if (!provider.start())
++  {
++    LOG(LERROR, ("Can't export the Sailplay navigation backend"));
++    return EXIT_FAILURE;
++  }
++  auto const publish = [&] { provider.publish(state()); };
++  QObject::connect(mapCore.routing(), &sailfish::Routing::guidanceChanged, &provider, [&]
++  {
++    guidance = sailfish::SailplayGuidance(mapCore.routing()->NavigationSnapshot());
++    publish();
++  });
++  QObject::connect(mapCore.routing(), &sailfish::Routing::stateChanged, &provider, publish);
++  QObject::connect(mapCore.routing(), &sailfish::Routing::navigatingChanged, &provider, publish);
++  QObject::connect(&mapCore, &sailfish::MapItem::trackRecordingChanged, &provider, publish);
++  QObject::connect(&downloads, &sailfish::DownloadStatus::inProgressChanged, &provider, publish);
++  QObject::connect(&presentation, &sailfish::PhonePresentation::changed, &provider, publish);
++#endif
++
++  QTimer idleTimer;
++  idleTimer.setSingleShot(true);
++  idleTimer.setInterval(10000);
++  auto const hasViews = [&]
++  {
++    bool wanted = presentation.isOpen();
++#ifdef OMIM_SAILPLAY
++    wanted = wanted || provider.sessionCount() > 0;
++#endif
++    return wanted;
++  };
++  auto const updateLifetime = [&]
++  {
++    if (hasViews())
++      idleTimer.stop();
++    else if (!idleTimer.isActive())
++      idleTimer.start();
++  };
++  QObject::connect(&presentation, &sailfish::PhonePresentation::changed, &idleTimer, updateLifetime);
++#ifdef OMIM_SAILPLAY
++  QObject::connect(&provider, &SailplayProvider::sessionsChanged, &idleTimer, updateLifetime);
++#endif
++  QObject::connect(&idleTimer, &QTimer::timeout, &idleTimer, [&]
++  {
++    bool working = mapCore.routing()->HasBackgroundWork() || mapCore.trackRecording() || downloads.inProgress() ||
++                   bookmarksIO.busy() || osmAccount.busy();
++#ifdef OMIM_SAILPLAY
++    working = working || provider.pendingCount() > 0;
++#endif
++    if (!hasViews() && !working)
++      app->quit();
++    else
++      updateLifetime();
++  });
++  if (!background && !presentation.Show())
++    return EXIT_FAILURE;
+   if (!urls.isEmpty())
+     urlHandler.openUrl(urls);
++  dbusInbox.SetHandler(urlHandler);
++  updateLifetime();
+
+   return app->exec();
+ }
+diff --git a/sailfish/bookmarks_io.cpp b/sailfish/bookmarks_io.cpp
+index 3c8f8e7a..f7f3fc80 100644
+--- a/sailfish/bookmarks_io.cpp
++++ b/sailfish/bookmarks_io.cpp
+@@ -72,6 +72,16 @@ BookmarksIO::BookmarksIO(Framework & framework, QObject * parent) : QObject(pare
+   });
+   connect(&notifier, &BookmarksNotifier::loaded, this, &BookmarksIO::BackUpIfDue);
+   connect(&notifier, &BookmarksNotifier::changed, this, &BookmarksIO::listsChanged);
++  connect(&notifier, &BookmarksNotifier::loaded, this, &BookmarksIO::busyChanged);
++  connect(&notifier, &BookmarksNotifier::fileLoaded, this, &BookmarksIO::busyChanged);
++  connect(this, &BookmarksIO::backupChanged, this, &BookmarksIO::busyChanged);
++  auto const exportFinished = [this]
++  {
++    --m_exports;
++    emit busyChanged();
++  };
++  connect(this, &BookmarksIO::exportReady, this, exportFinished);
++  connect(this, &BookmarksIO::exportFailed, this, exportFinished);
+
+   m_backupTimer.setInterval(60 * 60 * 1000);
+   connect(&m_backupTimer, &QTimer::timeout, this, &BookmarksIO::BackUpIfDue);
+@@ -87,6 +97,11 @@ BookmarksIO::BookmarksIO(Framework & framework, QObject * parent) : QObject(pare
+   });
+ }
+
++bool BookmarksIO::busy() const
++{
++  return m_backingUp || m_exports > 0 || m_framework.GetBookmarkManager().IsAsyncLoadingInProgress();
++}
++
+ QVariantList BookmarksIO::lists() const
+ {
+   auto const & manager = m_framework.GetBookmarkManager();
+@@ -158,6 +173,7 @@ QDateTime BookmarksIO::lastBackup() const
+ void BookmarksIO::importFile(QString const & file)
+ {
+   m_framework.GetBookmarkManager().LoadBookmark(LocalPath(file).toStdString(), false /* isTemporaryFile */);
++  emit busyChanged();
+ }
+
+ bool BookmarksIO::OpenFile(QString const & file)
+@@ -208,6 +224,8 @@ void BookmarksIO::exportList(quint64 listId, int fileType)
+   // A page can still show a list or track deleted meanwhile, which the core CHECKs.
+   if (!m_framework.GetBookmarkManager().HasBmCategory(listId))
+     return;
++  ++m_exports;
++  emit busyChanged();
+   m_framework.GetBookmarkManager().PrepareFileForSharing({listId}, MakeSharingHandler(this), ToFileType(fileType));
+ }
+
+@@ -215,11 +233,15 @@ void BookmarksIO::exportTrack(quint64 trackId, int fileType)
+ {
+   if (!m_framework.GetBookmarkManager().HasTrack(trackId))
+     return;
++  ++m_exports;
++  emit busyChanged();
+   m_framework.GetBookmarkManager().PrepareTrackFileForSharing(trackId, MakeSharingHandler(this), ToFileType(fileType));
+ }
+
+ void BookmarksIO::exportAll()
+ {
++  ++m_exports;
++  emit busyChanged();
+   m_framework.GetBookmarkManager().PrepareAllFilesForSharing(MakeSharingHandler(this));
+ }
+
+diff --git a/sailfish/bookmarks_io.hpp b/sailfish/bookmarks_io.hpp
+index 587404ec..43720d81 100644
+--- a/sailfish/bookmarks_io.hpp
++++ b/sailfish/bookmarks_io.hpp
+@@ -30,6 +30,7 @@ class BookmarksIO : public QObject
+   Q_PROPERTY(int backupPeriod READ backupPeriod WRITE setBackupPeriod NOTIFY backupChanged)
+   Q_PROPERTY(QDateTime lastBackup READ lastBackup NOTIFY backupChanged)
+   Q_PROPERTY(bool backingUp READ backingUp NOTIFY backupChanged)
++  Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+
+ public:
+   // The kml::FileType values offered for export.
+@@ -50,6 +51,7 @@ public:
+   void setBackupPeriod(int days);
+   QDateTime lastBackup() const;
+   bool backingUp() const { return m_backingUp; }
++  bool busy() const;
+   QVariantList lists() const;
+
+   // New bookmarks then go to the new list.
+@@ -78,12 +80,14 @@ signals:
+   void backupChanged();
+   void backupFinished(bool success);
+   void listsChanged();
++  void busyChanged();
+
+ private:
+   void OnBackupFile(QString const & path);
+
+   Framework & m_framework;
+   bool m_backingUp = false;
++  int m_exports = 0;
+   // The app may stay open for days, mostly as its cover.
+   QTimer m_backupTimer;
+ };
+diff --git a/sailfish/map_item.cpp b/sailfish/map_item.cpp
+index c3cc0025..fbf77a6b 100644
+--- a/sailfish/map_item.cpp
++++ b/sailfish/map_item.cpp
+@@ -118,6 +118,9 @@ MapItem::MapItem(QQuickItem * parent)
+
+   m_simulationTimer.setInterval(1000);
+   connect(&m_simulationTimer, &QTimer::timeout, this, &MapItem::SimulateLocation);
++  m_framework.SetUserPositionListener([this](bool hasPosition) { OnUserPositionChanged(hasPosition); });
++  WatchRecording();
++  UpdateLocationService();
+ }
+
+ MapItem::~MapItem()
+@@ -130,6 +133,11 @@ MapItem::~MapItem()
+   m_framework.SetUserPositionListener(nullptr);
+   m_framework.GetStorage().Unsubscribe(m_storageSlot);
+   m_locationService->Stop();
++  DestroyEngine();
++}
++
++void MapItem::DestroyEngine()
++{
+   if (!m_contextFactory)
+     return;
+
+@@ -138,6 +146,7 @@ MapItem::~MapItem()
+   m_contextFactory->PrepareToShutdown();
+   m_framework.DestroyDrapeEngine();
+   m_contextFactory.reset();
++  m_skin.reset();
+ }
+
+ void MapItem::zoomIn()
+@@ -564,8 +573,12 @@ void MapItem::OnWindowChanged(QQuickWindow * window)
+   {
+     connect(window, &QWindow::visibleChanged, this, &MapItem::UpdateRenderingState, Qt::UniqueConnection);
+     CreateEngine();
+-    UpdateRenderingState();
+   }
++  else
++  {
++    DestroyEngine();
++  }
++  UpdateRenderingState();
+ }
+
+ void MapItem::OnApplicationStateChanged(Qt::ApplicationState)
+@@ -580,8 +593,10 @@ void MapItem::UpdateRenderingState()
+   // follows the app process, which Sailplay retires on session end.
+   bool const projected = qgetenv("WAYLAND_DISPLAY").contains("imira-comp") &&
+                          qgetenv("SAILPLAY_NAVIGATION_EXPORT") == "1";
+-  bool const inBackground = !projected && QGuiApplication::applicationState() != Qt::ApplicationActive;
+-  if (!m_contextFactory || inBackground == m_inBackground)
++  bool const inBackground =
++      !window() ||
++      (!projected && (!window()->isVisible() || QGuiApplication::applicationState() != Qt::ApplicationActive));
++  if (inBackground == m_inBackground)
+     return;
+
+   m_inBackground = inBackground;
+@@ -639,7 +654,6 @@ void MapItem::CreateEngine()
+
+   m_framework.SetMyPositionModeListener([this](location::EMyPositionMode mode, bool /* routingActive */)
+   { OnMyPositionModeChanged(mode); });
+-  m_framework.SetUserPositionListener([this](bool hasPosition) { OnUserPositionChanged(hasPosition); });
+   m_framework.GetIsolinesManager().SetStateListener([this](IsolinesManager::IsolinesState state)
+   {
+     GetPlatform().RunTask(Platform::Thread::Gui, [self = QPointer<MapItem>(this), state]
+@@ -658,6 +672,7 @@ void MapItem::CreateEngine()
+   // A recording goes on after a restart.
+   WatchRecording();
+   m_framework.EnterForeground();
++  m_inBackground = false;
+   m_contextFactory->WaitForInitialization(nullptr);
+   UpdateWidgetLayout();
+   UpdateVisibleViewport();
+diff --git a/sailfish/map_item.hpp b/sailfish/map_item.hpp
+index 0e8338e1..cc8da663 100644
+--- a/sailfish/map_item.hpp
++++ b/sailfish/map_item.hpp
+@@ -181,6 +181,7 @@ private:
+   void OnApplicationStateChanged(Qt::ApplicationState state);
+   void UpdateRenderingState();
+   void CreateEngine();
++  void DestroyEngine();
+   void Resize(int width, int height);
+   void UpdateWidgetLayout();
+   void UpdateVisibleViewport();
+@@ -224,7 +225,7 @@ private:
+   qreal m_viewportBottomInset = 0;
+   qreal m_leftInset = 0;
+   qreal m_rightInset = 0;
+-  bool m_inBackground = false;
++  bool m_inBackground = true;
+   bool m_locationActive = false;
+   bool m_locationErrorShown = false;
+   bool m_locationLost = false;
+diff --git a/sailfish/map_surface.cpp b/sailfish/map_surface.cpp
+new file mode 100644
+index 00000000..b680b185
+--- /dev/null
++++ b/sailfish/map_surface.cpp
+@@ -0,0 +1,32 @@
++#include "sailfish/map_surface.hpp"
++
++namespace sailfish
++{
++MapSurface::~MapSurface()
++{
++  if (m_map && m_map->parentItem() == this)
++    m_map->setParentItem(nullptr);
++}
++
++void MapSurface::setMap(QQuickItem * map)
++{
++  if (map == m_map)
++    return;
++  if (m_map && m_map->parentItem() == this)
++    m_map->setParentItem(nullptr);
++  m_map = map;
++  if (map)
++  {
++    map->setParentItem(this);
++    map->setSize(QSizeF(width(), height()));
++  }
++  emit mapChanged();
++}
++
++void MapSurface::geometryChanged(QRectF const & newGeometry, QRectF const & oldGeometry)
++{
++  QQuickItem::geometryChanged(newGeometry, oldGeometry);
++  if (m_map && m_map->parentItem() == this)
++    m_map->setSize(newGeometry.size());
++}
++}  // namespace sailfish
+diff --git a/sailfish/map_surface.hpp b/sailfish/map_surface.hpp
+new file mode 100644
+index 00000000..cefc29d0
+--- /dev/null
++++ b/sailfish/map_surface.hpp
+@@ -0,0 +1,30 @@
++#pragma once
++
++#include <QPointer>
++#include <QQuickItem>
++
++namespace sailfish
++{
++// A phone-owned viewport for the application-owned map item. Visual parenting leaves the backend's QObject
++// ownership intact, so destroying the phone page releases only its presentation.
++class MapSurface : public QQuickItem
++{
++  Q_OBJECT
++  Q_PROPERTY(QQuickItem * map READ map WRITE setMap NOTIFY mapChanged)
++
++public:
++  explicit MapSurface(QQuickItem * parent = nullptr) : QQuickItem(parent) {}
++  ~MapSurface() override;
++  QQuickItem * map() const { return m_map; }
++  void setMap(QQuickItem * map);
++
++signals:
++  void mapChanged();
++
++protected:
++  void geometryChanged(QRectF const & newGeometry, QRectF const & oldGeometry) override;
++
++private:
++  QPointer<QQuickItem> m_map;
++};
++}  // namespace sailfish
+diff --git a/sailfish/navigation_export.cpp b/sailfish/navigation_export.cpp
+index 34e13151..38f50beb 100644
+--- a/sailfish/navigation_export.cpp
++++ b/sailfish/navigation_export.cpp
+@@ -69,6 +69,8 @@ NavigationExport::~NavigationExport()
+
+ void NavigationExport::Publish(QJsonObject const & navigation)
+ {
++  m_navigation = navigation;
++  emit changed();
+   if (m_path.isEmpty())
+     return;
+   m_snapshot["navigation"] = navigation;
+diff --git a/sailfish/navigation_export.hpp b/sailfish/navigation_export.hpp
+index cc86b3cc..a8d19e4a 100644
+--- a/sailfish/navigation_export.hpp
++++ b/sailfish/navigation_export.hpp
+@@ -1,23 +1,31 @@
+ #pragma once
+
+ #include <QJsonObject>
++#include <QObject>
+ #include <QString>
+ #include <QTimer>
+
+ namespace sailfish
+ {
+ // Opt-in, process-local snapshots for a projected navigation consumer.
+-class NavigationExport
++class NavigationExport : public QObject
+ {
++  Q_OBJECT
++
+ public:
+   NavigationExport();
+   ~NavigationExport();
+   void Publish(QJsonObject const & navigation);
++  QJsonObject Snapshot() const { return m_navigation; }
++
++signals:
++  void changed();
+
+ private:
+   void Write();
+   QString m_path;
+   QJsonObject m_snapshot;
++  QJsonObject m_navigation{{"state", "idle"}};
+   QTimer m_heartbeat;
+   qint64 m_sequence = 0;
+ };
+diff --git a/sailfish/organicmaps.desktop.in b/sailfish/organicmaps.desktop.in
+index 517dccb4..03567e6f 100644
+--- a/sailfish/organicmaps.desktop.in
++++ b/sailfish/organicmaps.desktop.in
+@@ -9,13 +9,14 @@ MimeType=application/vnd.google-earth.kml+xml;application/vnd.google-earth.kmz;a
+ X-Maemo-Service=@DBUS_SERVICE@
+ X-Maemo-Object-Path=@DBUS_PATH@
+ X-Maemo-Method=@DBUS_SERVICE@.openUrl
++@SAILPLAY_METADATA@
+
+ [X-Sailjail]
+ # Both packages keep their data in the same place, ~/.local/share/app.organicmaps/organicmaps.
+ OrganizationName=app.organicmaps
+ ApplicationName=organicmaps
+ # Sailjail starts the app for the launcher's openUrl calls on OrganizationName.ApplicationName, the X-Maemo-Service.
+-ExecDBus=@APP_NAME@
++ExecDBus=@APP_NAME@ --background
+ # UserDirs and RemovableMedia: imported files, backups and maps on a memory card. Notifications and sharing are in
+ # the base permissions.
+ Permissions=Audio;Internet;Location;UserDirs;RemovableMedia
+diff --git a/sailfish/organicmaps.profile b/sailfish/organicmaps.profile
+index fc06c272..938868a0 100644
+--- a/sailfish/organicmaps.profile
++++ b/sailfish/organicmaps.profile
+@@ -2,6 +2,12 @@
+ # Sailjail profile of Organic Maps, applied with the permissions of organicmaps.desktop. Not in the Harbour
+ # package, which may have no profile of its own.
+
++# Directed SDK updates to the caller's temporary client name.
++dbus-user.call org.sailplay.Client.*=org.sailplay.Session1.StateChanged@/org/sailplay/v1/*
++dbus-user.call org.sailplay.Client.*=org.sailplay.Session1.RequestFinished@/org/sailplay/v1/*
++dbus-user.call org.sailplay.Client.*=org.sailplay.Navigation1.GuidanceChanged@/org/sailplay/v1/*
++dbus-user.call org.sailplay.Client.*=org.freedesktop.DBus.Properties.PropertiesChanged@/org/sailplay/v1/*
++
+ # Voice instructions: Speech Note when installed, which speaks with natural voices.
+ dbus-user.talk org.mkiol.Speech
+ # Opens Speech Note to download voices.
+diff --git a/sailfish/phone_presentation.cpp b/sailfish/phone_presentation.cpp
+new file mode 100644
+index 00000000..746e5098
+--- /dev/null
++++ b/sailfish/phone_presentation.cpp
+@@ -0,0 +1,88 @@
++#include "sailfish/phone_presentation.hpp"
++
++#include "base/logging.hpp"
++
++#include <QEvent>
++#include <QQmlEngine>
++#include <QQmlError>
++#include <QTimer>
++
++#include <utility>
++
++#include <sailfishapp.h>
++
++namespace sailfish
++{
++PhonePresentation::PhonePresentation(QUrl const & source, std::function<void(QQmlContext *)> setup, QObject * parent)
++  : QObject(parent)
++  , m_source(source)
++  , m_setup(std::move(setup))
++{}
++
++PhonePresentation::~PhonePresentation()
++{
++  Close();
++}
++
++bool PhonePresentation::Show()
++{
++  if (m_closing)
++    Close();
++  if (!m_view)
++  {
++    if (m_engine)
++    {
++      m_view = std::make_unique<QQuickView>(m_engine.get(), nullptr);
++      m_view->setTitle(m_title);
++      m_view->setResizeMode(QQuickView::SizeRootObjectToView);
++    }
++    else
++    {
++      m_view.reset(SailfishApp::createView());
++      // Silica's asynchronous component callbacks can outlive their original window.
++      // Keep their engine while releasing and rebuilding the phone QML tree and view.
++      m_engine.reset(m_view->engine());
++      m_engine->setParent(nullptr);
++      m_title = m_view->title();
++    }
++    m_setup(m_view->rootContext());
++    m_view->setSource(m_source);
++    if (m_view->status() != QQuickView::Ready)
++    {
++      for (auto const & error : m_view->errors())
++        LOG(LERROR, (error.toString().toStdString()));
++      m_view.reset();
++      return false;
++    }
++    m_view->installEventFilter(this);
++    emit changed();
++  }
++  m_view->show();
++  m_view->requestActivate();
++  return true;
++}
++
++void PhonePresentation::Close()
++{
++  m_closing = false;
++  if (!m_view)
++    return;
++  m_view->removeEventFilter(this);
++  m_view.reset();
++  emit changed();
++}
++
++bool PhonePresentation::eventFilter(QObject * watched, QEvent * event)
++{
++  if (watched == m_view.get() && event->type() == QEvent::Close && !m_closing)
++  {
++    m_closing = true;
++    QTimer::singleShot(0, this, [this]
++    {
++      if (m_closing)
++        Close();
++    });
++  }
++  return QObject::eventFilter(watched, event);
++}
++}  // namespace sailfish
+diff --git a/sailfish/phone_presentation.hpp b/sailfish/phone_presentation.hpp
+new file mode 100644
+index 00000000..3370e75f
+--- /dev/null
++++ b/sailfish/phone_presentation.hpp
+@@ -0,0 +1,42 @@
++#pragma once
++
++#include <QObject>
++#include <QQuickView>
++#include <QString>
++#include <QUrl>
++
++#include <functional>
++#include <memory>
++
++class QQmlContext;
++class QQmlEngine;
++
++namespace sailfish
++{
++class PhonePresentation : public QObject
++{
++  Q_OBJECT
++  Q_PROPERTY(bool open READ isOpen NOTIFY changed)
++
++public:
++  PhonePresentation(QUrl const & source, std::function<void(QQmlContext *)> setup, QObject * parent = nullptr);
++  ~PhonePresentation() override;
++  bool isOpen() const { return m_view != nullptr; }
++  bool Show();
++  void Close();
++
++signals:
++  void changed();
++
++protected:
++  bool eventFilter(QObject * watched, QEvent * event) override;
++
++private:
++  QUrl m_source;
++  std::function<void(QQmlContext *)> m_setup;
++  QString m_title;
++  std::unique_ptr<QQmlEngine> m_engine;
++  std::unique_ptr<QQuickView> m_view;
++  bool m_closing = false;
++};
++}  // namespace sailfish
+diff --git a/sailfish/qml/Backend.qml b/sailfish/qml/Backend.qml
+new file mode 100644
+index 00000000..5cbcebc5
+--- /dev/null
++++ b/sailfish/qml/Backend.qml
+@@ -0,0 +1,76 @@
++import QtQuick 2.6
++import Nemo.KeepAlive 1.2
++import Nemo.Notifications 1.0
++import "pages/notifications.js" as Notifications
++
++Item {
++    // This tree belongs to the application backend and has no window.
++    KeepAlive {
++        enabled: mapCore.trackRecording || mapCore.routing.navigating || mapCore.routing.building
++                 || downloads.inProgress || bookmarksIO.busy || osmAccount.busy
++    }
++
++    Notification {
++        id: recordingNotification
++        appName: "Organic Maps"
++        appIcon: appInfo.name
++        summary: mapCore.locationLost ? appInfo.localized("current_location_unknown_error_title")
++                                      : appInfo.localized("track_recording")
++        body: mapCore.locationLost ? appInfo.localized("dialog_routing_location_turn_wifi") : ""
++        remoteActions: [Notifications.openApp(),
++                        Notifications.action("stop", appInfo.localized("track_recording_stop_and_save"),
++                                             "stopTrackRecording")]
++    }
++    Connections {
++        target: mapCore
++        onTrackRecordingChanged: {
++            if (mapCore.trackRecording)
++                recordingNotification.publish()
++            else
++                recordingNotification.close()
++        }
++        onLocationLostChanged: if (mapCore.trackRecording) recordingNotification.publish()
++    }
++
++    Notification {
++        id: downloadNotification
++        appName: "Organic Maps"
++        appIcon: appInfo.name
++        summary: appInfo.localized("downloader_downloading") + " " + downloads.downloadingName
++        progress: downloads.downloadingProgress
++        remoteActions: [Notifications.openApp(),
++                        Notifications.action("cancel", appInfo.localized("cancel"), "cancelDownloads")]
++    }
++    Timer {
++        running: downloads.inProgress && downloads.downloadingName !== ""
++        repeat: true
++        triggeredOnStart: true
++        interval: 3000
++        onTriggered: downloadNotification.publish()
++    }
++    Connections {
++        target: downloads
++        onInProgressChanged: if (!downloads.inProgress) downloadNotification.close()
++        onDownloadFailed: {
++            if (Qt.application.state === Qt.ApplicationActive)
++                return
++            failedNotification.body = appInfo.localized("download_country_failed", [name])
++            failedNotification.previewBody = failedNotification.body
++            failedNotification.publish()
++        }
++    }
++    Notification {
++        id: failedNotification
++        appName: "Organic Maps"
++        appIcon: appInfo.name
++        summary: "Organic Maps"
++        previewSummary: summary
++        remoteActions: [Notifications.openApp()]
++    }
++
++    Component.onCompleted: if (mapCore.trackRecording) recordingNotification.publish()
++    Component.onDestruction: {
++        recordingNotification.close()
++        downloadNotification.close()
++    }
++}
+diff --git a/sailfish/qml/organicmaps.qml b/sailfish/qml/organicmaps.qml
+index d0e5282f..9ccdae3e 100644
+--- a/sailfish/qml/organicmaps.qml
++++ b/sailfish/qml/organicmaps.qml
+@@ -1,13 +1,10 @@
+ import QtQuick 2.6
+ import Sailfish.Silica 1.0
+ import Sailfish.Share 1.0
+-import Nemo.KeepAlive 1.2
+-import Nemo.Notifications 1.0
+ import app.organicmaps 1.0
+ import "cover"
+ import "pages"
+ import "pages/notices.js" as Toast
+-import "pages/notifications.js" as Notifications
+
+ ApplicationWindow {
+     id: appWindow
+@@ -29,7 +26,6 @@ ApplicationWindow {
+     allowedOrientations: defaultAllowedOrientations
+     // The virtual car output has no phone camera cutout.
+     defaultPageCutoutMode: sailplayProjected ? 0 : CutoutMode.AvoidLandscapeCutout
+-    Component.onDestruction: downloadNotification.close()
+     Component.onCompleted: {
+         // Phone soft keys reserve a strip even in landscape. The car has its own
+         // navigation and touch controls; change only this projected window.
+@@ -68,7 +64,6 @@ ApplicationWindow {
+             else
+                 activate()
+         }
+-        onCancelDownloadsRequested: downloads.cancelAll()
+     }
+
+     // Offered once, when the user is on the map: e.g. a start by a link opens other pages first.
+@@ -110,47 +105,4 @@ ApplicationWindow {
+         onBusyChanged: offerUpdate()
+     }
+
+-    // Keep the device from suspending while maps download, so a blanked screen doesn't stall them.
+-    KeepAlive {
+-        enabled: downloads.inProgress
+-    }
+-
+-    // No preview, so progress updates stay silent.
+-    Notification {
+-        id: downloadNotification
+-        appName: "Organic Maps"
+-        appIcon: appInfo.name
+-        summary: appInfo.localized("downloader_downloading") + " " + downloads.downloadingName
+-        progress: downloads.downloadingProgress
+-        remoteActions: [Notifications.openApp(),
+-                        Notifications.action("cancel", appInfo.localized("cancel"), "cancelDownloads")]
+-    }
+-    // Progress comes often; the notification follows it every few seconds.
+-    Timer {
+-        running: downloads.inProgress && downloads.downloadingName !== ""
+-        repeat: true
+-        triggeredOnStart: true
+-        interval: 3000
+-        onTriggered: downloadNotification.publish()
+-    }
+-    Connections {
+-        target: downloads
+-        onInProgressChanged: if (!downloads.inProgress) downloadNotification.close()
+-        // Failures are shown in the app; notify only when it is in the background.
+-        onDownloadFailed: {
+-            if (Qt.application.state === Qt.ApplicationActive)
+-                return
+-            failedNotification.body = appInfo.localized("download_country_failed", [name])
+-            failedNotification.previewBody = failedNotification.body
+-            failedNotification.publish()
+-        }
+-    }
+-    Notification {
+-        id: failedNotification
+-        appName: "Organic Maps"
+-        appIcon: appInfo.name
+-        summary: "Organic Maps"
+-        previewSummary: summary
+-        remoteActions: [Notifications.openApp()]
+-    }
+ }
+diff --git a/sailfish/qml/pages/MapPage.qml b/sailfish/qml/pages/MapPage.qml
+index 05e62435..10ad0750 100644
+--- a/sailfish/qml/pages/MapPage.qml
++++ b/sailfish/qml/pages/MapPage.qml
+@@ -1,19 +1,18 @@
+ import QtQuick 2.6
+ import Sailfish.Silica 1.0
+ import Nemo.KeepAlive 1.2
+-import Nemo.Notifications 1.0
+ import app.organicmaps 1.0
+ import "clipboard.js" as ClipboardHelper
+ import "downloads.js" as Downloads
+ import "icons.js" as Icons
+ import "notices.js" as Toast
+-import "notifications.js" as Notifications
+
+ Page {
+     id: page
+
+     // For children, where "map: map" would bind to their own property.
+     readonly property QtObject mapItem: map
++    readonly property QtObject map: mapCore
+     readonly property bool projected: sailplayProjected
+     // Phone theme metrics are too large for a short car viewport, including split view.
+     readonly property real navigationScale: projected
+@@ -124,11 +123,7 @@ Page {
+             page["softKeys"] = Qt.createQmlObject('import Sailfish.Silica 1.0; SoftKeys { overlay: true }', page)
+         if (!projected)
+             map.routing.restoreSavedRoute()
+-        // A recording goes on after a restart.
+-        if (map.trackRecording)
+-            recordingNotification.publish()
+     }
+-    Component.onDestruction: recordingNotification.close()
+
+     // Geometry-only diagnostics; never log route points or place names.
+     Timer {
+@@ -152,33 +147,46 @@ Page {
+         onNavigatingChanged: layoutAudit.restart()
+     }
+
+-    // Recording keeps the device awake.
+-    KeepAlive {
+-        enabled: map.trackRecording || map.routing.navigating
+-    }
+     DisplayBlanking {
+         preventBlanking: (appSettings.keepScreenOn || map.routing.navigating) && Qt.application.active
+     }
+
+
+-    MapItem {
+-        id: map
++    MapSurface {
++        map: mapCore
+         // Silica keeps landscape pages clear of the camera cutout, at the left in Landscape and the right in
+         // LandscapeInverted; the map alone is drawn under it.
+         anchors {
+             fill: parent
+-            leftMargin: -leftInset
+-            rightMargin: -rightInset
++            leftMargin: -mapCore.leftInset
++            rightMargin: -mapCore.rightInset
+         }
+-        leftInset: !page.projected && page.orientation === Orientation.Landscape ? Screen.topCutout.height : 0
+-        rightInset: !page.projected && page.orientation === Orientation.LandscapeInverted ? Screen.topCutout.height : 0
+-        // Keeps the scale line and attribution above the bottom row with its padding, or above the navigation
+-        // panel.
+-        bottomWidgetsOffset: page.navigating ? navigationBottomPanel.height * page.navigationScale
+-                           : bottomButtons.visible ? bottomButtons.height + 2 * page.buttonMargin : 0
+-        topWidgetsOffset: page.topControlsBottom
+-        // Routes are fitted into the map above the open sheets.
+-        viewportBottomInset: page.navigating ? navigationBottomPanel.height * page.navigationScale : page.bottomPanelsSize
++    }
++    Binding {
++        target: mapCore
++        property: "leftInset"
++        value: !page.projected && page.orientation === Orientation.Landscape ? Screen.topCutout.height : 0
++    }
++    Binding {
++        target: mapCore
++        property: "rightInset"
++        value: !page.projected && page.orientation === Orientation.LandscapeInverted ? Screen.topCutout.height : 0
++    }
++    Binding {
++        target: mapCore
++        property: "bottomWidgetsOffset"
++        value: page.navigating ? navigationBottomPanel.height * page.navigationScale
++             : bottomButtons.visible ? bottomButtons.height + 2 * page.buttonMargin : 0
++    }
++    Binding {
++        target: mapCore
++        property: "topWidgetsOffset"
++        value: page.topControlsBottom
++    }
++    Binding {
++        target: mapCore
++        property: "viewportBottomInset"
++        value: page.navigating ? navigationBottomPanel.height * page.navigationScale : page.bottomPanelsSize
+     }
+
+     Connections {
+@@ -195,13 +203,6 @@ Page {
+             message: appInfo.localized("isolines_activation_error_dialog"),
+             acceptAction: function() { pageStack.push(Qt.resolvedUrl("MapsPage.qml")) }
+         })
+-        onTrackRecordingChanged: {
+-            if (map.trackRecording)
+-                recordingNotification.publish()
+-            else
+-                recordingNotification.close()
+-        }
+-        onLocationLostChanged: if (map.trackRecording) recordingNotification.publish()
+     }
+     // Planning a route leaves fullscreen.
+     Connections {
+@@ -463,19 +464,6 @@ Page {
+         }
+     }
+
+-    Notification {
+-        id: recordingNotification
+-        appName: "Organic Maps"
+-        appIcon: appInfo.name
+-        // Without a position the recording stalls.
+-        summary: map.locationLost ? appInfo.localized("current_location_unknown_error_title")
+-                                  : appInfo.localized("track_recording")
+-        body: map.locationLost ? appInfo.localized("dialog_routing_location_turn_wifi") : ""
+-        remoteActions: [Notifications.openApp(),
+-                        Notifications.action("stop", appInfo.localized("track_recording_stop_and_save"),
+-                                             "stopTrackRecording")]
+-    }
+-
+     // Declared before the navigation panel, which covers them while its menu is pulled up.
+     Column {
+         anchors {
+diff --git a/sailfish/routing.cpp b/sailfish/routing.cpp
+index 1f8ea502..8501f8ed 100644
+--- a/sailfish/routing.cpp
++++ b/sailfish/routing.cpp
+@@ -41,6 +41,7 @@
+ #include <QDateTime>
+ #include <QGuiApplication>
+ #include <QJsonObject>
++#include <QPointer>
+ #include <QVariantMap>
+
+ #include <algorithm>
+@@ -327,6 +328,7 @@ Routing::Routing(Framework & framework, QObject * parent)
+   , m_voice(new VoiceGuide(this))
+ {
+   SetupVoice();
++  connect(&m_navigationExport, &NavigationExport::changed, this, &Routing::guidanceChanged);
+   // The framework saves the vehicle style, which stays after the app is closed while navigating.
+   SetNavigationStyle(false);
+   SetupRouteBuildingListener();
+@@ -422,6 +424,12 @@ bool Routing::active() const
+   return m_framework.GetRoutingManager().GetRoutePointsCount() > 0;
+ }
+
++bool Routing::HasBackgroundWork() const
++{
++  return m_navigating || m_building || m_loadingSavedRoute || m_startWhenBuilt || m_voice->IsBusy() ||
++         m_beep.IsPlaying();
++}
++
+ int Routing::routerType() const
+ {
+   return static_cast<int>(m_framework.GetRoutingManager().GetLastUsedRouter());
+@@ -558,13 +566,22 @@ void Routing::SaveRouteForRestart()
+ void Routing::restoreSavedRoute()
+ {
+   auto & manager = m_framework.GetRoutingManager();
+-  if (active() || !manager.HasSavedRoutePoints())
++  if (active() || m_loadingSavedRoute || !manager.HasSavedRoutePoints())
+     return;
+-  manager.LoadRoutePoints([this](bool success)
++  m_loadingSavedRoute = true;
++  auto const generation = m_resultGeneration;
++  auto const self = QPointer<Routing>(this);
++  manager.LoadRoutePoints([self](bool success)
+   {
+-    if (success)
+-      OnPointsChanged();
+-  });
++    GetPlatform().RunTask(Platform::Thread::Gui, [self, success]
++    {
++      if (!self)
++        return;
++      self->m_loadingSavedRoute = false;
++      if (success)
++        self->OnPointsChanged();
++    });
++  }, [self, generation] { return self && self->m_resultGeneration == generation; });
+ }
+
+ void Routing::start()
+@@ -892,8 +909,12 @@ void Routing::UpdateNavigation(double speedMps)
+
+   auto const points = manager.GetRoutePoints();
+   m_navigationExport.Publish(
+-      {{"state", "active"}, {"routerType", routerType()}, {"turn", static_cast<int>(info.m_turn)},
+-       {"exitNumber", static_cast<int>(info.m_exitNum)}, {"remainingSeconds", std::max(0, info.m_time)},
++      {{"state", "active"},
++       {"routerType", routerType()},
++       {"turn", static_cast<int>(info.m_turn)},
++       {"pedestrianTurn", static_cast<int>(info.m_pedestrianTurn)},
++       {"exitNumber", static_cast<int>(info.m_exitNum)},
++       {"remainingSeconds", std::max(0, info.m_time)},
+        {"currentRoad", QString::fromStdString(info.m_currentStreetName)},
+        {"nextRoad", QString::fromStdString(info.m_nextStreetName)},
+        {"destination", points.empty() ? QString() : QString::fromStdString(points.back().m_title)},
+diff --git a/sailfish/routing.hpp b/sailfish/routing.hpp
+index 83e97dea..b41b5213 100644
+--- a/sailfish/routing.hpp
++++ b/sailfish/routing.hpp
+@@ -161,12 +161,14 @@ public:
+   bool routeSaved() const { return m_routeSaved; }
+   bool navigating() const { return m_navigating; }
+   QVariantMap navigation() const { return m_navigation; }
++  QJsonObject NavigationSnapshot() const { return m_navigationExport.Snapshot(); }
+   bool darkOutside() const { return m_darkOutside; }
+
+   // Called on every location update.
+   void UpdateNavigation(double speedMps);
+   // Rebuilds a route that failed for lack of a position.
+   void OnPositionFound();
++  bool HasBackgroundWork() const;
+
+   // Use the place shown in the place page.
+   Q_INVOKABLE void routeFromPlace();
+@@ -234,6 +236,7 @@ signals:
+   void navigatingChanged();
+   // With every position while navigating.
+   void navigationChanged();
++  void guidanceChanged();
+   void voiceChanged();
+   void disclaimerChanged();
+   void pickChanged();
+@@ -280,6 +283,7 @@ private:
+   Framework & m_framework;
+   NavigationExport m_navigationExport;
+   bool m_building = false;
++  bool m_loadingSavedRoute = false;
+   bool m_buildCancelled = false;
+   // Changes on every build and close, so that a queued result of an earlier one is dropped.
+   uint32_t m_resultGeneration = 0;
+diff --git a/sailfish/rpm/organicmaps.spec b/sailfish/rpm/organicmaps.spec
+index 233d7434..dfbde43d 100644
+--- a/sailfish/rpm/organicmaps.spec
++++ b/sailfish/rpm/organicmaps.spec
+@@ -1,6 +1,7 @@
+ # The Jolla Harbour package, harbour-organicmaps without voice instructions, is built with "--with harbour",
+ # e.g. sfdk build -- --with harbour.
+ %bcond_with harbour
++%bcond_with sailplay
+
+ Name:       %{?with_harbour:harbour-}organicmaps
+ Summary:    Offline maps and navigation based on OpenStreetMap
+@@ -9,7 +10,11 @@ Summary:    Offline maps and navigation based on OpenStreetMap
+ Version:    %(bash tools/unix/version.sh ios_version)
+ Release:    %(bash tools/unix/version.sh count)
+ # The map data files are under DATA_LICENSE.txt.
++%if %{with sailplay}
++License:    Apache-2.0 AND GPL-3.0-or-later
++%else
+ License:    Apache-2.0
++%endif
+ URL:        https://organicmaps.app
+ # For source package builds, e.g. Chum's OBS; sfdk builds in place, where %%setup does nothing.
+ Source0:    %{name}-%{version}.tar.bz2
+@@ -29,6 +34,9 @@ BuildRequires:  pkgconfig(sailfishapp)
+ BuildRequires:  pkgconfig(glesv2)
+ BuildRequires:  pkgconfig(mlite5)
+ BuildRequires:  pkgconfig(libpulse-simple)
++%if %{with sailplay}
++%{!?sailplay_sdk_qt_dir:BuildRequires: harbour-sailplay >= 0.1.1-64}
++%endif
+ # QML modules, the linked Qt libraries are found automatically. Harbour allows no Requires for the other
+ # imported modules, which are on every device.
+ Requires:       sailfishsilica-qt5
+@@ -72,6 +80,8 @@ cmake -S . -B build -G Ninja \
+   -DCMAKE_INSTALL_PREFIX=%{_prefix} \
+   -DSAILFISH=ON \
+   -DSAILFISH_HARBOUR=%{?with_harbour:ON}%{!?with_harbour:OFF} \
++  -DSAILPLAY=%{?with_sailplay:ON}%{!?with_sailplay:OFF} \
++  %{?sailplay_sdk_qt_dir:-DSAILPLAY_SDK_QT_DIR=%{sailplay_sdk_qt_dir}} \
+   -DBUILD_TESTING=OFF
+ cmake --build build --target organicmaps_sailfish
+
+diff --git a/sailfish/sailplay_navigation.cpp b/sailfish/sailplay_navigation.cpp
+new file mode 100644
+index 00000000..61941709
+--- /dev/null
++++ b/sailfish/sailplay_navigation.cpp
+@@ -0,0 +1,58 @@
++#include "sailfish/sailplay_navigation.hpp"
++
++#include "sailplayprovider.h"
++
++#include <QStringList>
++#include <QVector>
++
++#include <algorithm>
++
++namespace sailfish
++{
++namespace
++{
++QString BoundedText(QString const & text)
++{
++  auto points = text.toUcs4();
++  points.erase(std::remove(points.begin(), points.end(), 0), points.end());
++  return QString::fromUcs4(points.constData(), std::min(1024, points.size()));
++}
++
++double DistanceMeters(QJsonObject const & navigation, QString const & value, QString const & unit)
++{
++  // platform::Distance::Units. Keep the SDK distance in meters independently of phone formatting.
++  double constexpr factors[] = {1, 1000, 0.3048, 1609.344};
++  int const index = navigation.value(unit).toInt(-1);
++  return index >= 0 && index < 4 ? navigation.value(value).toDouble() * factors[index] : 0;
++}
++}  // namespace
++
++QVariantMap SailplayGuidance(QJsonObject const & navigation)
++{
++  auto guidance = SailplayProvider::navigationGuidance(navigation.value("state").toString("idle"));
++  if (guidance.value("state") != "active")
++    return guidance;
++
++  // routing::turns::CarDirection keeps these numeric values stable across platforms.
++  QStringList const maneuvers = {
++      "unknown",          "continue",        "turn-right",          "sharp-right", "slight-right",
++      "turn-left",        "sharp-left",      "slight-left",         "uturn",       "uturn",
++      "roundabout-enter", "roundabout-exit", "roundabout-continue", "unknown",     "arrive",
++      "exit-left",        "exit-right"};
++  QStringList const pedestrianManeuvers = {"unknown", "continue", "turn-right", "turn-left", "arrive"};
++  QStringList const modes = {"driving", "walking", "cycling", "transit"};
++  int const type = navigation.value("routerType").toInt();
++  int const turn = navigation.value("turn").toInt();
++  guidance["mode"] = modes.value(type, "driving");
++  guidance["maneuver"] = type == 1 ? pedestrianManeuvers.value(navigation.value("pedestrianTurn").toInt(), "unknown")
++                                   : maneuvers.value(turn, "unknown");
++  guidance["drivingSide"] = turn == 9 ? "left" : "right";
++  guidance["exitNumber"] = static_cast<uint>(navigation.value("exitNumber").toDouble());
++  guidance["remainingSeconds"] = static_cast<qulonglong>(navigation.value("remainingSeconds").toDouble());
++  guidance["nextDistanceMeters"] = DistanceMeters(navigation, "nextDistance", "nextDistanceUnit");
++  guidance["remainingDistanceMeters"] = DistanceMeters(navigation, "remainingDistance", "remainingDistanceUnit");
++  for (auto const & field : {"currentRoad", "nextRoad", "destination"})
++    guidance[field] = BoundedText(navigation.value(field).toString());
++  return guidance;
++}
++}  // namespace sailfish
+diff --git a/sailfish/sailplay_navigation.hpp b/sailfish/sailplay_navigation.hpp
+new file mode 100644
+index 00000000..20e234f8
+--- /dev/null
++++ b/sailfish/sailplay_navigation.hpp
+@@ -0,0 +1,9 @@
++#pragma once
++
++#include <QJsonObject>
++#include <QVariantMap>
++
++namespace sailfish
++{
++QVariantMap SailplayGuidance(QJsonObject const & navigation);
++}  // namespace sailfish
+diff --git a/sailfish/url_handler.cpp b/sailfish/url_handler.cpp
+index 095e2c15..fa1c5e0c 100644
+--- a/sailfish/url_handler.cpp
++++ b/sailfish/url_handler.cpp
+@@ -54,8 +54,16 @@ void DBusInbox::OpenInRunningApp(QStringList const & urls)
+ void DBusInbox::SetHandler(UrlHandler & handler)
+ {
+   m_handler = &handler;
+-  if (!m_queued.isEmpty())
++  if (m_activationQueued)
++  {
++    m_activationQueued = false;
+     handler.openUrl(std::exchange(m_queued, {}));
++  }
++  if (m_closeQueued)
++  {
++    m_closeQueued = false;
++    emit handler.phoneCloseRequested();
++  }
+ }
+
+ void DBusInbox::openUrl(QStringList const & urls)
+@@ -63,7 +71,24 @@ void DBusInbox::openUrl(QStringList const & urls)
+   if (m_handler)
+     m_handler->openUrl(urls);
+   else
++  {
+     m_queued.append(urls);
++    m_activationQueued = true;
++    m_closeQueued = false;
++  }
++}
++
++void DBusInbox::Show()
++{
++  openUrl({});
++}
++
++void DBusInbox::Close()
++{
++  if (m_handler)
++    emit m_handler->phoneCloseRequested();
++  else
++    m_closeQueued = true;
+ }
+
+ void DBusInbox::cancelDownloads()
+diff --git a/sailfish/url_handler.hpp b/sailfish/url_handler.hpp
+index 0c9c9da5..2c4ccbcb 100644
+--- a/sailfish/url_handler.hpp
++++ b/sailfish/url_handler.hpp
+@@ -30,6 +30,8 @@ public:
+ public slots:
+   // The X-Maemo-Method of organicmaps.desktop.
+   Q_SCRIPTABLE void openUrl(QStringList const & urls);
++  Q_SCRIPTABLE void Show();
++  Q_SCRIPTABLE void Close();
+   // Notification actions.
+   Q_SCRIPTABLE void cancelDownloads();
+   Q_SCRIPTABLE void stopTrackRecording();
+@@ -37,6 +39,8 @@ public slots:
+ private:
+   UrlHandler * m_handler = nullptr;
+   QStringList m_queued;
++  bool m_activationQueued = false;
++  bool m_closeQueued = false;
+ };
+
+ // Opens bookmark and track files, and geo:, om://, ge0:// and https://omaps.app links. They come as arguments or
+@@ -59,6 +63,7 @@ public:
+
+ signals:
+   void activated();
++  void phoneCloseRequested();
+   // Points as {lat, lon, name}, from start to finish.
+   void routeRequested(int routerType, QVariantList const & points);
+   // The locale is empty when the link has none.
+diff --git a/sailfish/voice_guide.hpp b/sailfish/voice_guide.hpp
+index 18d0b15b..7a511b6c 100644
+--- a/sailfish/voice_guide.hpp
++++ b/sailfish/voice_guide.hpp
+@@ -38,6 +38,11 @@ public:
+   ~VoiceGuide() override;
+
+   bool IsAvailable() const { return !m_language.empty(); }
++  bool IsBusy() const
++  {
++    return !m_queue.isEmpty() || m_speechNotePending || m_speechNoteRequestsToStop > 0 ||
++           m_process.state() != QProcess::NotRunning || m_player.IsPlaying() || m_resumeTimer.isActive();
++  }
+   // Empty without a voice.
+   std::string const & Language() const { return m_language; }
+   // Turn notification languages with a voice, in the core order.

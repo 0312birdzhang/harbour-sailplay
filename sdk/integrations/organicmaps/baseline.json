@@ -1,0 +1,174 @@
+{
+  "source_repository": "https://github.com/0312birdzhang/organicmaps-sailfish",
+  "baseline_commit": "abcdd8c3d518973d74d1d967c1f6d6ba34e500bf",
+  "integrated_commit": "b40a00d89a665b06374371b9b5e8914139174231",
+  "patch": "lifecycle.patch",
+  "patch_sha256": "a01c66666a893019a4922ab697fec9aa3881311e61c4a4d9a071b186aa486186",
+  "files": [
+    {
+      "path": "libs/map/framework.cpp",
+      "before": "691509cd0d9b0653d61a54f5e34f30dfc59d3524cc5fb14fa9202bb9bc727b20",
+      "after": "cf71dac86aa486cb9c9887a0fc3874486a442475b87d8fc13afed2bf873dab92"
+    },
+    {
+      "path": "libs/map/map_tests/CMakeLists.txt",
+      "before": "9af4592f1bf60465256143e28eacab6e5c9ffd1351971c7b7464de7f14f3dd55",
+      "after": "e0bd8fd922172ad9c7f07d73a4bf3c21840cd1980ec576d49660ebcc150bcfee"
+    },
+    {
+      "path": "libs/map/map_tests/framework_location_tests.cpp",
+      "before": null,
+      "after": "42ccc24c9e0c517605726ccb323bd871d30cebf9b4da2edfef06d652d71f724c"
+    },
+    {
+      "path": "libs/map/map_tests/routing_manager_tests.cpp",
+      "before": "ddbcd3bd4925fd6fed3d49ea5d5bb375a440b0600f2fdaa01f6052e9e2635d6b",
+      "after": "ec3cf30a118287028b849705c582291331646e6ba7e5dff451ffab3e1edc41c9"
+    },
+    {
+      "path": "libs/map/routing_manager.cpp",
+      "before": "63e8c5921a196eed15937956ed1e17da801c603c0fa6be4ec46a697efbc5c883",
+      "after": "6887f8e735a9c0f5cc6f641d6e8bf7caad551bd6af4016957d95df9505b47bbe"
+    },
+    {
+      "path": "libs/map/routing_manager.hpp",
+      "before": "59fb3fe39150a396c200860404b0b35bd45ae339ab0a52675d3024474ba387ca",
+      "after": "deea838be0778929b14d3d4fc523a579d59901492b70cdb8a2f8728647440df0"
+    },
+    {
+      "path": "qt/qt_common/qtoglcontextfactory.cpp",
+      "before": "4158765bfd6aad6ad100e2d877a9e15447a508de7c6d8140bda6997eaffd92d5",
+      "after": "56bdbd63c51247ec1dc8385a5857b8d8c093778c9afcdacd70df1e1b8a57609b"
+    },
+    {
+      "path": "qt/qt_common/qtoglcontextfactory.hpp",
+      "before": "e9d38e24e9dfed92b170e2d746bdb1f57f79b956ae56f83d78ce1a0938d33324",
+      "after": "fa9e0ff1165b1ecb0561af6a201758b54400a8d7526d00e77d220dd2073d792f"
+    },
+    {
+      "path": "sailfish/CMakeLists.txt",
+      "before": "af22dd6da2e97ba671e72cdddd38c2c4709614a0bc1fa2dc15be0378afaf6e81",
+      "after": "3dbd952ec8a54228ae4bd22e16d6fd22792f03572b74cf5970af4d92322914e3"
+    },
+    {
+      "path": "sailfish/app.cpp",
+      "before": "7f6064521588344bf14221e6bfbc4d632d7e1c1736d3f8da122e0e52468e34ae",
+      "after": "90a55be5f328b9c0fdc4614aae1487cfe73ea5658ff598bcf3834e62b8168e43"
+    },
+    {
+      "path": "sailfish/bookmarks_io.cpp",
+      "before": "ab8418c02bf810d6ca12a9149644f51cce70927e768ca9bf9fd4a9d1387f3627",
+      "after": "0c9879f5c8c42fe8df3cd1a17bf50a3b2fad2d1b374bf60c719bc90c94ed0998"
+    },
+    {
+      "path": "sailfish/bookmarks_io.hpp",
+      "before": "dec916957c637bf66f9e60c21a89e85d36ba5cbbb2aa5230bb115d9a499d35dd",
+      "after": "2e635f2d5a85130ea408a13c38eeb5e5c23e27e867ddadcd3e8bc0c2522bf286"
+    },
+    {
+      "path": "sailfish/map_item.cpp",
+      "before": "441da60c388f782ebf4416015f7eb8df90fc9737e4af0f08d23e5d3da3e3c887",
+      "after": "0641bf7ab213b446ec55b58a14b2168cdb96bb69756e0c525fef1e7f6ee25c20"
+    },
+    {
+      "path": "sailfish/map_item.hpp",
+      "before": "126843533f635eafdd97e1138fa48f0d57cee82f74a385591479e368a859121a",
+      "after": "c166cb6bdb2bab4328177132971c32f1045b89b14553940ad485d8e823d5a5e0"
+    },
+    {
+      "path": "sailfish/map_surface.cpp",
+      "before": null,
+      "after": "a2a56f06c9057d4066f0da7b0c7d06432cc508951db109d6a0c3575e59dba8a4"
+    },
+    {
+      "path": "sailfish/map_surface.hpp",
+      "before": null,
+      "after": "6073db6ea730c7e78e461bf45af413254c6efcae1ec993166e268e37b9ae040a"
+    },
+    {
+      "path": "sailfish/navigation_export.cpp",
+      "before": "9ed10e370715cbd29938c7a18c479012191f261f342d747dc8b2fd3dc175d031",
+      "after": "23d3c6567383e1104450b2554f7a16f336544edbe5f4250c67fcd6f3bde984b4"
+    },
+    {
+      "path": "sailfish/navigation_export.hpp",
+      "before": "0231eef816b7d15ec430e04d396c32193ecf3ef2a714f7f8cf42027a4c08cb31",
+      "after": "8a3a06c3bb3f5f5e86aeb4bec5a0921868824045223c5b4a227cd2f09b38db1c"
+    },
+    {
+      "path": "sailfish/organicmaps.desktop.in",
+      "before": "561c86dd7d963033700087abfc8af6ff151cd0435eba0042d461322ee0cd8a25",
+      "after": "e6f6b0f213d07ecec82854620aabe8cd4631e86c9a84b7c3a4c5bfa3d5e70ae2"
+    },
+    {
+      "path": "sailfish/organicmaps.profile",
+      "before": "ded9de76b24538fdedc7291bea4ae22d80f71affc51dcf2b72e4c60f96b6d33b",
+      "after": "e7be94f0bde0f36ff5e12a6df32239ed93031b959f1c6aa21bda0418c8260b9a"
+    },
+    {
+      "path": "sailfish/phone_presentation.cpp",
+      "before": null,
+      "after": "ccf65cdd1d285b297e014d1a7e0ca66a7899187525b863b18365efa0903adf60"
+    },
+    {
+      "path": "sailfish/phone_presentation.hpp",
+      "before": null,
+      "after": "1ddc17b3989721e03d2615d65fdd41452aa2aeff9bb3cd90b67b9fac8f1f6f7c"
+    },
+    {
+      "path": "sailfish/qml/Backend.qml",
+      "before": null,
+      "after": "b0b30db8d0e603c2ef65ff1062029dbea21dc0ad8b1a22daeed94b56d364426e"
+    },
+    {
+      "path": "sailfish/qml/organicmaps.qml",
+      "before": "679bd4d5c4a324b2a132595aaa0f84b168a7661902d8b3362ad4363e2eace046",
+      "after": "6bd7ae7a7d28ad287df0d4d62be8b9a4988e793751e419ae167239b478176f25"
+    },
+    {
+      "path": "sailfish/qml/pages/MapPage.qml",
+      "before": "63835fc72f82b269f126ee5f8efe89e9897d57d11d42ddc985dffd5c49fbba7e",
+      "after": "6944bcc882ecdb3e5081851418a98da554270569b6d988aa723b8a7879679999"
+    },
+    {
+      "path": "sailfish/routing.cpp",
+      "before": "bb556ca01704c5d3370064b3a9ea71b9adfcc6aa0359b986de764c3c427fa8b5",
+      "after": "f8123fc8ea4987053ed06931717e6eeb0f62301b61d37f6ff906c78c802c5334"
+    },
+    {
+      "path": "sailfish/routing.hpp",
+      "before": "6d76c13419dba48b9de14e58994353af0e85c6567d525d74940486c4892f5393",
+      "after": "cea258e194afcca0a1ea3971563ef4e4ad42cc7abc2558125d5b6e980cc84bcc"
+    },
+    {
+      "path": "sailfish/rpm/organicmaps.spec",
+      "before": "cf223dc58ef1e80ed8a47d7f77b0394ad316c8629a2602195bfbf9e2018aa672",
+      "after": "6a65d94297f7d07d3ef654112536fb85d9570ede927338a2765995d50024c83d"
+    },
+    {
+      "path": "sailfish/sailplay_navigation.cpp",
+      "before": null,
+      "after": "764a982e2ec4d1338007e63dbcc8d88f47155dd8efeaa862e295f5eebfe501ec"
+    },
+    {
+      "path": "sailfish/sailplay_navigation.hpp",
+      "before": null,
+      "after": "57e34e748c322cd9b7c136abe07f82a72e275df13dff2bfe02ca2ebe424611f4"
+    },
+    {
+      "path": "sailfish/url_handler.cpp",
+      "before": "c4f8c888d1a6d3d3b2aa7d69b3861055fab84b4bb29f58711a9d9150115767f5",
+      "after": "f87e8449dff1e4363748e4c54c5d3f7142a3d1a64595e4b1405b8f8a1aed8e64"
+    },
+    {
+      "path": "sailfish/url_handler.hpp",
+      "before": "307352666c82da0b7e2360cd6e4b223a44c2bcf829a9552ad485c0acb6288082",
+      "after": "b47d224eb593ea24df3ba1c90391f31a161c4af28f11572a4d6ac745c9315534"
+    },
+    {
+      "path": "sailfish/voice_guide.hpp",
+      "before": "d8bd57ec29ea8cdbc81f04902b3d25e26833e710dd3bc9fbf32da7928d539109",
+      "after": "0a49a08554fb3467189d6786f3546b8926214b8bd2b0f743033b012695f58eff"
+    }
+  ]
+}

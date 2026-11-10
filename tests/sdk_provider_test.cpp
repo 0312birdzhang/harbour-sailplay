@@ -1,4 +1,5 @@
 #include "sailplayprovider.h"
+#include "sailplaysession.h"
 #include "musichost.h"
 
 #include <QCoreApplication>
@@ -52,6 +53,11 @@ QString open(const QDBusConnection &bus, const QString &presentation = QStringLi
         QVariantList() << presentation << (QStringList() << QStringLiteral("media")));
     CHECK(reply.type() == QDBusMessage::ReplyMessage && reply.arguments().size() == 1);
     return qvariant_cast<QDBusObjectPath>(reply.arguments().first()).path();
+}
+
+QStringList clientNames(const QDBusConnection &bus)
+{
+    return bus.interface()->registeredServiceNames().value().filter(QStringLiteral("org.sailplay.Client.c"));
 }
 }
 
@@ -177,6 +183,32 @@ int main(int argc, char **argv)
     CHECK(waitFor([&]() { return abandonedChanges > 0; }));
     CHECK(provider.sessionCount() == 0);
     QObject::disconnect(abandonedConnection);
+    const auto originalNames = clientNames(bus);
+    {
+        SailplaySession first(owner), second(owner);
+        first.open(service, appPath, QStringLiteral("car"), QStringList() << QStringLiteral("media"));
+        CHECK(clientNames(bus).size() == originalNames.size() + 1);
+        const auto firstNames = clientNames(bus);
+        second.open(service, appPath, QStringLiteral("phone"));
+        CHECK(clientNames(bus).size() == originalNames.size() + 2);
+        CHECK(waitFor([&]() { return first.ready() && second.ready(); }));
+        CHECK(provider.sessionCount() == 2);
+        second.close();
+        second.close();
+        CHECK(clientNames(bus) == firstNames);
+        first.open(service, appPath);
+        CHECK(clientNames(bus).size() == originalNames.size() + 1);
+        CHECK(waitFor([&]() { return first.ready() && provider.sessionCount() == 1; }));
+    }
+    CHECK(clientNames(bus) == originalNames);
+    CHECK(waitFor([&]() { return provider.sessionCount() == 0; }));
+    {
+        SailplaySession unavailable{QDBusConnection(QStringLiteral("sdk-client-unconnected"))};
+        int failures = 0;
+        QObject::connect(&unavailable, &SailplaySession::errorOccurred, [&]() { ++failures; });
+        unavailable.open(service, appPath);
+        CHECK(failures == 1 && clientNames(bus) == originalNames && provider.sessionCount() == 0);
+    }
     QTemporaryDir temporary;
     CHECK(temporary.isValid());
     QFile desktop(temporary.path() + QStringLiteral("/media.desktop"));
@@ -206,6 +238,7 @@ int main(int argc, char **argv)
     CHECK(first.start() && firstBus.registerService(replacement.service));
     music.open(replacement);
     CHECK(waitFor([&]() { return provider.sessionCount() == 0 && first.sessionCount() == 1; }));
+    const auto reconnectNames = clientNames(bus);
     first.close();
     firstBus.unregisterService(replacement.service);
     waitFor([&]() { return false; }, 30);
@@ -214,6 +247,7 @@ int main(int argc, char **argv)
     CHECK(second.start() && secondBus.registerService(replacement.service));
     CHECK(first.instanceId() != second.instanceId());
     CHECK(waitFor([&]() { return second.sessionCount() == 1; }));
+    CHECK(clientNames(bus) == reconnectNames);
     music.open(replacement);
     CHECK(second.sessionCount() == 1);
     music.close();
@@ -223,6 +257,7 @@ int main(int argc, char **argv)
     music.close();
     CHECK(waitFor([&]() { return provider.sessionCount() == 0; }));
     CHECK(errors == 0);
+    CHECK(clientNames(bus) == originalNames);
     puts("QT_SDK_PROVIDER_PASS canonical-signatures caller-ownership directed-signals hidden-leases owner-loss limits media-host activity backend-replacement teardown");
     return 0;
 }
