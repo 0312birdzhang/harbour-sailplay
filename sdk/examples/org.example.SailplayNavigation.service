@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=org.example.SailplayNavigation
+Exec=/usr/bin/python3 /usr/share/sailplay-sdk/examples/navigation-service.py

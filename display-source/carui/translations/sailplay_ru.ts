@@ -3,6 +3,46 @@
   <context>
     <name>Sailplay</name>
     <message>
+      <source>Connecting navigation</source>
+      <translation>Подключение навигации</translation>
+    </message>
+    <message>
+      <source>Ready for navigation</source>
+      <translation>Навигация готова</translation>
+    </message>
+    <message>
+      <source>Navigation unavailable</source>
+      <translation>Навигация недоступна</translation>
+    </message>
+    <message>
+      <source>Navigation stopped</source>
+      <translation>Навигация остановлена</translation>
+    </message>
+    <message>
+      <source>You have arrived</source>
+      <translation>Вы прибыли в пункт назначения</translation>
+    </message>
+    <message>
+      <source>Stop navigation</source>
+      <translation>Остановить навигацию</translation>
+    </message>
+    <message>
+      <source>%1 min</source>
+      <translation>%1 мин.</translation>
+    </message>
+    <message>
+      <source>Could not publish navigation guidance</source>
+      <translation>Не удалось опубликовать навигационные указания</translation>
+    </message>
+    <message>
+      <source>Navigation provider identity does not match its desktop declaration</source>
+      <translation>Идентификатор поставщика навигации не совпадает с его декларацией приложения</translation>
+    </message>
+    <message>
+      <source>Navigation provider returned invalid guidance</source>
+      <translation>Поставщик навигации вернул недопустимые указания</translation>
+    </message>
+    <message>
       <source>Projection protocol</source>
       <translation>Протокол проекции</translation>
     </message>

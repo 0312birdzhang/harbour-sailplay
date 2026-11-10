@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Sailplay SDK navigation
+Icon=icon-m-navigation
+Exec=/usr/bin/python3 /usr/share/sailplay-sdk/examples/navigation-service.py
+ExecDBus=/usr/bin/python3 /usr/share/sailplay-sdk/examples/navigation-service.py
+Categories=Navigation;
+X-Sailplay-Service=org.example.SailplayNavigation
+X-Sailplay-ObjectPath=/org/sailplay/v1/App
+X-Sailplay-ApiVersion=1
+X-Sailplay-Capabilities=navigation;
+X-Sailplay-Presentation=template
+
+[X-Sailjail]
+OrganizationName=org.example
+ApplicationName=SailplayNavigation
+Permissions=

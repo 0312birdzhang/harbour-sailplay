@@ -18,7 +18,24 @@ def state_copy(state):
     if not isinstance(state, dict) or any(not isinstance(key, str) or not key or '\0' in key
                                            for key in state):
         raise Fault('InvalidArgument', 'state must be a dictionary with nonempty string keys')
-    return copy.deepcopy(state)
+    return _copy_value(state)
+
+
+def _copy_value(value):
+    if isinstance(value, dict):
+        result = {copy.deepcopy(key): _copy_value(item) for key, item in value.items()}
+    elif isinstance(value, list):
+        result = [_copy_value(item) for item in value]
+    elif isinstance(value, tuple):
+        result = tuple(_copy_value(item) for item in value)
+    else:
+        return copy.deepcopy(value)
+    if hasattr(value, 'variant_level'):
+        keywords = {'variant_level': value.variant_level}
+        if hasattr(value, 'signature'):
+            keywords['signature'] = value.signature
+        return type(value)(result, **keywords)
+    return result
 
 
 class SessionRecord:

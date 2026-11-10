@@ -1,21 +1,17 @@
-"""Subscription-gated Organic Maps to iAP2 guidance, on the existing link queue."""
+"""Subscription-gated provider-neutral guidance on the existing iAP2 link queue."""
 import logging
 from .navigation import route_update, maneuver_information
+from .navigationadapter import meters, organicmaps_snapshot
 
-# Organic Maps CarDirection -> Apple RouteGuidanceManeuverType.
-# DiPlay BydManeuverCodes and its iPhone fixtures provide the receiver vocabulary.
-TURNS = {0: 0, 1: 3, 2: 2, 3: 48, 4: 14, 5: 1, 6: 47, 7: 13,
-         8: 4, 9: 4, 10: 6, 11: 7, 12: 6, 13: 0, 14: 10, 15: 13, 16: 14}
-
-
-def meters(value, unit):
-    return min(0xffffffff, round(value * (1, 1000, .3048, 1609.344)[unit]))
+# Navigation1 maneuver names use the receiver vocabulary verified with DiPlay.
+MANEUVERS = {'unknown': 0, 'continue': 3, 'slight-right': 2, 'turn-right': 48,
+             'sharp-right': 14, 'slight-left': 1, 'turn-left': 47, 'sharp-left': 13,
+             'uturn': 4, 'roundabout-enter': 6, 'roundabout-exit': 7,
+             'roundabout-continue': 6, 'arrive': 10, 'exit-left': 13, 'exit-right': 14}
 
 
 def display(value):
-    # iAP2 display units differ from Organic Maps: 0 kilometers, 2 meters.
-    # HSAE maps raw 0 -> internal 2 (km), raw 2 -> internal 0 (m).
-    # Normalize imperial inputs to meters before selecting the display unit.
+    # HSAE maps iAP2 unit 0 to kilometers and unit 2 to meters.
     return (format(value / 1000, '.1f'), 0) if value >= 1000 else (str(value), 2)
 
 
@@ -38,8 +34,10 @@ class NavigationSender:
         if component != self.component:
             self.reset()
             self.component = component
+        if snapshot and 'turn' in snapshot['navigation']:
+            snapshot = organicmaps_snapshot(snapshot)
         nav = snapshot['navigation'] if snapshot else {}
-        if nav.get('state') != 'active':
+        if nav.get('state') != 'active' or nav.get('mode', 'driving') != 'driving':
             if not self.active:
                 return []
             self.active = False
@@ -49,18 +47,17 @@ class NavigationSender:
             logging.info('navigation tx clear component=%s reason=%s', component, nav.get('state', 'expired'))
             return [route_update(2, 0, '', '', 0, '0', 2, '0', 2,
                                  component=component, next_meters=0, remaining_meters=0)]
-        signature = (snapshot['pid'], snapshot['startTicks'], snapshot['sequence'])
+        signature = (snapshot['providerId'], snapshot['instanceId'], snapshot['sequence'])
         if signature == self.last:
             return []
-        next_m = meters(nav['nextDistance'], nav['nextDistanceUnit'])
-        remaining_m = meters(nav['remainingDistance'], nav['remainingDistanceUnit'])
+        next_m = round(min(0xffffffff, nav['nextDistanceMeters']))
+        remaining_m = round(min(0xffffffff, nav['remainingDistanceMeters']))
         next_text, next_unit = display(next_m)
         remaining_text, remaining_unit = display(remaining_m)
-        turn = TURNS[nav['turn']]
-        if nav['turn'] == 11 and 1 <= nav['exitNumber'] <= 19:
+        turn = MANEUVERS[nav['maneuver']]
+        if nav['maneuver'] == 'roundabout-exit' and 1 <= nav['exitNumber'] <= 19:
             turn = 27 + nav['exitNumber']
-        # Right-hand traffic by default; UTurnRight uses the left-hand variant.
-        side = 1 if nav['turn'] == 9 else 0
+        side = 1 if nav['drivingSide'] == 'left' else 0
         result = [maneuver_information(turn, nav['nextRoad'], side, component, 0),
                   route_update(1, 1, nav['currentRoad'], nav['destination'],
                                min(nav['remainingSeconds'], 0xffffffffffffffff),

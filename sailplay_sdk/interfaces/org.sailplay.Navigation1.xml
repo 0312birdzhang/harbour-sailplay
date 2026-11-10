@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+  "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="org.sailplay.Navigation1">
+    <method name="GetGuidance">
+      <arg name="revision" type="t" direction="out"/>
+      <arg name="guidance" type="a{sv}" direction="out"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out1" value="QVariantMap"/>
+    </method>
+    <signal name="GuidanceChanged">
+      <arg name="revision" type="t"/>
+      <arg name="guidance" type="a{sv}"/>
+      <annotation name="org.qtproject.QtDBus.QtTypeName.Out1" value="QVariantMap"/>
+    </signal>
+  </interface>
+</node>

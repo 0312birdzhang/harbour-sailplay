@@ -149,6 +149,21 @@ class ApplicationTests(unittest.TestCase):
 @unittest.skipUnless(shutil.which('dbus-run-session') and importlib.util.find_spec('dbus')
                      and importlib.util.find_spec('gi'), 'Linux D-Bus and GLib bindings are required')
 class BusContractTests(unittest.TestCase):
+    def test_state_copy_preserves_nested_dbus_container_signatures(self):
+        import dbus
+        from sailplay_sdk.service import wire_dictionary
+
+        values = dbus.Dictionary({'label': 'road', 'distance': dbus.UInt64(200)}, signature='sv', variant_level=1)
+        source = {'nested': values, 'names': dbus.Array(['one', 'two'], signature='s'),
+                  'record': dbus.Struct(('one', dbus.UInt32(2)), variant_level=1)}
+        cloned = state_copy(source)
+        self.assertEqual(cloned['nested'].signature, 'sv')
+        self.assertEqual(cloned['nested'].variant_level, 1)
+        self.assertEqual(cloned['names'].signature, 's')
+        self.assertEqual(cloned['record'].variant_level, 1)
+        self.assertIsNot(cloned['nested'], values)
+        self.assertEqual(wire_dictionary(cloned)['nested']['distance'], 200)
+
     def test_live_python_binding_and_backend(self):
         environment = dict(os.environ)
         environment.pop('XDG_RUNTIME_DIR', None)

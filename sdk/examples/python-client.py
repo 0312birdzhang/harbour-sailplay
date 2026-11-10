@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Open one SDK presentation, increment the example counter and close."""
+"""Open one SDK presentation, invoke an application action and close."""
 import argparse
 import json
 import sys
@@ -19,14 +19,22 @@ def main():
     parser.add_argument('--presentation', choices=('phone', 'car'), default='car')
     parser.add_argument('--amount', type=int, default=1)
     parser.add_argument('--delay-ms', type=int, default=0)
+    parser.add_argument('--action', default='increment')
+    parser.add_argument('--parameters', type=json.loads)
     options = parser.parse_args()
+    if options.parameters is not None and not isinstance(options.parameters, dict):
+        parser.error('--parameters must be a JSON object')
+    parameters = options.parameters
+    if parameters is None:
+        parameters = {'amount': options.amount, 'delayMs': options.delay_ms} if options.action == 'increment' else {}
     DBusGMainLoop(set_as_default=True)
     loop = GLib.MainLoop()
     status = [1]
 
     def ready(value):
         if value:
-            client.invoke('increment', {'amount': options.amount, 'delayMs': options.delay_ms}, client.revision)
+            expected = 0 if options.action == 'navigation.stop' else client.revision
+            client.invoke(options.action, parameters, expected)
 
     def finished(request, revision, result, name, message):
         print(json.dumps({'request': request, 'revision': revision, 'result': result,

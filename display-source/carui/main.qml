@@ -182,9 +182,17 @@ Window {
                 horizontalAlignment: Text.AlignHCenter; color: carPalette.secondary; font.pixelSize: 26
                 visible: !carController.dashboardMapApp
                 text: qsTranslate("Sailplay", "Choose a map app in Sailplay") }
+            NavigationCard {
+                anchors.fill: parent
+                visible: carController.dashboardNavigationTemplate
+                provider: carController.navigation
+                palette: carPalette
+                compact: true
+                onActivated: carController.dockClicked(carController.dashboardMapApp)
+            }
             MouseArea {
                 anchors.fill: parent
-                enabled: !!carController.dashboardMapApp
+                enabled: !!carController.dashboardMapApp && !carController.dashboardNavigationTemplate
                 onClicked: carController.dockClicked(carController.dashboardMapApp)
             }
         }
@@ -372,6 +380,15 @@ Window {
                 MouseArea { anchors.fill: parent; onClicked: carController.ensureMusicBackend() }
             }
         }
+    }
+    NavigationCard {
+        visible: carController.navigationActive
+        x: dock.width + 16
+        y: 16
+        width: root.width - x - 16
+        height: root.height - 32
+        provider: carController.navigation
+        palette: carPalette
     }
     Row {
         visible: pages.visible; y: root.height - 45; x: dock.width + (pages.width - width) / 2; spacing: 16

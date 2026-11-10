@@ -3,6 +3,46 @@
   <context>
     <name>Sailplay</name>
     <message>
+      <source>Connecting navigation</source>
+      <translation>正在連接導航</translation>
+    </message>
+    <message>
+      <source>Ready for navigation</source>
+      <translation>導航已就緒</translation>
+    </message>
+    <message>
+      <source>Navigation unavailable</source>
+      <translation>導航暫不可用</translation>
+    </message>
+    <message>
+      <source>Navigation stopped</source>
+      <translation>導航已停止</translation>
+    </message>
+    <message>
+      <source>You have arrived</source>
+      <translation>已抵達目的地</translation>
+    </message>
+    <message>
+      <source>Stop navigation</source>
+      <translation>停止導航</translation>
+    </message>
+    <message>
+      <source>%1 min</source>
+      <translation>%1 分鐘</translation>
+    </message>
+    <message>
+      <source>Could not publish navigation guidance</source>
+      <translation>無法發佈導航指引</translation>
+    </message>
+    <message>
+      <source>Navigation provider identity does not match its desktop declaration</source>
+      <translation>導航提供方身分與桌面宣告不一致</translation>
+    </message>
+    <message>
+      <source>Navigation provider returned invalid guidance</source>
+      <translation>導航提供方回傳了無效指引</translation>
+    </message>
+    <message>
       <source>Projection protocol</source>
       <translation>投影協議</translation>
     </message>

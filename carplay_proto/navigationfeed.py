@@ -58,6 +58,10 @@ def validate_snapshot(value, now_ms, boot_id, start_ticks, pid):
 
 
 class NavigationFeed:
+    prefix = 'organicmaps-'
+    executables = ('organicmaps', 'harbour-organicmaps')
+    maximum_bytes = 16384
+
     def __init__(self, runtime="/run/user/100000", uid=100000, proc="/proc", clock=None):
         self.directory = os.path.join(runtime, "sailplay-navigation")
         self.uid = uid
@@ -83,21 +87,21 @@ class NavigationFeed:
             with open(os.path.join(self.proc, "sys/kernel/random/boot_id")) as source:
                 boot_id = source.read(128).strip()
             for name in names:
-                if not name.startswith("organicmaps-") or not name.endswith(".json"):
+                if not name.startswith(self.prefix) or not name.endswith(".json"):
                     continue
                 try:
-                    pid = int(name[len("organicmaps-"):-len(".json")])
+                    pid = int(name[len(self.prefix):-len(".json")])
                     value = self._read(directory, name)
                     process = os.path.join(self.proc, str(pid))
                     with open(os.path.join(process, "stat")) as source:
                         data = source.read(4096)
                     start = data[data.rindex(")") + 2:].split()[19]
                     executable = os.path.basename(os.readlink(os.path.join(process, "exe")))
-                    if executable not in ("organicmaps", "harbour-organicmaps"):
+                    if executable not in self.executables:
                         raise ValueError("invalid navigation executable")
                     if os.stat(process).st_uid != self.uid:
                         raise ValueError("invalid navigation process owner")
-                    valid.append(validate_snapshot(value, int(self.clock()), boot_id, start, pid))
+                    valid.append(self._validate(value, int(self.clock()), boot_id, start, pid, process))
                 except (OSError, ValueError, TypeError, IndexError, UnicodeError):
                     self.reason = "invalid-or-expired"
             if len(valid) == 1:
@@ -112,13 +116,16 @@ class NavigationFeed:
                 os.close(directory)
         return None
 
+    def _validate(self, value, now_ms, boot_id, start_ticks, pid, process):
+        return validate_snapshot(value, now_ms, boot_id, start_ticks, pid)
+
     def _read(self, directory, name):
         descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
         with os.fdopen(descriptor, "rb") as source:
             info = os.fstat(source.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_uid != self.uid or info.st_mode & 0o077:
                 raise ValueError("unsafe navigation file")
-            data = source.read(16385)
-            if len(data) > 16384:
+            data = source.read(self.maximum_bytes + 1)
+            if len(data) > self.maximum_bytes:
                 raise ValueError("oversized navigation snapshot")
         return json.loads(data.decode("utf-8"))

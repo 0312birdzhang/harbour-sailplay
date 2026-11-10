@@ -1,3 +1,22 @@
+# Provider-neutral navigation SDK
+
+Sailplay 0.1.1-61 adds the experimental `org.sailplay.Navigation1` contract,
+desktop declaration discovery, a car guidance template and Python navigation
+provider/client helpers. Applications publish named maneuvers, distances in
+meters, remaining duration and explicit driving side on their existing D-Bus
+identity. The template owns a car presentation session and shares the backend
+with a phone client.
+
+The instrument sender now consumes the neutral model. Organic Maps v1 snapshots
+pass through a legacy adapter that retains their turn and distance conversions.
+SDK snapshots come from the validated car UI publisher. An expired publisher,
+expired guidance or ambiguous providers clears previously active instructions.
+Provider-specific state and unit conversions belong to the adapter.
+
+The existing vehicle subscription and acknowledged iAP2 queue remain the sender
+entry point. Real vehicle acceptance of a new SDK navigation provider still
+requires a subscribed projection session. [SDK contract and examples](sdk/README.md)
+
 # Enabled sender: Sailplay 0.1.1-37
 
 Authenticated RFCOMM workers now send 0x5202 followed by 0x5201 when the

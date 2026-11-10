@@ -16,6 +16,7 @@ cp -r "$REPO/display-source/carui/translations" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/main.qml" "$REPO/display-source/carui/carui-apps.conf" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/CarPalette.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/WeatherCard.qml" "$STAGE/display-source/carui/"
+cp "$REPO/display-source/carui/NavigationCard.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/MusicPlayer.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/AboutPage.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/mobile-settings.qml" "$REPO/display-source/carui/harbour-sailplay.png" "$STAGE/display-source/carui/"
@@ -36,4 +37,4 @@ PY
 cd "$WORK"
 tar cjf harbour-sailplay-0.1.1.tar.bz2 harbour-sailplay-0.1.1
 rpmbuild -ta --target aarch64 --define 'debug_package %{nil}' --define '__os_install_post %{nil}' harbour-sailplay-0.1.1.tar.bz2
-test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.1-60.aarch64.rpm"
+test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.1-61.aarch64.rpm"

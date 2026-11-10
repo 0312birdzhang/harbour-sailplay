@@ -48,8 +48,15 @@
 #include <algorithm>
 #include <cstdio>
 #include <sailfishapp.h>
+#include "navigationhost.h"
 
 static const char *kSystemConfig = "/opt/sailplay/carui-apps.conf";
+static volatile sig_atomic_t g_stopRequested = 0;
+
+static void requestUiStop(int)
+{
+    g_stopRequested = 1;
+}
 
 struct AppInfo {
     QString category;
@@ -69,6 +76,7 @@ struct AvailableApp {
     QString name;
     QString exec;
     QString icon;
+    SailplayApplication sdk;
 };
 static QVector<AvailableApp> g_available;
 
@@ -266,6 +274,9 @@ static void scanAvailableApps()
             if (a.id == QLatin1String("harbour-sailife"))
                 continue;
             a.name = name;
+            a.sdk = SailplayApplication::fromDesktopFile(dir.filePath(fn));
+            if (a.sdk.declared && !a.sdk.navigationTemplate())
+                continue;
             a.exec = execIsRunnerStyle(exec) ? exec : extractBinary(exec);
             a.icon = resolveIcon(icon);
             int found = -1;
@@ -448,9 +459,13 @@ class CarUiController : public QObject
     Q_PROPERTY(QString musicError READ musicError NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString lastMusicName READ lastMusicName NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString dashboardMapApp READ dashboardMapApp NOTIFY dashboardSettingsChanged)
+    Q_PROPERTY(QObject *navigation READ navigation CONSTANT)
+    Q_PROPERTY(bool navigationActive READ navigationActive NOTIFY currentAppChanged)
+    Q_PROPERTY(bool dashboardNavigationTemplate READ dashboardNavigationTemplate NOTIFY dashboardSettingsChanged)
 
 public:
-    explicit CarUiController(QObject *parent = nullptr) : QObject(parent)
+    explicit CarUiController(QObject *parent = nullptr, bool projection = true)
+        : QObject(parent), m_projection(projection), m_navigation(new SailplayNavigationHost(QString(), this))
     {
         QTimer *timer = new QTimer(this);
         connect(timer, &QTimer::timeout, this, [this]() {
@@ -548,6 +563,14 @@ public:
     QString dashboardMapApp() const {
         QSettings s(dashboardConfigPath(), QSettings::IniFormat);
         return s.value(QStringLiteral("Dashboard/map")).toString();
+    }
+    QObject *navigation() const { return m_navigation; }
+    bool navigationActive() const {
+        return !m_currentApp.isEmpty() && m_currentApp == m_navigation->applicationId();
+    }
+    bool dashboardNavigationTemplate() const {
+        const AvailableApp *app = findAvailable(dashboardMapApp());
+        return app && app->sdk.navigationTemplate();
     }
     bool isMusicApp(const QString &id) const {
         if (id == QLatin1String("jolla-mediaplayer")) return true;
@@ -701,11 +724,20 @@ public:
         m_dashboardActive = true;
         saveShellView(QStringLiteral("dashboard"));
         const QString map = dashboardMapApp();
-        writeCmd(QStringLiteral("D %1 %2").arg(map.isEmpty() ? QStringLiteral("-") : appKey(map),
+        const AvailableApp *mapApp = findAvailable(map);
+        const bool templateMap = mapApp && mapApp->sdk.navigationTemplate();
+        writeCmd(QStringLiteral("D %1 %2").arg(map.isEmpty() || templateMap ? QStringLiteral("-") : appKey(map),
                                              QStringLiteral("-")));
+        if (templateMap && m_projection) {
+            m_navigation->setActive(true);
+            m_navigation->open(mapApp->sdk, mapApp->name);
+        } else {
+            m_navigation->setActive(false);
+        }
         for (const QString &id : {map}) {
             const AvailableApp *a = findAvailable(id);
             if (!a) continue;
+            if (a->sdk.navigationTemplate()) continue;
             if (m_hiddenApps.contains(id) && (!m_appPids.contains(id)
                     || kill(m_appPids.value(id), 0) == 0)) continue;
             m_appPids[id] = launchApp(id, a->exec);
@@ -717,6 +749,7 @@ public:
         rememberShellOrigin();
         if (!m_currentApp.isEmpty()) hideCurrent();
         writeCmd(QStringLiteral("H"));
+        m_navigation->setActive(false);
         m_dashboardActive = false;
         m_musicActive = true;
         emit currentAppChanged();
@@ -1153,6 +1186,7 @@ public:
         }
         m_dashboardActive = false;
         m_musicActive = false;
+        m_navigation->setActive(false);
         m_returnToDashboard = false;
         saveShellView(QStringLiteral("apps"));
         emit currentAppChanged();
@@ -1175,6 +1209,8 @@ signals:
     void statusChanged();
 
 private:
+    bool m_projection;
+    SailplayNavigationHost *m_navigation;
     QSet<QString> m_positionPending;
     QSet<QString> m_lyricsPending;
     QVariantMap m_status;
@@ -1410,6 +1446,21 @@ private:
             return;
         }
         rememberShellOrigin();
+        const AvailableApp *available = findAvailable(appId);
+        if (available && available->sdk.navigationTemplate() && m_projection) {
+            if (!m_currentApp.isEmpty()) hideCurrent();
+            writeCmd(QStringLiteral("H"));
+            m_dashboardActive = false;
+            m_musicActive = false;
+            m_navigation->setActive(true);
+            m_navigation->open(available->sdk, name);
+            m_currentApp = appId;
+            moveToFront(appId);
+            emit dockChanged();
+            emit currentAppChanged();
+            return;
+        }
+        m_navigation->setActive(false);
         if (m_dashboardActive || m_musicActive) {
             writeCmd(QStringLiteral("H"));
             m_dashboardActive = false;
@@ -1458,6 +1509,11 @@ private:
     void hideCurrent()
     {
         writeCmd(QStringLiteral("H"));
+        if (navigationActive()) {
+            m_navigation->setActive(false);
+            m_currentApp.clear();
+            return;
+        }
         m_hiddenApps.insert(m_currentApp);
         m_lastHiddenApp = m_currentApp;
         m_currentApp.clear();
@@ -1509,7 +1565,19 @@ Q_DECL_EXPORT int main(int argc, char **argv)
     QQuickView *themeView = SailfishApp::createView();
     QQmlEngine &engine = *themeView->engine();
 
-    CarUiController controller;
+    CarUiController controller(nullptr, !mobileSettings);
+    QTimer shutdownTimer;
+    if (!mobileSettings) {
+        ::signal(SIGTERM, requestUiStop);
+        ::signal(SIGINT, requestUiStop);
+        QObject::connect(&shutdownTimer, &QTimer::timeout, &app, [&app]() {
+            if (g_stopRequested) app.quit();
+        });
+        shutdownTimer.start(100);
+    }
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &controller, [&controller]() {
+        qobject_cast<SailplayNavigationHost *>(controller.navigation())->close();
+    });
     engine.rootContext()->setContextProperty("carController", &controller);
     loadRecent();
     controller.reloadConfig();

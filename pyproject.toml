@@ -20,6 +20,7 @@ addopts = "-q"
 
 [tool.setuptools]
 packages = ["carplay_proto", "android_auto", "sailplay_sdk"]
+include-package-data = false
 
 [tool.setuptools.package-data]
 sailplay_sdk = ["interfaces/*.xml"]

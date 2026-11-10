@@ -1,6 +1,6 @@
 Name: harbour-sailplay
 Version: 0.1.1
-Release: 60
+Release: 61
 Summary: SailfishOS wireless CarPlay and Android Auto phone with virtual display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
@@ -24,8 +24,8 @@ Qt Quick launcher and statically linked x264 capture binary. Experimental
 vehicle integration with continuous video, absolute HID touch, and encrypted playback audio.
 Includes a phone-side wireless Android Auto backend with WPP bootstrap, AAP TLS,
 negotiated H.264/PCM/AAC media, input and exclusive dual-protocol session ownership.
-Includes SDK v1 application/session XML, Python provider and client helpers,
-Qt/QML bindings and a background reference application.
+Includes SDK v1 application/session/navigation XML, Python provider and client
+helpers, Qt/QML bindings and shared-backend reference applications.
 
 %prep
 %setup -q
@@ -44,12 +44,14 @@ find %{buildroot}/usr/share/sailplay-sdk -type d -exec chmod 0755 {} +
 install -m 0644 sdk/README.md %{buildroot}/usr/share/sailplay-sdk/README.md
 install -D -m 0644 sailplay_sdk/interfaces/org.sailplay.App1.xml %{buildroot}/usr/share/dbus-1/interfaces/org.sailplay.App1.xml
 install -D -m 0644 sailplay_sdk/interfaces/org.sailplay.Session1.xml %{buildroot}/usr/share/dbus-1/interfaces/org.sailplay.Session1.xml
+install -D -m 0644 sailplay_sdk/interfaces/org.sailplay.Navigation1.xml %{buildroot}/usr/share/dbus-1/interfaces/org.sailplay.Navigation1.xml
 install -m 2755 rpm/payload/imira-comp %{buildroot}/opt/sailplay/imira-comp
 install -m 2755 rpm/payload/carlife-capture %{buildroot}/opt/sailplay/carlife-capture
 install -m 0755 rpm/payload/carui %{buildroot}/opt/sailplay/carui/carui
 install -m 0644 display-source/carui/main.qml %{buildroot}/opt/sailplay/carui/main.qml
 install -m 0644 display-source/carui/CarPalette.qml %{buildroot}/opt/sailplay/carui/CarPalette.qml
 install -m 0644 display-source/carui/WeatherCard.qml %{buildroot}/opt/sailplay/carui/WeatherCard.qml
+install -m 0644 display-source/carui/NavigationCard.qml %{buildroot}/opt/sailplay/carui/NavigationCard.qml
 install -m 0644 display-source/carui/MusicPlayer.qml %{buildroot}/opt/sailplay/carui/MusicPlayer.qml
 install -m 0644 display-source/carui/mobile-settings.qml %{buildroot}/opt/sailplay/carui/mobile-settings.qml
 install -m 0644 display-source/carui/AboutPage.qml %{buildroot}/opt/sailplay/carui/AboutPage.qml
@@ -100,3 +102,4 @@ systemctl daemon-reload || :
 /usr/share/sailplay-sdk
 /usr/share/dbus-1/interfaces/org.sailplay.App1.xml
 /usr/share/dbus-1/interfaces/org.sailplay.Session1.xml
+/usr/share/dbus-1/interfaces/org.sailplay.Navigation1.xml

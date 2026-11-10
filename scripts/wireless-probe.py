@@ -31,7 +31,7 @@ from carplay_proto.wireless import (parse_wifi_configuration,
                                     request_wifi_configuration,
                                     parse_start_session, StartSession)
 from carplay_proto.navigation import NavigationSubscription, START as NAV_START, STOP as NAV_STOP
-from carplay_proto.navigationfeed import NavigationFeed
+from carplay_proto.navigationproviders import ProviderNavigationFeed
 from carplay_proto.navigationsender import NavigationSender
 from carplay_proto.navigationsender import NavigationSender
 
@@ -209,7 +209,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
     ea_protocols = []
     wifi_config = None
     navigation = NavigationSubscription()
-    navigation_feed = NavigationFeed()
+    navigation_feed = ProviderNavigationFeed()
     navigation_check_at = 0
     navigation_status = None
     navigation_sender = NavigationSender()
@@ -230,10 +230,10 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                 navigation_check_at = now + 1
                 snapshot = navigation_feed.poll()
                 nav = snapshot['navigation'] if snapshot else {}
-                status = (navigation_feed.reason, nav.get('state'), nav.get('turn'), navigation.component)
+                status = (navigation_feed.reason, nav.get('state'), nav.get('maneuver'), navigation.component)
                 if status != navigation_status:
                     navigation_status = status
-                    logging.info('navigation feed=%s state=%s raw_turn=%s component=%s', *status)
+                    logging.info('navigation feed=%s state=%s maneuver=%s component=%s', *status)
             if not negotiated and now >= detection_deadline:
                 raise ValueError('iAP2 handshake timeout; release RFCOMM for retry')
             if sync_at and not local_syn_acked and now >= sync_at:

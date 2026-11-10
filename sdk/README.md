@@ -1,6 +1,6 @@
 # Sailplay application SDK v1
 
-The first SDK stage provides application and presentation-session contracts,
+The SDK provides application, presentation-session and navigation contracts,
 Python provider/client helpers, and a Qt5 client that can be registered in QML.
 Applications expose the interfaces on their own session-bus service identity.
 
@@ -11,6 +11,7 @@ Applications expose the interfaces on their own session-bus service identity.
 | `/opt/sailplay/sailplay_sdk` | Python helpers and canonical XML |
 | `/usr/share/dbus-1/interfaces/org.sailplay.App1.xml` | Application contract |
 | `/usr/share/dbus-1/interfaces/org.sailplay.Session1.xml` | Presentation-session contract |
+| `/usr/share/dbus-1/interfaces/org.sailplay.Navigation1.xml` | Provider-neutral navigation contract |
 | `/usr/share/sailplay-sdk/qt` | Qt source and qmake include |
 | `/usr/share/sailplay-sdk/examples` | Python/Qt clients, reference backend and activation metadata |
 
@@ -84,6 +85,14 @@ explicit caller requests.
 
 The provider limits an application to 64 presentation sessions and each
 session to 64 pending requests. Limit failures preserve the previous state.
+
+Python backends can supply `on_lifecycle(backend)`. The callback runs after a
+session opens, closes, changes activity or loses its bus owner, and after an
+accepted request enters or leaves the backend. `session_count`,
+`active_session_count` and `pending_count` describe those leases and operations.
+`pending_count` includes work accepted by a presentation that has since closed.
+An application may exit when it has zero sessions, zero pending requests and
+zero business work. Explicit stop commands remain application decisions.
 
 ## Python backend
 
@@ -168,6 +177,124 @@ SailplaySession {
 }
 ```
 
+## Navigation providers
+
+`org.sailplay.Navigation1` is exported on each caller-owned navigation session.
+`GetGuidance` returns the application revision and a native `a{sv}` guidance
+model. `GuidanceChanged` delivers the same complete model to its session owner.
+The regular Session1 snapshot includes that model under `navigation`, so both
+existing language bindings share the same initial snapshot and reconnect flow.
+
+Navigation1 requires the following fields and variant types.
+
+| Field | D-Bus type | Meaning |
+|---|---|---|
+| `state` | `s` | `idle`, `active`, `unavailable`, `stopped` or `arrived` |
+| `mode` | `s` | `driving`, `walking`, `cycling` or `transit` |
+| `maneuver` | `s` | Provider-neutral maneuver name |
+| `drivingSide` | `s` | `left` or `right` |
+| `exitNumber` | `u` | Roundabout exit number, zero when unspecified |
+| `nextDistanceMeters` | `d` | Finite, nonnegative distance to the maneuver in meters |
+| `remainingDistanceMeters` | `d` | Finite, nonnegative remaining route distance in meters |
+| `remainingSeconds` | `t` | Remaining route duration in seconds |
+| `currentRoad` | `s` | Current road |
+| `nextRoad` | `s` | Road after the maneuver |
+| `destination` | `s` | Destination label |
+| `updatedMs` | `t` | Actual guidance update time from `CLOCK_BOOTTIME`, in milliseconds |
+
+Maneuvers are `unknown`, `continue`, `slight-left`, `slight-right`, `turn-left`,
+`turn-right`, `sharp-left`, `sharp-right`, `uturn`, `roundabout-enter`,
+`roundabout-exit`, `roundabout-continue`, `exit-left`, `exit-right` and `arrive`.
+Each text field is bounded to 1024 Unicode characters. Inactive lifecycle states
+clear previous road, distance and maneuver values.
+
+Providers advertise `navigation` and implement the asynchronous
+`navigation.stop` action. Other route-planning actions remain application-defined.
+`NavigationBackend` validates publications and assigns explicit D-Bus variant
+types. `guidance(...)` creates complete models with a suspend-aware timestamp.
+Active guidance expires after ten seconds without a navigation update.
+The car publisher's heartbeat independently expires after three seconds.
+
+```python
+from sailplay_sdk.guidance import guidance
+from sailplay_sdk.navigation import NavigationBackend
+
+def stop_navigation(parameters, invocation):
+    stop_route_engine()
+    backend.publish_guidance(guidance('stopped'))
+    invocation.complete({'stopped': True})
+
+backend = NavigationBackend('org.example.MyMap', 'my-map',
+                            {'navigation.stop': stop_navigation})
+backend.publish_guidance(guidance('active', maneuver='turn-right',
+    nextDistanceMeters=200, remainingDistanceMeters=12000,
+    remainingSeconds=900, currentRoad='Current road', nextRoad='Next road'))
+```
+
+`NavigationClient` reuses SessionClient and exposes validated `guidance` plus
+an `on_navigation(revision, guidance)` callback. Qt clients can read the same
+model from `SailplaySession.state["navigation"]`. Generated Navigation1 proxies
+also accompany the Qt source SDK.
+
+## Discovery and the car navigation template
+
+The application declares its existing backend service and SDK capabilities in
+its installed desktop file.
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=My map
+Exec=/usr/bin/my-map
+ExecDBus=/usr/bin/my-map --background
+X-Sailplay-ApiVersion=1
+X-Sailplay-Service=org.example.MyMap
+X-Sailplay-ObjectPath=/org/sailplay/v1/App
+X-Sailplay-Capabilities=navigation;
+X-Sailplay-Presentation=template
+```
+
+Python `read_declaration` and `discover` helpers, and Qt
+`SailplayApplication::fromDesktopFile`, read these declarations. The car app list
+accepts supported navigation templates. A tile or dock activation opens the
+backend and its car session through D-Bus. Selecting the app for the dashboard
+opens the compact guidance card. The expanded card offers an explicit stop
+control. Backend identity must match the desktop-file basename.
+
+Sailplay keeps the car session when the template is hidden and calls
+`SetActive(false)`. Projection teardown releases its D-Bus connection and session.
+The application decides whether its route continues. The same backend can serve
+a separate phone presentation while the car template remains open.
+
+For the existing CarPlay instrument sender, Sailplay publishes a private,
+atomic SDK guidance snapshot from the car UI. The root-side reader validates
+the publisher's executable, projection environment, PID, start time, boot ID,
+ownership and freshness before using it. Revision and duration values retain
+their full uint64 range across that local JSON envelope. Organic Maps v1 files
+remain available through the legacy adapter. Multiple valid providers produce
+an ambiguous state and clear instrument guidance. Instrument output currently
+consumes driving guidance.
+
+The fake navigation backend provides a simulator with start, stop and delayed
+actions. Its route keeps updating while either SDK view closes. Run it and the
+command client on a development bus.
+
+```sh
+python3 sdk/examples/navigation-service.py
+python3 sdk/examples/python-client.py --service org.example.SailplayNavigation --action navigation.start
+python3 sdk/examples/python-client.py --service org.example.SailplayNavigation --action navigation.stop
+```
+
+The example desktop and activation files ship under the examples directory.
+An application's packaging installs its own declarations into the system
+desktop and session-bus service directories. A second provider can use the same
+contract under another existing application identity. The example backend
+accepts `--service` and `--application-id` for that integration check.
+
+Navigation1 and its template remain an experimental SDK extension. Mconnect's
+real window/core separation, a shared map backend with independent renderers,
+Sailjail renderer permissions, and Content1 templates remain subsequent stages.
+
 ## Validation
 
 `tests/test_sdk_unittest.py` checks the XML signatures, ownership, snapshots,
@@ -175,6 +302,15 @@ request IDs, revision conflicts and resource limits. With Linux D-Bus and GLib
 bindings available, it also runs the reference backend and Python clients on a
 private bus, checks live introspection against the XML, activates a background
 service, and exercises backend replacement with a new instance and revision sequence.
+
+`tests/test_navigation_sdk_unittest.py` covers the fixed guidance model, desktop
+declarations, legacy maneuver conversions, Unicode and uint64 snapshots, and
+publisher identity and expiry. Its private-bus scenario also exercises the
+reference backend's main entry point and graceful signal exit.
+
+`tests/navigation_sdk_host_probe.pro` builds a Qt probe using the production
+navigation host and SDK bindings. It checks phone closure, hidden car sessions,
+explicit stop, Unicode state and private snapshot cleanup on Sailfish.
 
 Application adoption, Mconnect view lifetime and the sandboxed car renderer
 remain integration milestones for the broader SDK proposal.
