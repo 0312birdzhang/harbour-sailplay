@@ -9,6 +9,11 @@ checkout at `82f09c4`. Use the native checkout matching the recorded hashes.
 The patch and SDK overlay are published in Sailplay's repository so the
 lifecycle change can be reviewed independently.
 
+The complete native application includes the C++ core, Silica/QML interface,
+regression tests, RPM inputs and bundled SDK source. Release 53 is published
+in the application's standalone repository.
+[Native Mconnect source](https://github.com/0312birdzhang/harbour-mconnect)
+
 ## Applying
 
 Run the script from a complete Sailplay checkout. Supply the path to the native
