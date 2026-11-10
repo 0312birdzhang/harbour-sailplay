@@ -177,6 +177,35 @@ SailplaySession {
 }
 ```
 
+## Qt state and session providers
+
+`SailplayProvider` exports App1 and caller-owned Session1 leases on an existing
+application connection. Start the object before acquiring the activatable
+application name, so a cold-start client can discover the SDK path immediately.
+
+```cpp
+#include "sailplayprovider.h"
+
+auto bus = QDBusConnection::sessionBus();
+SailplayProvider provider(bus, "example-media", {{"playing", false}}, {"media"});
+if (!provider.start() || !bus.registerService("org.example.Media")) return 1;
+provider.publish({{"playing", true}});
+```
+
+The provider embeds the canonical XML for introspection and argument checks.
+`publish` validates typed state and returns whether publication succeeded.
+Equal state retains its revision. `sessionCount`, `activeSessionCount` and
+`sessionsChanged` support the application's exit policy. State and activity
+signals are directed to their session owner. Caller loss releases its leases.
+Application actions receive the defined `NotSupported` error from this state
+and lease provider. Media control uses MPRIS.
+
+The SDK also provides a CMake `sailplay_sdk_provider` target. Its embedded XML
+comes from `SAILPLAY_SDK_INTERFACES`, the repository interfaces directory or the
+installed D-Bus interface directory. The native Mconnect integration supplies
+the provider and XML through a guarded source overlay.
+[Mconnect integration](integrations/mconnect/README.md)
+
 ## Navigation providers
 
 `org.sailplay.Navigation1` is exported on each caller-owned navigation session.
@@ -291,9 +320,10 @@ desktop and session-bus service directories. A second provider can use the same
 contract under another existing application identity. The example backend
 accepts `--service` and `--application-id` for that integration check.
 
-Navigation1 and its template remain an experimental SDK extension. Mconnect's
-real window/core separation, a shared map backend with independent renderers,
-Sailjail renderer permissions, and Content1 templates remain subsequent stages.
+Navigation1 and its template remain an experimental SDK extension. Native
+Mconnect uses the media session provider for its window/core separation. A
+shared map backend with independent renderers, Sailjail renderer permissions
+and Content1 templates remain subsequent stages.
 
 ## Validation
 
@@ -312,5 +342,9 @@ reference backend's main entry point and graceful signal exit.
 navigation host and SDK bindings. It checks phone closure, hidden car sessions,
 explicit stop, Unicode state and private snapshot cleanup on Sailfish.
 
-Application adoption, Mconnect view lifetime and the sandboxed car renderer
-remain integration milestones for the broader SDK proposal.
+`tests/sdk_provider_test.pro` checks the Qt provider, caller-owned state and
+properties, directed signals, resource limits and owner loss. Its production
+music host checks hidden activity, player replacement and backend replacement.
+The Mconnect integration adds native window and work lifetime regression suites
+and repeated release/reload of the installed Silica QML tree. Installed and
+physical phone/car verification are recorded separately in `todo.md`.

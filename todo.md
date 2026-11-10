@@ -134,13 +134,11 @@ Current code supports this architectural direction but does not yet implement th
 
 ### 6.1 Mconnect Lifecycle
 
-**Reference:** [[MUSIC.md — Line 19](<https://chatgpt.com/home/bin4ry/hadk/hybris/mw/harbour-sailplay/MUSIC.md:19>)](/home/bin4ry/hadk/hybris/mw/harbour-sailplay/MUSIC.md:19)
-
-Describes one Mconnect core with phone UI and Sailplay's MPRIS controls.
-
-**Known limitation:** [[MUSIC.md — Line 41](<https://chatgpt.com/home/bin4ry/hadk/hybris/mw/harbour-sailplay/MUSIC.md:41>)](/home/bin4ry/hadk/hybris/mw/harbour-sailplay/MUSIC.md:41) explicitly says closing the phone window still terminates the core.
-
-**Required action:** Fix this before using Mconnect as the SDK lifecycle example.
+The native C++/Silica runtime owns playback, storage and MPRIS independently
+of the phone QML tree. Closing the phone presentation releases its QML and
+polling, while car leases and ongoing work retain the core. Show rebuilds the
+phone presentation over that core. The integration and installed verification
+are recorded below. [Background music integration](MUSIC.md)
 
 ### 6.2 Navigation Provider Abstraction
 
@@ -198,7 +196,7 @@ The proposed architecture establishes a clear separation of responsibilities:
 - [x] Compact and expanded car guidance templates through the existing app, dock and dashboard entry points.
 - [x] Provider-neutral instrument sender with the Organic Maps v1 adapter and a second fake provider integration test.
 - [x] Install and verify the navigation SDK RPM and Qt/Python calls on Sailfish.
-- [ ] Mconnect window/core lifecycle separation using its current native runtime.
+- [x] Mconnect window/core lifecycle separation using its current native runtime.
 - [ ] One authoritative map backend with independent phone and car presentations.
 - [ ] Sandboxed dedicated renderer activation and Imira/input permission validation.
 - [ ] Content1 browsing, lists, search, actions and messages, with their host templates.
@@ -212,4 +210,16 @@ The proposed architecture establishes a clear separation of responsibilities:
 - The installed carui dock entry and guidance card passed geometry checks at 1920x720, 1280x720 and 720x1280 with hidden windows on the minimal platform. The live snapshot reader and subscribed iAP2 codec passed, and graceful carui exit preserved the backend and removed its export.
 - Final device checks restored the saved recent-app history and compositor command bytes and removed their test files and directories. An earlier AAC timeout passed its isolated seven-test retry and subsequent complete runs.
 - An earlier timed-out GUI check lacked a saved original history backup. Recovery removed its confirmed test entry under an exact-content guard. Byte-for-byte restoration of that earlier history remains unverified.
-- This stage completes navigation SDK integration. Real phone-window and vehicle visual acceptance, Mconnect lifecycle separation, shared map presentations, Sailjail renderer permissions and Content1 remain subsequent milestones.
+- At this navigation checkpoint, Mconnect lifecycle separation, shared map presentations, Sailjail renderer permissions, Content1 and real phone/car acceptance remained subsequent milestones.
+
+### Mconnect lifecycle verification (2026-11-10)
+
+- Mconnect 1.6.0-52 and Sailplay 0.1.1-62 were built and installed on JollaPhone2026. Root RPM verification, installed binary hashes, dependency resolution and the installed Python runtime/XML checks passed.
+- The native source integration targets the existing C++/Silica 1.6.0-51 migration tree, including its preceding local migration work beyond upstream `82f09c4`. Sailplay publishes the guarded lifecycle patch and seven SDK overlay files. Baseline application, idempotence, mismatch rejection, rollback and preservation of a concurrent edit passed. [Native integration](sdk/integrations/mconnect/README.md)
+- Host native suites passed 31/31 and device native suites passed 32/32, including the installed GStreamer audio library with `fakesink`. The existing UI responsiveness assertion now uses its bounded condition-wait helper. Python verification passed 329 unittest tests, 936 pytest tests and 491 subtests.
+- Host and Qt 5.6 device SDK fixtures passed typed nested maps/hashes, invalid nested-value rejection, caller-owned properties and directed signals, hidden leases, session limits, vanished callers, music-host reuse and backend replacement. Nested values are validated before querying their D-Bus signature to handle Qt 5.6 marshalling safely.
+- Normal Sailjail cold activation opened an SDK car session on the user bus, exported the core and MPRIS identities, retained paused playback through a hidden lease for fourteen seconds and exited after caller loss and the last lease closed. Direct and D-Bus startup supply Wayland and Maliit defaults before Qt loads its plugins. The core uses a ten-second idle grace period with an activity recheck at the deadline.
+- The complete installed QML validator passed and released/rebuilt the phone tree twice over its isolated core fixture. An initial minimal-platform run exposed the platform's 240x320 screen size. The complete retry used a hidden Wayland window with the device's screen dimensions.
+- An isolated installed-core probe restored a two-item legacy Hive queue with its second item selected at twelve seconds, preserved paused state and Unicode MPRIS metadata, and exercised the production carui compatibility ID, dock entry, existing-player reuse and hidden media lease. Graceful carui exit released its final lease and allowed the same core to exit. The compositor command bytes were restored and the test directory, including isolated data and history, was removed under identity/hash guards.
+- Final checks matched the original recent-app history, carui configuration, UI/dashboard state and compositor command bytes. Normal activation had updated only the playback memory's `savedAt` field. Its original bytes were restored under the native file lock and exact hash guards, and all 28 original Mconnect data files matched their saved hashes. Sailplay remained active and enabled, with both installed packages passing root RPM verification.
+- Real phone gesture closure and vehicle visual acceptance remain open, alongside independent map presentations, dedicated renderer sandbox permissions and Content1 templates.

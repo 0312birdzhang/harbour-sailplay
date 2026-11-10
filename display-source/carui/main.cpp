@@ -49,6 +49,7 @@
 #include <cstdio>
 #include <sailfishapp.h>
 #include "navigationhost.h"
+#include "musichost.h"
 
 static const char *kSystemConfig = "/opt/sailplay/carui-apps.conf";
 static volatile sig_atomic_t g_stopRequested = 0;
@@ -275,7 +276,7 @@ static void scanAvailableApps()
                 continue;
             a.name = name;
             a.sdk = SailplayApplication::fromDesktopFile(dir.filePath(fn));
-            if (a.sdk.declared && !a.sdk.navigationTemplate())
+            if (a.sdk.declared && !a.sdk.navigationTemplate() && !a.sdk.mediaTemplate())
                 continue;
             a.exec = execIsRunnerStyle(exec) ? exec : extractBinary(exec);
             a.icon = resolveIcon(icon);
@@ -465,8 +466,16 @@ class CarUiController : public QObject
 
 public:
     explicit CarUiController(QObject *parent = nullptr, bool projection = true)
-        : QObject(parent), m_projection(projection), m_navigation(new SailplayNavigationHost(QString(), this))
+        : QObject(parent), m_projection(projection), m_navigation(new SailplayNavigationHost(QString(), this)),
+          m_music(new SailplayMusicHost(this))
     {
+        connect(this, &CarUiController::currentAppChanged, this, [this]() {
+            m_music->setActive(m_musicActive || m_dashboardActive);
+        });
+        connect(m_music, &SailplayMusicHost::errorOccurred, this, [this](const QString &message) {
+            m_musicError = message;
+            emit rememberedMusicChanged();
+        });
         QTimer *timer = new QTimer(this);
         connect(timer, &QTimer::timeout, this, [this]() {
             const QDateTime stamp = QFileInfo(userConfigPath()).lastModified();
@@ -565,6 +574,10 @@ public:
         return s.value(QStringLiteral("Dashboard/map")).toString();
     }
     QObject *navigation() const { return m_navigation; }
+    void closeSessions() {
+        m_navigation->close();
+        m_music->close();
+    }
     bool navigationActive() const {
         return !m_currentApp.isEmpty() && m_currentApp == m_navigation->applicationId();
     }
@@ -573,6 +586,8 @@ public:
         return app && app->sdk.navigationTemplate();
     }
     bool isMusicApp(const QString &id) const {
+        const AvailableApp *available = findAvailable(id);
+        if (available && available->sdk.mediaTemplate()) return true;
         if (id == QLatin1String("jolla-mediaplayer")) return true;
         QSettings desktop(QStringLiteral("/usr/share/applications/") + id + QStringLiteral(".desktop"), QSettings::IniFormat);
         if (!desktop.value(QStringLiteral("Desktop Entry/X-Sailplay-BackgroundService")).toString().isEmpty()) return true;
@@ -672,7 +687,7 @@ public:
     }
     bool hasRememberedMusic() const {
         QSettings state(uiStatePath(), QSettings::IniFormat);
-        return findAvailable(state.value(QStringLiteral("MusicApp")).toString()) != nullptr;
+        return !musicApplicationId(state.value(QStringLiteral("MusicApp")).toString()).isEmpty();
     }
     Q_INVOKABLE QString preferredMusicService(const QStringList &services) const {
         for (const QString &service : services) {
@@ -684,14 +699,14 @@ public:
             if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) continue;
             QString id = qvariant_cast<QDBusVariant>(reply.arguments().first()).variant().toString();
             if (id.endsWith(QStringLiteral(".desktop"))) id.chop(8);
-            if (id == lastMusicApp()) return service;
+            if (musicApplicationId(id) == lastMusicApp()) return service;
         }
         return QString();
     }
     QString lastMusicApp() const {
         QSettings state(uiStatePath(), QSettings::IniFormat);
-        const QString id = state.value(QStringLiteral("MusicApp")).toString();
-        return findAvailable(id) ? id : QStringLiteral("jolla-mediaplayer");
+        const QString id = musicApplicationId(state.value(QStringLiteral("MusicApp")).toString());
+        return id.isEmpty() ? QStringLiteral("jolla-mediaplayer") : id;
     }
     QString lastMusicName() const {
         const AvailableApp *a = findAvailable(lastMusicApp());
@@ -706,7 +721,9 @@ public:
         if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) return;
         QString id = qvariant_cast<QDBusVariant>(reply.arguments().first()).variant().toString();
         if (id.endsWith(QStringLiteral(".desktop"))) id.chop(8);
-        if (!findAvailable(id)) return;
+        id = musicApplicationId(id);
+        if (id.isEmpty()) return;
+        attachMusicSession(id);
         QDir().mkpath(QFileInfo(uiStatePath()).absolutePath());
         QSettings state(uiStatePath(), QSettings::IniFormat);
         if (state.value(QStringLiteral("MusicApp")).toString() == id) return;
@@ -756,14 +773,17 @@ public:
     }
     QString musicError() const { return m_musicError; }
     Q_INVOKABLE bool ensureMusicBackend(const QString &requestedId = QString()) {
-        const QString id = requestedId.isEmpty() ? lastMusicApp() : requestedId;
-        if (!findAvailable(id)) return false;
+        const QString id = requestedId.isEmpty() ? lastMusicApp() : musicApplicationId(requestedId);
+        const AvailableApp *available = findAvailable(id);
+        if (!available) return false;
         m_musicError.clear();
         QSettings state(uiStatePath(), QSettings::IniFormat);
         if (state.value(QStringLiteral("MusicApp")).toString() != id) {
             state.setValue(QStringLiteral("MusicApp"), id); state.sync();
         }
         emit rememberedMusicChanged();
+        attachMusicSession(id);
+        if (m_projection && available->sdk.mediaTemplate()) return true;
         const auto names = QDBusConnection::sessionBus().interface()->registeredServiceNames();
         if (names.isValid() && !preferredMusicService(names.value()).isEmpty()) return true;
         QSettings desktop(QStringLiteral("/usr/share/applications/") + id + QStringLiteral(".desktop"), QSettings::IniFormat);
@@ -1211,6 +1231,24 @@ signals:
 private:
     bool m_projection;
     SailplayNavigationHost *m_navigation;
+    SailplayMusicHost *m_music;
+    QString musicApplicationId(const QString &id) const {
+        if (findAvailable(id)) return id;
+        QSettings legacy(QStringLiteral("/usr/share/applications/") + id + QStringLiteral(".desktop"), QSettings::IniFormat);
+        const QString service = legacy.value(QStringLiteral("Desktop Entry/X-Sailplay-BackgroundService")).toString();
+        if (service.isEmpty()) return QString();
+        for (const AvailableApp &candidate : g_available) {
+            QSettings desktop(QStringLiteral("/usr/share/applications/") + candidate.id + QStringLiteral(".desktop"), QSettings::IniFormat);
+            if (desktop.value(QStringLiteral("Desktop Entry/X-Sailplay-BackgroundService")).toString() == service)
+                return candidate.id;
+        }
+        return QString();
+    }
+    void attachMusicSession(const QString &id) {
+        if (!m_projection) return;
+        const AvailableApp *available = findAvailable(id);
+        if (available) m_music->open(available->sdk);
+    }
     QSet<QString> m_positionPending;
     QSet<QString> m_lyricsPending;
     QVariantMap m_status;
@@ -1576,7 +1614,7 @@ Q_DECL_EXPORT int main(int argc, char **argv)
         shutdownTimer.start(100);
     }
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &controller, [&controller]() {
-        qobject_cast<SailplayNavigationHost *>(controller.navigation())->close();
+        controller.closeSessions();
     });
     engine.rootContext()->setContextProperty("carController", &controller);
     loadRecent();

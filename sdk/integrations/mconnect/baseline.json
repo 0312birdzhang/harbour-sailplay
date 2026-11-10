@@ -1,0 +1,170 @@
+{
+  "baseline": "Native C++/Silica migration 1.6.0-51 with preceding local migration work",
+  "upstream_commit": "82f09c497eb757ed210f606fc23b15ef55f8d8fb",
+  "release": "1.6.0-52",
+  "patch_sha256": "93ab16dbb6342be0c636a04ec6553eb6ef0a60a4ae0f97b2059282297a7b7d5b",
+  "files": [
+    {
+      "path": "apps/mconnect/docs/sailplay-background.md",
+      "before_sha256": "392a519e18246e74a19ddb5b24063aa9692e167f6100afb88b2c590837a0407f",
+      "after_sha256": "fc5954d339359dea10c9ecd00374fda1a0366982abb6f08cd07a6ff70588464f"
+    },
+    {
+      "path": "apps/mconnect/elinux/harbour-mconnect-silica.desktop",
+      "before_sha256": "5b3c50a0b439eae72d6a8137f31e869a372b5b68766816c7df11e1842bfecaaa",
+      "after_sha256": "d57666ba292fd5be7e2468e5f7cf1ad54436e0e0523acbae18763f6e8df765f5"
+    },
+    {
+      "path": "apps/mconnect/elinux/harbour-mconnect.desktop.in",
+      "before_sha256": "3d104a858984dc905af56fdcd88e87ee6c2408e7d1d63845236b833cae95311d",
+      "after_sha256": "f6b98262ee7977bc5c006f4baeb925f1b612dc2d88e092dfdd65dabb5d180e63"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/CMakeLists.txt",
+      "before_sha256": "414200b97b0cc897c37d8a538e55771fbd81ec68553ba8d976fc1756008997db",
+      "after_sha256": "083eb1c7e85bebb7f76fa405953d5dcb9a289c2b89b52a1e3ce0cbb9dbc99198"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/bridge.cpp",
+      "before_sha256": "be22e9eb395f4db99225c5ac67495425b83a985a4fc3059ab00b1e9f3b48afbd",
+      "after_sha256": "628309f31098641e8f45a745abbb267af19cd58924ca1d4db279ad9b5bb77276"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/bridge.h",
+      "before_sha256": "6db093f729a10e7df0b7bc73cdbf4f5a1e6d47b244e44a973089ac61183ed3c9",
+      "after_sha256": "6184a5cd922bc41e57ca3f4944354e5520d5614cf497af8a1129d1bc31c1b0c5"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/main.cpp",
+      "before_sha256": "3874ba276a9e8e1ad442440ebf351a44a9a6059a4eb478c90a0b21dd05ac6504",
+      "after_sha256": "d774ab3cdd07179899b07510af1b6f2debbde5fe82d61614bd8b8cdf775dadc0"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/native_core.cpp",
+      "before_sha256": "57b880eb8c114bc0deb972f4f002497534ae2cf4991b1ab6f5d73e4d952da45f",
+      "after_sha256": "6c9410adb8ece10f83a86a07483e8263570ac6ac5fd5009faa133e26682786b1"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/native_core.h",
+      "before_sha256": "a217dd7faccc602c779249026f54c3239429bf2da12849da844f8ea3bd9e206c",
+      "after_sha256": "d36926788ed173babb2ab2fad55d33a148ceacafe6b89b3fb0ce8e235fbf9b5d"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/native_downloads.h",
+      "before_sha256": "8a5233150033eaf8952d63d207b9f1f88d58aca0dd5ba44841a0dad030e8d158",
+      "after_sha256": "c6bb77d87b6880291b4ae5a488b76cce3b5cbd779d5774d55ae20ad9771b6324"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/native_local_music.h",
+      "before_sha256": "ef7860857a55fbe93b63ead6aaf0301fc48726da2d8a0ba75def004f26b626ec",
+      "after_sha256": "b897e2d3346bc21f301d3305ff80f53273d40102150c2a6813d7196ccc3b8d19"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/native_login.cpp",
+      "before_sha256": "bb40ecdd37430700779acfdb0b082a550dde78916010aa74002ec8939855f338",
+      "after_sha256": "fa9e5f4bccec4c0701c09fc3f1ef3d6014c2af67bff63630955623f46809f510"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/native_login.h",
+      "before_sha256": "0b3ce280536caeb0b318111c832d520e6c0f0f3666966ba5d8bd230526b26e18",
+      "after_sha256": "6396b32ff40fe69ac0013b5b1686d51675490140de57add649dc2a7bab7c2708"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/native_lyric_loader.h",
+      "before_sha256": "be147f65bd185c63a0eaed92bcd276b86f0eae5e2eb4d6b10b1f7fd9bdf1057d",
+      "after_sha256": "fd8756680daa00242b7c7cb0c4ca7a409063771a38ee90901e0bb525d653b7ac"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/native_player.h",
+      "before_sha256": "ee2f080d2bcff7eae24fb4921790817a5aae3275f01409f7ba0bbd4f1f3ba5ac",
+      "after_sha256": "44687c3e02db3376ed7e6d628096334ca66e7139df92b9fc43242cc63d134d31"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/native_presentation.cpp",
+      "before_sha256": null,
+      "after_sha256": "6f72f519b9aa61cc5d795d003a458586ba1e2e46f942f73ce2b075953dd84e31"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/native_presentation.h",
+      "before_sha256": null,
+      "after_sha256": "0c6c7e8c18ee20f97332747e70d09da2137deca3dbe46a2fb76231d2734fec38"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/native_runtime.cpp",
+      "before_sha256": "59c26d54cef58fb08a3b7e483290238c6ef86367e4328fa665e75fb1a5e32c5e",
+      "after_sha256": "e0b18a3a818b2c73169c10139582d703586bc247dbd6462b362fbe402f1f7353"
+    },
+    {
+      "path": "apps/mconnect/elinux/silica/native_runtime.h",
+      "before_sha256": "7629d5968c272b943e376087e5445c76f28a61e66cfc39607c287449e0b3e288",
+      "after_sha256": "04068d61d9257922d1c5207717eb96e26a56b53399fe01d8267fd337af70d683"
+    },
+    {
+      "path": "apps/mconnect/rpm/harbour-mconnect.spec",
+      "before_sha256": "1f653fa2a22f145b079bd618dbdf2544add4b479d1a441a02b86433d1eff1bb5",
+      "after_sha256": "9d92ed81b26c40714e37d3c2d09374da945510a91981a69b62329d3e2c5291be"
+    },
+    {
+      "path": "apps/mconnect/rpm/harbour-mconnect.yaml.in",
+      "before_sha256": "d3ceb10e0825ab257880a39fe89d0c76572dda6e3e67b2cf320b1a59dca82805",
+      "after_sha256": "fa60d8d6397437f6ccaf2f302b29f3f73bfa5818f4c9e3e7348d34038b0aeefd"
+    },
+    {
+      "path": "apps/mconnect/test/native_lifecycle_test.cc",
+      "before_sha256": null,
+      "after_sha256": "806e66baaa524fcd164cadcc7db7076ab00b1e25709db5b480dbbff003f6671e"
+    },
+    {
+      "path": "apps/mconnect/test/native_presentation_test.cc",
+      "before_sha256": null,
+      "after_sha256": "8d27acede0400e126b39a30b219e633d4a47f849d3864d22c7a19489ea2a7122"
+    },
+    {
+      "path": "apps/mconnect/test/native_ui_test.cc",
+      "before_sha256": "349bc16a9e6d14138f1e2fc001d7a6f5fa3859fdb71068d25fcfcccadbac688d",
+      "after_sha256": "2d198bd82c85fb1d3bc4f573970a0c11d13956c94a7d4d435403fc2db48609f8"
+    },
+    {
+      "path": "apps/mconnect/tools/verify-rpm.py",
+      "before_sha256": "4bc1703484301a9112c4c9e1b842689190ddd53790fd4b7f421c60aeb1f8a10a",
+      "after_sha256": "9fd82c098a09a074356e5d0c2feaf38708fb5f37ef9136b111f610df05ea746a"
+    }
+  ],
+  "sdk_files": [
+    {
+      "source": "sdk/qt/sailplayprovider.h",
+      "path": "apps/mconnect/elinux/sailplay-sdk/sdk/qt/sailplayprovider.h",
+      "sha256": "416043f4c77c48495e7942eb71ed0b27b4d0cb106a0c8684620455906722b2fe"
+    },
+    {
+      "source": "sdk/qt/sailplayprovider.cpp",
+      "path": "apps/mconnect/elinux/sailplay-sdk/sdk/qt/sailplayprovider.cpp",
+      "sha256": "de0abbe438e3e5ee019b2282595bbe691d2c4cb724232da5d5cbc015ed3b0202"
+    },
+    {
+      "source": "sdk/qt/CMakeLists.txt",
+      "path": "apps/mconnect/elinux/sailplay-sdk/sdk/qt/CMakeLists.txt",
+      "sha256": "2ad6fbfb5f8250ebfa9a1e029261cbbfc2e5aa0b54bb145bcaf98f5aa48bf59c"
+    },
+    {
+      "source": "sdk/qt/sailplay_contracts.qrc.in",
+      "path": "apps/mconnect/elinux/sailplay-sdk/sdk/qt/sailplay_contracts.qrc.in",
+      "sha256": "f72be080fefecf5e510844fb40f32870115b8220a8fc865ef8785c79693293d5"
+    },
+    {
+      "source": "sailplay_sdk/interfaces/org.sailplay.App1.xml",
+      "path": "apps/mconnect/elinux/sailplay-sdk/sailplay_sdk/interfaces/org.sailplay.App1.xml",
+      "sha256": "3a7fd1268fb6e59198d05e944067c9d453b6e4e676da6676b9335dc69aa5cce8"
+    },
+    {
+      "source": "sailplay_sdk/interfaces/org.sailplay.Session1.xml",
+      "path": "apps/mconnect/elinux/sailplay-sdk/sailplay_sdk/interfaces/org.sailplay.Session1.xml",
+      "sha256": "bc01afc9736432f0417f675381484b78944b32e3bd6005e6b70da3c031c06b2b"
+    },
+    {
+      "source": "LICENSE",
+      "path": "apps/mconnect/elinux/sailplay-sdk/LICENSE",
+      "sha256": "26fab88dbd7fc5dffb5bce7e5fcce2c53678616bd477832958df4d64b73de68e"
+    }
+  ]
+}

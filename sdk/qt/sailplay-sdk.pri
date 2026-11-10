@@ -1,8 +1,8 @@
 QT += core dbus
 CONFIG += c++11
 INCLUDEPATH += $$PWD $$OUT_PWD
-HEADERS += $$PWD/sailplaysession.h $$PWD/sailplayapplication.h
-SOURCES += $$PWD/sailplaysession.cpp $$PWD/sailplayapplication.cpp
+HEADERS += $$PWD/sailplaysession.h $$PWD/sailplayapplication.h $$PWD/sailplayprovider.h
+SOURCES += $$PWD/sailplaysession.cpp $$PWD/sailplayapplication.cpp $$PWD/sailplayprovider.cpp
 
 isEmpty(SAILPLAY_SDK_INTERFACES) {
     SAILPLAY_SDK_INTERFACES = $$clean_path($$PWD/../../sailplay_sdk/interfaces)
@@ -13,3 +13,9 @@ isEmpty(SAILPLAY_SDK_INTERFACES) {
 DBUS_INTERFACES += $$SAILPLAY_SDK_INTERFACES/org.sailplay.App1.xml \
                    $$SAILPLAY_SDK_INTERFACES/org.sailplay.Session1.xml \
                    $$SAILPLAY_SDK_INTERFACES/org.sailplay.Navigation1.xml
+
+sailplay_contracts.files = $$SAILPLAY_SDK_INTERFACES/org.sailplay.App1.xml \
+                          $$SAILPLAY_SDK_INTERFACES/org.sailplay.Session1.xml
+sailplay_contracts.prefix = /sailplay-sdk/interfaces
+sailplay_contracts.base = $$SAILPLAY_SDK_INTERFACES
+RESOURCES += sailplay_contracts

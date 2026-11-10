@@ -1,0 +1,1039 @@
+diff --git a/apps/mconnect/docs/sailplay-background.md b/apps/mconnect/docs/sailplay-background.md
+index 47e49e8..b004fe2 100644
+--- a/apps/mconnect/docs/sailplay-background.md
++++ b/apps/mconnect/docs/sailplay-background.md
+@@ -1,6 +1,6 @@
+ # Sailplay native background playback
+ 
+-Updated on 2026-11-06 for the native release 40 source.
++Updated on 2026-11-10 for the native release 52 source.
+ `harbour-mconnect --background` enters `mconnect-silica`, which initializes
+ native storage, account services, the playback runtime and MPRIS. Playback
+ memory restores paused. MPRIS Play and explicit UI controls use the same native
+@@ -20,7 +20,7 @@ The root D-Bus name serializes native launches. A subsequent foreground launch
+ calls `Show` on the owner. A subsequent background launch calls
+ `EnsurePlayback`. That method reuses the initialized runtime and its paused
+ restoration. `Show` prepares the QML view once, starts bridge subscriptions and
+-raises the window. Queue, position and accounts belong to the existing runtime
++raises the window. Reopening recreates the released QML tree. Queue, position and accounts belong to the existing runtime
+ throughout activation.
+ 
+ MPRIS retains `org.mpris.MediaPlayer2.harbour_mconnect`, the existing
+@@ -28,10 +28,25 @@ MPRIS retains `org.mpris.MediaPlayer2.harbour_mconnect`, the existing
+ the same foreground presentation path. Artwork uses the native private cache
+ and loopback decoder.
+ 
+-Minimizing retains the runtime. Explicitly closing the foreground view exits
+-the application. Shutdown releases MPRIS, closes native work, unregisters the
+-Silica objects/name and finally releases the root activation name.
++Closing the foreground view hides the phone window, releases its QML tree and
++suspends UI polling. The native runtime remains alive while a Sailplay session,
++playback, download queue, login operation, local scan, lyric load or accepted
++core/bridge request needs it. Hidden car sessions retain their lease. Pausing
++playback keeps a leased core paused.
+ 
+-Native activation, MPRIS and bridge fixtures passed on the host. The release 40
+-Sailfish RPM and device lifecycle validation remain pending. The earlier
+-`sailplay-background-validation.md` records historical packaged-host evidence.
++`org.sailplay.App1` is exported before the root application name is acquired.
++Caller-owned `org.sailplay.Session1` objects provide revisioned media snapshots,
++activity and explicit close. Owner loss releases the caller's sessions. Media
++commands use the existing MPRIS interface.
++
++When the phone presentation, sessions and work have all ended, a ten-second
++idle grace permits exit. The timer inspects current work and leases again at
++its deadline. Foreground activation cancels pending presentation release and
++idle exit. Shutdown releases MPRIS, closes native work, unregisters the Silica
++objects/name and finally releases the root activation name.
++
++The lifecycle integration and SDK source overlay are published with Sailplay.
++The guarded integration script checks the native release 51 source files and
++preserves unrelated migration work. Installed verification is recorded in
++Sailplay's `todo.md`. The earlier `sailplay-background-validation.md` records
++historical packaged-host evidence.
+diff --git a/apps/mconnect/elinux/harbour-mconnect-silica.desktop b/apps/mconnect/elinux/harbour-mconnect-silica.desktop
+index 91025aa..e71d821 100644
+--- a/apps/mconnect/elinux/harbour-mconnect-silica.desktop
++++ b/apps/mconnect/elinux/harbour-mconnect-silica.desktop
+@@ -4,6 +4,11 @@ Name=Mconnect
+ Icon=harbour-mconnect
+ Categories=AudioVideo;Audio;Music;Player;
+ X-Sailplay-BackgroundService=org.sailfishos.Mconnect
++X-Sailplay-ApiVersion=1
++X-Sailplay-Service=org.sailfishos.Mconnect
++X-Sailplay-ObjectPath=/org/sailplay/v1/App
++X-Sailplay-Presentation=template
++X-Sailplay-Capabilities=media;
+ Exec=/usr/bin/harbour-mconnect-silica
+ X-Nemo-Application-Type=generic
+ X-Nemo-Single-Instance=no
+diff --git a/apps/mconnect/elinux/harbour-mconnect.desktop.in b/apps/mconnect/elinux/harbour-mconnect.desktop.in
+index fac19ea..0e8f79a 100644
+--- a/apps/mconnect/elinux/harbour-mconnect.desktop.in
++++ b/apps/mconnect/elinux/harbour-mconnect.desktop.in
+@@ -9,6 +9,11 @@ Exec=/usr/bin/harbour-mconnect
+ X-Nemo-Application-Type=generic
+ X-Nemo-Single-Instance=no
+ X-Sailplay-BackgroundService=org.sailfishos.Mconnect
++X-Sailplay-ApiVersion=1
++X-Sailplay-Service=org.sailfishos.Mconnect
++X-Sailplay-ObjectPath=/org/sailplay/v1/App
++X-Sailplay-Presentation=template
++X-Sailplay-Capabilities=media;
+ 
+ [X-Sailjail]
+ OrganizationName=org.sailfishos
+diff --git a/apps/mconnect/elinux/silica/CMakeLists.txt b/apps/mconnect/elinux/silica/CMakeLists.txt
+index 1b201d5..cc5ea20 100644
+--- a/apps/mconnect/elinux/silica/CMakeLists.txt
++++ b/apps/mconnect/elinux/silica/CMakeLists.txt
+@@ -25,6 +25,7 @@ add_library(mconnect_native_core STATIC
+   native_music.cpp
+   native_platforms.cpp
+   native_platforms.h
++  native_presentation.cpp
+   native_player.cpp
+   native_qq.cpp
+   native_qq_account.cpp
+@@ -37,7 +38,11 @@ add_library(mconnect_native_core STATIC
+ apply_standard_settings(mconnect_native_core)
+ target_compile_options(mconnect_native_core PRIVATE -Wno-misleading-indentation)
+ target_link_libraries(mconnect_native_core PUBLIC Qt5::Gui Qt5::DBus Qt5::Network
+-  PkgConfig::SQLITE PkgConfig::TAGLIB ZLIB::ZLIB)
++  Qt5::Quick PkgConfig::SQLITE PkgConfig::TAGLIB ZLIB::ZLIB)
++
++set(MCONNECT_SAILPLAY_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sailplay-sdk/sdk/qt" CACHE PATH "Sailplay Qt SDK source")
++add_subdirectory("${MCONNECT_SAILPLAY_SDK_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/sailplay-sdk")
++install(FILES "${MCONNECT_SAILPLAY_SDK_DIR}/../../LICENSE" DESTINATION share/licenses/harbour-mconnect RENAME sailplay-sdk-LICENSE)
+ 
+ add_library(mconnect_native_ui STATIC bridge.cpp bridge.h)
+ apply_standard_settings(mconnect_native_ui)
+@@ -49,7 +54,7 @@ set_target_properties(mconnect-silica PROPERTIES
+   INSTALL_RPATH "$ORIGIN/../libexec/harbour-mconnect/lib")
+ apply_standard_settings(mconnect-silica)
+ target_compile_definitions(mconnect-silica PRIVATE MCONNECT_VERSION="${PROJECT_VERSION}")
+-target_link_libraries(mconnect-silica PRIVATE mconnect_native_ui mconnect_native_core mconnect_audio
++target_link_libraries(mconnect-silica PRIVATE mconnect_native_ui mconnect_native_core mconnect_audio sailplay_sdk_provider
+   Qt5::Quick Qt5::Qml PkgConfig::SAILFISHAPP)
+ 
+ if(MCONNECT_BUILD_TESTS OR MCONNECT_BUILD_COVER_TESTS)
+@@ -59,11 +64,11 @@ if(MCONNECT_BUILD_TESTS OR MCONNECT_BUILD_COVER_TESTS)
+   foreach(module qq_account qq kugou kugou_content kugou_account kugou_library
+       bilibili account catalog content platforms storage music library core_service
+       downloads login local_music lyric_document lyric_loader player runtime source_match mpris
+-      ui artwork lyrics lyrics_bridge core_transfer)
++      ui artwork lyrics lyrics_bridge core_transfer presentation lifecycle)
+     add_executable(mconnect_native_${module}_test ../../test/native_${module}_test.cc)
+     apply_standard_settings(mconnect_native_${module}_test)
+     target_compile_options(mconnect_native_${module}_test PRIVATE -Wno-misleading-indentation)
+-    target_link_libraries(mconnect_native_${module}_test PRIVATE mconnect_native_ui mconnect_native_core mconnect_fixture_audio)
++    target_link_libraries(mconnect_native_${module}_test PRIVATE mconnect_native_ui mconnect_native_core mconnect_fixture_audio sailplay_sdk_provider)
+     add_test(NAME native_${module} COMMAND mconnect_native_${module}_test)
+   endforeach()
+ endif()
+diff --git a/apps/mconnect/elinux/silica/bridge.cpp b/apps/mconnect/elinux/silica/bridge.cpp
+index f0cde1e..f6e9b5f 100644
+--- a/apps/mconnect/elinux/silica/bridge.cpp
++++ b/apps/mconnect/elinux/silica/bridge.cpp
+@@ -39,6 +39,8 @@ class LyricsReadJob : public QThread {
+ };
+ CoreBridge::CoreBridge(QObject* parent, bool enabled) : QObject(parent),
+     bus_(QDBusConnection::connectToBus(QDBusConnection::SessionBus, "mconnect-native-ui-client")) {
++  reconnectTimer_.setInterval(2000);
++  connect(&reconnectTimer_, &QTimer::timeout, this, &CoreBridge::reconnect);
+   if (enabled) start();
+ }
+ void CoreBridge::start() {
+@@ -46,17 +48,22 @@ void CoreBridge::start() {
+   started_ = true;
+   bus_.connect(service, path, service, "Changed",
+       this, SLOT(changed(QString,QString)));
+-  auto* timer = new QTimer(this);
+-  timer->setInterval(2000);
+-  connect(timer, &QTimer::timeout, this, &CoreBridge::reconnect);
+-  timer->start();
++  ready_ = false;
++  emit readyChanged();
++  reconnectTimer_.start();
+   QTimer::singleShot(0, this, SLOT(reconnect()));
+ }
++void CoreBridge::suspend() {
++  started_ = false;
++  reconnectTimer_.stop();
++  bus_.disconnect(service, path, service, "Changed", this, SLOT(changed(QString,QString)));
++}
+ CoreBridge::~CoreBridge() {
+   for (auto* job : lyricJobs_) { job->disconnect(this); job->wait(); delete job; }
+ }
+ int CoreBridge::request(const QString& method, const QVariantMap& args) {
+   const int id = ++sequence_;
++  pendingRequests_.insert(id);
+   const auto song=state_.value("song").toMap();
+   if (method=="lyrics" && !song.value("id").toString().isEmpty() && song.value("platform")!="local") {
+     auto* job=new LyricsReadJob;
+@@ -66,7 +73,7 @@ int CoreBridge::request(const QString& method, const QVariantMap& args) {
+     const auto track=track_;
+     connect(job,&QThread::finished,this,[this,job,id,method,args,track](){
+       lyricJobs_.remove(job);
+-      if(track!=track_){emit completed(id,QVariant(),QStringLiteral("歌曲已切换"));return;}
++      if(track!=track_){finishRequest(id,method,QVariant(),QStringLiteral("歌曲已切换"));return;}
+       if(job->result.isEmpty())sendRequest(id,method,args);
+       else {qInfo("MCONNECT_NATIVE_LYRICS_CACHE_HIT");finishRequest(id,method,job->result,QString());}
+     });
+@@ -104,12 +111,13 @@ void CoreBridge::finishRequest(int id,const QString& method,const QVariant& valu
+     auto mapped=value.toMap();mapped["artwork"]=artworkCache_.MediaUrl(mapped.take("artworkSource").toString());
+     finishRequest(id,method,mapped,error);return;
+   }
++  pendingRequests_.remove(id);
+   if (method=="snapshot") {
+     connecting_=false;
+     if (!error.isEmpty()) { if(ready_){ready_=false;emit readyChanged();} }
+     else {
+       const bool initial=!ready_;ready_=true;applyState(value.toMap());
+-      if(initial){emit readyChanged();request("lyrics");request("queue");request("accounts");}
++      if(initial){emit readyChanged();if(started_){request("lyrics");request("queue");request("accounts");}}
+     }
+   } else if(error.isEmpty()) {
+     if(method=="lyrics"){lyrics_=value.toMap();emit lyricsChanged();}
+@@ -160,7 +168,7 @@ QString CoreBridge::clipboardText() {
+   return text.size()<=250000 ? text : QString();
+ }
+ void CoreBridge::reconnect() {
+-  if (connecting_) return;
++  if (!started_ || connecting_) return;
+   connecting_ = true;
+   request("snapshot");
+ }
+diff --git a/apps/mconnect/elinux/silica/bridge.h b/apps/mconnect/elinux/silica/bridge.h
+index a859b67..8acc6be 100644
+--- a/apps/mconnect/elinux/silica/bridge.h
++++ b/apps/mconnect/elinux/silica/bridge.h
+@@ -3,6 +3,7 @@
+ #include <QVariantMap>
+ #include <QDBusConnection>
+ #include <QNetworkAccessManager>
++#include <QTimer>
+ #include <functional>
+ #include <memory>
+ #include "native_artwork.h"
+@@ -21,6 +22,8 @@ class CoreBridge : public QObject {
+   explicit CoreBridge(QObject* parent = nullptr, bool enabled = true);
+   ~CoreBridge() override;
+   void start();
++  void suspend();
++  bool hasPendingWork() const { return !pendingRequests_.isEmpty() || !lyricJobs_.isEmpty(); }
+   QVariantMap state() const { return state_; }
+   QVariantMap lyrics() const { return lyrics_; }
+   QString artwork() const { return artwork_; }
+@@ -61,6 +64,8 @@ class CoreBridge : public QObject {
+   QNetworkAccessManager network_;
+   NativeArtwork artworkCache_;
+   QSet<QThread*> lyricJobs_;
++  QSet<int> pendingRequests_;
++  QTimer reconnectTimer_;
+   bool ready_ = false, connecting_ = false, started_ = false;
+   int sequence_ = 0;
+ };
+diff --git a/apps/mconnect/elinux/silica/main.cpp b/apps/mconnect/elinux/silica/main.cpp
+index 002277a..a70f083 100644
+--- a/apps/mconnect/elinux/silica/main.cpp
++++ b/apps/mconnect/elinux/silica/main.cpp
+@@ -4,6 +4,7 @@
+ #include <QQuickRenderControl>
+ #include <QQuickWindow>
+ #include <QMouseEvent>
++#include <QCloseEvent>
+ #include <QQmlContext>
+ #include <QQmlEngine>
+ #include <QQmlComponent>
+@@ -28,7 +29,9 @@
+ #include "native_activation.h"
+ #include "native_mpris.h"
+ #include "native_platforms.h"
++#include "native_presentation.h"
+ #include "native_runtime.h"
++#include "sailplayprovider.h"
+ 
+ namespace {
+ volatile std::sig_atomic_t stopping = 0;
+@@ -401,27 +404,15 @@ bool ValidateDownloadRows(QObject* page) {
+ }
+ }
+ 
+-class WindowControl : public QObject {
+-  Q_OBJECT
+-  Q_CLASSINFO("D-Bus Interface", "org.sailfishos.Mconnect.Silica")
+- public:
+-  QQuickView* view = nullptr;
+-  bool requested = false;
+-  std::function<bool()> prepare;
+- public slots:
+-  void Show() {
+-    requested = true;
+-    if (view && (!prepare || prepare())) { view->showFullScreen(); view->raise(); view->requestActivate(); }
+-  }
+-};
+-
+ int main(int argc, char** argv) {
+   umask(0077);
+-  // Direct desktop/SSH launches may bypass the invoker's input environment.
+-  // Select the system input context before QGuiApplication loads plugins.
++  // Direct and D-Bus launches may bypass the invoker's Qt environment.
++  // Select the phone compositor and input context before loading plugins.
++  if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) qputenv("QT_QPA_PLATFORM", "wayland");
+   if (qEnvironmentVariableIsEmpty("QT_IM_MODULE")) qputenv("QT_IM_MODULE", "Maliit");
+   std::unique_ptr<QGuiApplication> application(SailfishApp::application(argc, argv));
+   auto& app = *application;
++  app.setQuitOnLastWindowClosed(false);
+   std::signal(SIGTERM, stop);
+   std::signal(SIGINT, stop);
+   QTimer stopTimer;
+@@ -444,8 +435,12 @@ int main(int argc, char** argv) {
+       ? app.arguments().at(validateIndex + 1) : "/usr/share/harbour-mconnect/qml";
+   auto bus = QDBusConnection::sessionBus();
+   NativeActivation activation;
+-  WindowControl control;
+-  QObject::connect(&activation, &NativeActivation::showRequested, &control, &WindowControl::Show);
++  SailplayProvider provider(bus, "harbour-mconnect", {}, {"media"});
++  NativePresentation control;
++  // Export the SDK object before acquiring the activatable application name.
++  // Cold-start clients can open their lease as soon as ownership is announced.
++  if (!validate && !provider.start()) return 1;
++  QObject::connect(&activation, &NativeActivation::showRequested, &control, &NativePresentation::Show);
+   if (!validate && !activation.start()) {
+     auto call = QDBusMessage::createMethodCall("org.sailfishos.Mconnect", "/org/sailfishos/Mconnect",
+         "org.sailfishos.Mconnect", background ? "EnsurePlayback" : "Show");
+@@ -506,7 +501,7 @@ QtObject {
+   view.setResizeMode(QQuickView::SizeRootObjectToView);
+   view.rootContext()->setContextProperty("core", validate ? validationCore.get() : &bridge);
+   view.rootContext()->setContextProperty("validationMode", validate);
+-  control.view = &view;
++  control.attach(view);
+   control.prepare = [&app, &view, &bridge, qmlDirectory, validate]() {
+     if (!validate) bridge.start();
+     if (view.source().isEmpty()) view.setSource(QUrl::fromLocalFile(qmlDirectory + "/main.qml"));
+@@ -1093,15 +1088,48 @@ QtObject {
+     fprintf(stderr,"SILICA_SEARCH_LAYOUT_PASS four-orientations mini-player empty-query empty-results both-types busy-error\n");
+     fprintf(stderr,"SILICA_PLAYER_MENU_PASS page-top ownership full-width header-pointer-drag cover-lyrics\n");
+     fprintf(stderr,"SILICA_VALIDATION_ISOLATED_CORE_PASS requests-use-fixture\n");
++    for (int cycle = 0; cycle < 2; ++cycle) {
++      QPointer<QObject> oldRoot(view.rootObject());
++      QCloseEvent close;
++      QCoreApplication::sendEvent(&view, &close);
++      app.processEvents();
++      QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
++      if (oldRoot || view.rootObject() || control.requested || !view.source().isEmpty()) return 1;
++      control.Show();
++      view.hide();
++      if (!view.rootObject() || view.status() == QQuickView::Error ||
++          view.rootContext()->contextProperty("core").value<QObject*>() != validationCore.get()) return 1;
++      view.rootObject()->setParentItem(validationWindow->contentItem());
++      app.processEvents();
++    }
++    fprintf(stderr,"SILICA_PRESENTATION_REOPEN_PASS close-event qml-release same-core two-cycles\n");
+     fprintf(stderr,app.arguments().contains("--shell-only")?"SILICA_SHELL_ONLY_VALIDATION_PASS\n":"SILICA_QML_VALIDATION_PASS components=32\n");
+     return 0;
+   }
+   NativeMpris mpris(runtime->player(), *bridge.artworkBackend(),
+       [&runtime]() { return runtime->artworkSource(); }, [&control]() { control.Show(); });
+   if (!mpris.start()) { qCritical("MCONNECT_NATIVE_MPRIS_START_FAILED"); return 1; }
+-  if (!background || control.requested) view.showFullScreen();
++  QObject::connect(&control, &NativePresentation::presentationClosed, &bridge, &CoreBridge::suspend);
++  control.keepAlive = [&]() {
++    return provider.sessionCount() > 0 || runtime->hasOngoingWork() || bridge.hasPendingWork();
++  };
++  const auto publish = [&]() {
++    auto media = runtime->player().snapshot();
++    // D-Bus variants require a concrete type, including before a song is loaded.
++    media["song"] = media.value("song").toMap();
++    provider.publish({{"media", media}});
++  };
++  QObject::connect(&runtime->player(), &NativePlayer::changed, &provider, publish);
++  publish();
++  QObject::connect(&control, &NativePresentation::idle, &app, [&]() {
++    qInfo("MCONNECT_NATIVE_IDLE_EXIT");
++    app.quit();
++  });
++  control.monitor();
++  if (!background || control.requested) control.Show();
+   else qInfo("MCONNECT_NATIVE_BACKGROUND_READY");
+   const int result = app.exec();
++  provider.close();
+   mpris.close();
+   runtime->close();
+   bus.unregisterObject("/org/sailfishos/Mconnect/Silica");
+@@ -1111,4 +1139,3 @@ QtObject {
+   activation.close();
+   return result;
+ }
+-#include "main.moc"
+diff --git a/apps/mconnect/elinux/silica/native_core.cpp b/apps/mconnect/elinux/silica/native_core.cpp
+index 32a3995..c99a91e 100644
+--- a/apps/mconnect/elinux/silica/native_core.cpp
++++ b/apps/mconnect/elinux/silica/native_core.cpp
+@@ -4,6 +4,7 @@
+ #include <QDBusError>
+ #include <QJsonArray>
+ #include <QJsonDocument>
++#include <QScopedValueRollback>
+ #include <QTimer>
+ #include <QUuid>
+ 
+@@ -94,6 +95,7 @@ void NativeCoreService::publish(const QString& topic, const QVariant& value) {
+ }
+ 
+ QString NativeCoreService::execute(const QString& method, const QVariantMap& arguments) {
++  QScopedValueRollback<int> executing(executing_, executing_ + 1);
+   return method == "_readTransfer" ? encode(transferPart(arguments)) : encode(dispatch_(method, arguments));
+ }
+ 
+diff --git a/apps/mconnect/elinux/silica/native_core.h b/apps/mconnect/elinux/silica/native_core.h
+index d78fb2c..2510ef1 100644
+--- a/apps/mconnect/elinux/silica/native_core.h
++++ b/apps/mconnect/elinux/silica/native_core.h
+@@ -15,6 +15,7 @@ class NativeCoreService : public QObject, protected QDBusContext {
+   explicit NativeCoreService(Dispatch dispatch, QObject* parent = nullptr, Clock clock = {});
+   bool start();
+   void close();
++  bool hasPendingWork() const { return processing_ || executing_ > 0 || !pending_.isEmpty(); }
+   void publish(const QString& topic, const QVariant& value);
+   QString encode(const QVariant& value);
+   QVariantMap transferPart(const QVariantMap& arguments);
+@@ -31,6 +32,7 @@ class NativeCoreService : public QObject, protected QDBusContext {
+   QStringList transferOrder_;
+   QQueue<Pending> pending_;
+   bool processing_ = false;
++  int executing_ = 0;
+   bool started_ = false;
+   void purgeTransfers();
+   void process();
+diff --git a/apps/mconnect/elinux/silica/native_downloads.h b/apps/mconnect/elinux/silica/native_downloads.h
+index f00c957..32ddeee 100644
+--- a/apps/mconnect/elinux/silica/native_downloads.h
++++ b/apps/mconnect/elinux/silica/native_downloads.h
+@@ -17,6 +17,10 @@ class NativeDownloads : public QObject {
+                   WifiProbe wifi = {}, SpaceProbe space = {}, bool resumeStored = true);
+   ~NativeDownloads() override;
+   QVariantMap snapshot() const;
++  bool hasOngoingWork() const {
++    return !closed_ && (pumping_ || !jobs_.isEmpty() || flushTimer_.isActive() ||
++        (!paused_ && (!waiting_.isEmpty() || !retryTimers_.isEmpty())));
++  }
+   QString directory() const;
+   void setDirectory(const QString& path);
+   void enqueue(const QVariantMap& song, int quality, bool cache = false);
+diff --git a/apps/mconnect/elinux/silica/native_local_music.h b/apps/mconnect/elinux/silica/native_local_music.h
+index dc5bd38..3ea3838 100644
+--- a/apps/mconnect/elinux/silica/native_local_music.h
++++ b/apps/mconnect/elinux/silica/native_local_music.h
+@@ -12,6 +12,7 @@ class NativeLocalMusic : public QObject {
+   NativeLocalMusic(NativeStorage& storage, QObject* parent = nullptr);
+   ~NativeLocalMusic() override;
+   QVariantMap snapshot() const;
++  bool hasOngoingWork() const { return worker_ != nullptr; }
+   void scan(const QString& directory);
+   QVariantList groups(const QVariantMap& arguments) const;
+   QVariantList songs(const QVariantMap& arguments) const;
+diff --git a/apps/mconnect/elinux/silica/native_login.cpp b/apps/mconnect/elinux/silica/native_login.cpp
+index 5a47221..75a9c7d 100644
+--- a/apps/mconnect/elinux/silica/native_login.cpp
++++ b/apps/mconnect/elinux/silica/native_login.cpp
+@@ -1,4 +1,5 @@
+ #include "native_login.h"
++#include <QScopedValueRollback>
+ 
+ #include <QBuffer>
+ #include <QDateTime>
+@@ -57,6 +58,7 @@ NativeLogin::NativeLogin(NativeMusicServices& music, QObject* parent, int lifeti
+ }
+ 
+ QVariantMap NativeLogin::begin(const QString& platform, const QString& clientSession, const QString& variant) {
++  QScopedValueRollback<bool> running(running_, true);
+   NativeServicePlatform(platform);
+   NativeIdentifier(clientSession, 128);
+   if (!variant.isEmpty() && (platform != "kugou" || !QStringList{"lite", "android"}.contains(variant))) {
+@@ -101,6 +103,7 @@ void NativeLogin::status(const QString& value) {
+ }
+ 
+ void NativeLogin::check() {
++  QScopedValueRollback<bool> running(running_, true);
+   const auto generation = generation_;
+   const auto platform = platform_;
+   if (state_.isEmpty()) return;
+@@ -144,7 +147,11 @@ void NativeLogin::cancel(const QVariant& clientSession) {
+   platform_.clear(); key_.clear(); cookie_.clear(); state_.clear();
+   emit changed();
+   auto* music = &music_;
+-  if (!platform.isEmpty() && !key.isEmpty()) QTimer::singleShot(0, music, [music, platform, key, cookie]() {
+-    try { music->loginRequest(platform, "qrCancel", {{"key", key}}, cookie); } catch (...) {}
+-  });
++  if (!platform.isEmpty() && !key.isEmpty()) {
++    ++pendingCancels_;
++    QTimer::singleShot(0, this, [this, music, platform, key, cookie]() {
++      try { music->loginRequest(platform, "qrCancel", {{"key", key}}, cookie); } catch (...) {}
++      --pendingCancels_;
++    });
++  }
+ }
+diff --git a/apps/mconnect/elinux/silica/native_login.h b/apps/mconnect/elinux/silica/native_login.h
+index 32cb7ca..1bac3cd 100644
+--- a/apps/mconnect/elinux/silica/native_login.h
++++ b/apps/mconnect/elinux/silica/native_login.h
+@@ -11,6 +11,7 @@ class NativeLogin : public QObject {
+   NativeLogin(NativeMusicServices& music, QObject* parent = nullptr, int lifetimeMs = 180000, int pollIntervalMs = 2000);
+   QVariantMap begin(const QString& platform, const QString& clientSession, const QString& variant = {});
+   QVariantMap state() const { return state_; }
++  bool hasOngoingWork() const { return running_ || saving_ || pendingCancels_ > 0 || poll_.isActive() || expiry_.isActive(); }
+   void cancel(const QVariant& clientSession = {});
+  signals:
+   void changed();
+@@ -22,6 +23,8 @@ class NativeLogin : public QObject {
+   qint64 expires_ = 0;
+   int lifetimeMs_, pollIntervalMs_;
+   bool saving_ = false;
++  bool running_ = false;
++  int pendingCancels_ = 0;
+   QTimer poll_, expiry_;
+   void check();
+   void status(const QString& value);
+diff --git a/apps/mconnect/elinux/silica/native_lyric_loader.h b/apps/mconnect/elinux/silica/native_lyric_loader.h
+index f630805..ce726e6 100644
+--- a/apps/mconnect/elinux/silica/native_lyric_loader.h
++++ b/apps/mconnect/elinux/silica/native_lyric_loader.h
+@@ -13,6 +13,7 @@ class NativeLyricLoader : public QObject {
+   using LrclibFetch = std::function<QString(const QVariantMap&)>;
+   NativeLyricLoader(NativeStorage& storage, NativeMusicServices& music, QObject* parent = nullptr, LrclibFetch lrclib = {});
+   QVariantMap snapshot() const;
++  bool hasOngoingWork() const { return !closed_ && (loading_ || running_ || scheduled_); }
+   QVariantMap document() const { return document_; }
+   void load(const QVariantMap& song, bool preferCached = true);
+   void close();
+diff --git a/apps/mconnect/elinux/silica/native_player.h b/apps/mconnect/elinux/silica/native_player.h
+index 2b41855..ec57b58 100644
+--- a/apps/mconnect/elinux/silica/native_player.h
++++ b/apps/mconnect/elinux/silica/native_player.h
+@@ -14,6 +14,7 @@ class NativePlayer : public QObject {
+   NativePlayer(NativeStorage& storage, NativeMusicServices& music, NativeDownloads& downloads, NativeLibrary& library, QObject* parent = nullptr);
+   ~NativePlayer() override;
+   QVariantMap snapshot() const;
++  bool hasOngoingWork() const { return !closed_ && (playing_ || busy_ || pending_ || running_ || scheduled_); }
+   QVariantMap currentSong() const { return song_; }
+   QVariantList playlist() const { return playlist_; }
+   QString sourcePlatform() const { return source_; }
+diff --git a/apps/mconnect/elinux/silica/native_presentation.cpp b/apps/mconnect/elinux/silica/native_presentation.cpp
+new file mode 100644
+index 0000000..6c18b57
+--- /dev/null
++++ b/apps/mconnect/elinux/silica/native_presentation.cpp
+@@ -0,0 +1,63 @@
++#include "native_presentation.h"
++
++#include <QCloseEvent>
++#include <QUrl>
++
++NativePresentation::NativePresentation(QObject* parent) : QObject(parent) {
++  idle_.setSingleShot(true);
++  connect(&poll_, &QTimer::timeout, this, &NativePresentation::evaluate);
++  connect(&idle_, &QTimer::timeout, this, [this]() {
++    // Work or a new lease may arrive after the last poll, including inside a
++    // provider's nested event loop. Inspect authoritative state at the deadline.
++    if (canExit()) emit idle();
++  });
++}
++
++void NativePresentation::attach(QQuickView& view) {
++  if (view_) view_->removeEventFilter(this);
++  view_ = &view;
++  view_->installEventFilter(this);
++}
++
++void NativePresentation::monitor(int idleMs, int pollMs) {
++  idle_.setInterval(idleMs);
++  poll_.start(pollMs);
++  evaluate();
++}
++
++bool NativePresentation::canExit() const {
++  return !requested && (!keepAlive || !keepAlive());
++}
++
++void NativePresentation::evaluate() {
++  if (!canExit()) idle_.stop();
++  else if (!idle_.isActive()) idle_.start();
++}
++
++void NativePresentation::Show() {
++  requested = true;
++  ++generation_;
++  idle_.stop();
++  if (view_ && (!prepare || prepare())) {
++    view_->showFullScreen();
++    view_->raise();
++    view_->requestActivate();
++  }
++}
++
++bool NativePresentation::eventFilter(QObject* watched, QEvent* event) {
++  if (watched != view_ || event->type() != QEvent::Close) return QObject::eventFilter(watched, event);
++  static_cast<QCloseEvent*>(event)->ignore();
++  requested = false;
++  view_->hide();
++  const auto generation = ++generation_;
++  // Release the QML tree after its close event returns. A foreground activation
++  // in the meantime cancels release and keeps the new presentation attached.
++  QTimer::singleShot(0, this, [this, generation]() {
++    if (generation != generation_ || requested || !view_) return;
++    view_->setSource(QUrl());
++    emit presentationClosed();
++    evaluate();
++  });
++  return true;
++}
+diff --git a/apps/mconnect/elinux/silica/native_presentation.h b/apps/mconnect/elinux/silica/native_presentation.h
+new file mode 100644
+index 0000000..6b8daf1
+--- /dev/null
++++ b/apps/mconnect/elinux/silica/native_presentation.h
+@@ -0,0 +1,32 @@
++#pragma once
++
++#include <QObject>
++#include <QPointer>
++#include <QQuickView>
++#include <QTimer>
++#include <functional>
++
++class NativePresentation : public QObject {
++  Q_OBJECT
++  Q_CLASSINFO("D-Bus Interface", "org.sailfishos.Mconnect.Silica")
++ public:
++  explicit NativePresentation(QObject* parent = nullptr);
++  void attach(QQuickView& view);
++  void monitor(int idleMs = 10000, int pollMs = 500);
++  bool requested = false;
++  std::function<bool()> prepare;
++  std::function<bool()> keepAlive;
++ public slots:
++  void Show();
++ signals:
++  void presentationClosed();
++  void idle();
++ protected:
++  bool eventFilter(QObject* watched, QEvent* event) override;
++ private:
++  QPointer<QQuickView> view_;
++  QTimer poll_, idle_;
++  quint64 generation_ = 0;
++  bool canExit() const;
++  void evaluate();
++};
+diff --git a/apps/mconnect/elinux/silica/native_runtime.cpp b/apps/mconnect/elinux/silica/native_runtime.cpp
+index cbb040e..b7a0b8a 100644
+--- a/apps/mconnect/elinux/silica/native_runtime.cpp
++++ b/apps/mconnect/elinux/silica/native_runtime.cpp
+@@ -1,6 +1,7 @@
+ #include "native_runtime.h"
+ 
+ #include <QRegularExpression>
++#include <QScopedValueRollback>
+ #include <QUrl>
+ #include <algorithm>
+ #include <cmath>
+@@ -86,12 +87,18 @@ QStringList NativeCoreRuntime::requestNames() const {
+ }
+ 
+ QVariant NativeCoreRuntime::dispatch(const QString& method, const QVariantMap& arguments) {
++  QScopedValueRollback<int> executing(executing_, executing_ + 1);
+   if (closed_) throw NativeRequestFailure(QStringLiteral("请求已取消"));
+   const auto request = requests_.constFind(method);
+   if (request == requests_.cend()) throw NativeRequestFailure(QStringLiteral("请求参数无效"), true);
+   return request.value()(arguments);
+ }
+ 
++bool NativeCoreRuntime::hasOngoingWork() const {
++  return !closed_ && (executing_ > 0 || service_.hasPendingWork() || player_.hasOngoingWork() ||
++      downloads_.hasOngoingWork() || login_.hasOngoingWork() || local_.hasOngoingWork() || lyrics_.hasOngoingWork());
++}
++
+ QVariantMap NativeCoreRuntime::song(const QVariantMap& arguments) { return results_.song(arguments, player_.currentSong()); }
+ 
+ QString NativeCoreRuntime::artworkSource() const {
+diff --git a/apps/mconnect/elinux/silica/native_runtime.h b/apps/mconnect/elinux/silica/native_runtime.h
+index 38b472e..c5e1cb4 100644
+--- a/apps/mconnect/elinux/silica/native_runtime.h
++++ b/apps/mconnect/elinux/silica/native_runtime.h
+@@ -17,6 +17,7 @@ class NativeCoreRuntime : public QObject {
+   QStringList requestNames() const;
+   bool start();
+   void close();
++  bool hasOngoingWork() const;
+   NativePlayer& player() { return player_; }
+   NativeLyricLoader& lyrics() { return lyrics_; }
+   NativeMusicServices& music() { return music_; }
+@@ -39,6 +40,7 @@ class NativeCoreRuntime : public QObject {
+   QVariantMap lastState_;
+   QHash<QString, Request> requests_;
+   bool closed_ = false;
++  int executing_ = 0;
+   QVariantMap song(const QVariantMap& arguments);
+   QVariantMap songInfo(const QVariantMap& arguments);
+   QVariantMap discoverySongs(const QVariantMap& arguments);
+diff --git a/apps/mconnect/rpm/harbour-mconnect.spec b/apps/mconnect/rpm/harbour-mconnect.spec
+index 1e658dc..f8258dc 100644
+--- a/apps/mconnect/rpm/harbour-mconnect.spec
++++ b/apps/mconnect/rpm/harbour-mconnect.spec
+@@ -10,9 +10,9 @@ Name:       harbour-mconnect
+ 
+ Summary:    Multi-platform music player for Sailfish OS
+ Version:    1.6.0
+-Release:    51
++Release:    52
+ Group:      Applications/System
+-License:    MIT
++License:    MIT and GPLv3+
+ URL:        https://github.com/Hjdd14/Mconnect-Music_connect
+ Source0:    %{name}-%{version}.tar.bz2
+ Source100:  harbour-mconnect.yaml
+@@ -98,6 +98,11 @@ desktop-file-install --delete-original       \
+ # >> files
+ # Spectacle preserves this RPM metadata footer during YAML regeneration.
+ %changelog
++* Tue Nov 10 2026 BirdZhang - 1.6.0-52
++- Release the phone QML presentation while retaining playback and accepted work.
++- Export Sailplay media state and caller-owned sessions through the existing identity.
++- Reopen the phone presentation over the live core and exit after idle grace.
++
+ * Mon Nov 09 2026 BirdZhang - 1.6.0-51
+ - Select download directories with the Sailfish folder picker.
+ - Validate folder write access before saving the existing download root setting.
+diff --git a/apps/mconnect/rpm/harbour-mconnect.yaml.in b/apps/mconnect/rpm/harbour-mconnect.yaml.in
+index bf33ffa..d0f4a24 100644
+--- a/apps/mconnect/rpm/harbour-mconnect.yaml.in
++++ b/apps/mconnect/rpm/harbour-mconnect.yaml.in
+@@ -1,9 +1,9 @@
+ Name: harbour-mconnect
+ Summary: Multi-platform music player for Sailfish OS
+ Version: 1.6.0
+-Release: 51
++Release: 52
+ Group: Applications/System
+-License: MIT
++License: MIT and GPLv3+
+ URL: https://github.com/Hjdd14/Mconnect-Music_connect
+ NoIconCache: true
+ Sources:
+diff --git a/apps/mconnect/test/native_lifecycle_test.cc b/apps/mconnect/test/native_lifecycle_test.cc
+new file mode 100644
+index 0000000..a0c3a06
+--- /dev/null
++++ b/apps/mconnect/test/native_lifecycle_test.cc
+@@ -0,0 +1,174 @@
++#include "../elinux/silica/native_activation.h"
++#include "../elinux/silica/native_artwork.h"
++#include "../elinux/silica/native_mpris.h"
++#include "../elinux/silica/native_presentation.h"
++#include "../elinux/silica/native_runtime.h"
++#include "sailplayprovider.h"
++
++#include <QDBusArgument>
++#include <QDBusPendingCallWatcher>
++#include <QElapsedTimer>
++#include <QEventLoop>
++#include <QFile>
++#include <QGuiApplication>
++#include <QQuickItem>
++#include <QTemporaryDir>
++#include <QThread>
++#include <cstdio>
++#include <cstdlib>
++
++#define CHECK(condition) do { if (!(condition)) { fprintf(stderr, "LIFECYCLE_CHECK_FAILED line=%d %s\n", __LINE__, #condition); std::exit(1); } } while (false)
++
++namespace {
++bool waitFor(const std::function<bool()>& ready, int timeout = 2000) {
++  QElapsedTimer elapsed;
++  elapsed.start();
++  while (!ready() && elapsed.elapsed() < timeout) { QCoreApplication::processEvents(QEventLoop::AllEvents, 10); QThread::msleep(1); }
++  return ready();
++}
++void wait(int duration) {
++  QElapsedTimer elapsed;
++  elapsed.start();
++  while (elapsed.elapsed() < duration) { QCoreApplication::processEvents(QEventLoop::AllEvents, 10); QThread::msleep(1); }
++}
++QDBusMessage call(const QString& service, const QString& path, const QString& interface,
++                 const QString& member, const QVariantList& arguments = {}) {
++  auto message = QDBusMessage::createMethodCall(service, path, interface, member);
++  message.setArguments(arguments);
++  const auto client = QDBusConnection::connectToBus(QDBusConnection::SessionBus, "native-lifecycle-client");
++  QDBusPendingCallWatcher watcher(client.asyncCall(message, 3000));
++  QEventLoop loop;
++  QObject::connect(&watcher, &QDBusPendingCallWatcher::finished, &loop, &QEventLoop::quit);
++  if (!watcher.isFinished()) loop.exec();
++  return watcher.reply();
++}
++}
++
++int main(int argc, char** argv) {
++  QGuiApplication application(argc, argv);
++  application.setQuitOnLastWindowClosed(false);
++  QTemporaryDir temporary;
++  CHECK(temporary.isValid());
++  NativeStorage storage(temporary.path() + "/data", temporary.path() + "/cache");
++  storage.setCacheSetting("autoCleanup", false);
++  NativePresentation presentation;
++  NativeCoreRuntime* live = nullptr;
++  int exits = 0;
++  bool observedAcceptedWork = false;
++  NativeCoreRuntime runtime(storage, nullptr, [&](const QString& method, const QVariantList& arguments) {
++    if (method == "QqCatalog" && arguments.first() == "search") {
++      CHECK(live && live->hasOngoingWork() && live->service().hasPendingWork());
++      observedAcceptedWork = true;
++      const int previous = exits;
++      QEventLoop awaiting;
++      QTimer::singleShot(70, &awaiting, &QEventLoop::quit);
++      awaiting.exec();
++      CHECK(exits == previous && live->hasOngoingWork());
++      return QVariantMap{{"backend", "cpp-qq-catalog"}, {"songs", QVariantList{}}};
++    }
++    return QVariantMap{{"backend", "cpp-qq-account"}, {"qrKey", "fixture-key"}, {"qrUrl", "https://example.test/qr"},
++        {"qrStatus", "waiting"}, {"ok", true}};
++  }, []() { return false; }, [](const QVariantMap&) { return QString(); });
++  live = &runtime;
++  SailplayProvider provider("harbour-mconnect", {}, {"media"});
++  CHECK(provider.start());
++  NativeActivation activation;
++  CHECK(activation.start() && runtime.start());
++  const auto publish = [&]() {
++    auto media = runtime.player().snapshot();
++    media["song"] = media.value("song").toMap();
++    CHECK(provider.publish({{"media", media}}));
++  };
++  QObject::connect(&runtime.player(), &NativePlayer::changed, &provider, publish);
++  publish();
++  NativeArtwork artwork;
++  NativeMpris mpris(runtime.player(), artwork, []() { return QString(); }, [&]() { presentation.Show(); });
++  CHECK(mpris.start());
++  QFile qml(temporary.path() + "/main.qml");
++  CHECK(qml.open(QIODevice::WriteOnly));
++  qml.write("import QtQuick 2.0\nItem {}\n");
++  qml.close();
++  QQuickView view;
++  presentation.attach(view);
++  presentation.prepare = [&]() {
++    if (view.source().isEmpty()) view.setSource(QUrl::fromLocalFile(qml.fileName()));
++    return view.status() != QQuickView::Error;
++  };
++  presentation.keepAlive = [&]() { return provider.sessionCount() > 0 || runtime.hasOngoingWork(); };
++  QObject::connect(&presentation, &NativePresentation::idle, [&]() { ++exits; });
++  presentation.monitor(25, 5);
++  const auto opened = call("org.sailfishos.Mconnect", "/org/sailplay/v1/App", "org.sailplay.App1", "OpenSession", {"car", QStringList{"media"}});
++  CHECK(opened.type() == QDBusMessage::ReplyMessage);
++  const auto session = qvariant_cast<QDBusObjectPath>(opened.arguments().first()).path();
++  const auto instance = provider.instanceId();
++  CHECK(provider.sessionCount() == 1);
++  presentation.Show();
++  view.hide();
++  QFile audio(temporary.path() + "/track.mp3");
++  CHECK(audio.open(QIODevice::WriteOnly));
++  audio.write("isolated-audio-fixture");
++  audio.close();
++  const auto song = NativePlaybackSong({{"id", audio.fileName()}, {"platform", "local"}, {"name", "fixture track"}, {"durationMs", 100000}});
++  runtime.player().playSong(song);
++  CHECK(runtime.hasOngoingWork());
++  CHECK(waitFor([&]() { return runtime.player().snapshot().value("playing").toBool(); }));
++  CHECK(!view.close());
++  wait(80);
++  CHECK(!view.rootObject() && !presentation.requested && runtime.player().snapshot().value("playing").toBool());
++  CHECK(exits == 0 && provider.instanceId() == instance);
++  CHECK(call("org.sailfishos.Mconnect", session, "org.sailplay.Session1", "SetActive", {false}).type() == QDBusMessage::ReplyMessage);
++  CHECK(provider.activeSessionCount() == 0 && provider.sessionCount() == 1);
++  presentation.Show();
++  view.hide();
++  CHECK(view.rootObject() && provider.instanceId() == instance && runtime.player().snapshot().value("playing").toBool());
++  CHECK(!view.close());
++  CHECK(call("org.mpris.MediaPlayer2.harbour_mconnect", "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "Pause").type() == QDBusMessage::ReplyMessage);
++  CHECK(waitFor([&]() { return !runtime.hasOngoingWork(); }));
++  wait(70);
++  CHECK(exits == 0 && !runtime.player().snapshot().value("playing").toBool());
++  // A lease retains the paused core without restarting playback.
++  CHECK(call("org.sailfishos.Mconnect", session, "org.sailplay.Session1", "Close").type() == QDBusMessage::ReplyMessage);
++  CHECK(waitFor([&]() { return exits > 0; }));
++  const int beforeAccepted = exits;
++  presentation.Show();
++  view.hide();
++  QTimer::singleShot(5, &view, [&]() { CHECK(!view.close()); });
++  const auto searched = call("org.sailfishos.Mconnect.Core", "/org/sailfishos/Mconnect/Core", "org.sailfishos.Mconnect.Core", "Request",
++      {"search", "{\"platform\":\"qq\",\"query\":\"fixture\"}"});
++  CHECK(observedAcceptedWork && searched.type() == QDBusMessage::ReplyMessage);
++  CHECK(exits == beforeAccepted && !presentation.requested && !view.rootObject());
++  CHECK(waitFor([&]() { return exits > beforeAccepted; }));
++  // Scanning is retained until the worker has joined and imported its result.
++  CHECK(runtime.dispatch("localScan", {{"directory", temporary.path()}}).toMap().value("started").toBool());
++  CHECK(runtime.hasOngoingWork());
++  CHECK(waitFor([&]() { return !runtime.hasOngoingWork(); }));
++  runtime.close();
++  CHECK(!runtime.hasOngoingWork());
++  mpris.close();
++  activation.close();
++  provider.close();
++  {
++    NativeStorage workStorage(temporary.path() + "/work-data", temporary.path() + "/work-cache");
++    workStorage.setCacheSetting("autoCleanup", false);
++    NativeMusicServices music(workStorage, nullptr, [](const QString&, const QVariantList&) {
++      return QVariantMap{{"backend", "cpp-qq-account"}, {"qrKey", "fixture-key"}, {"qrUrl", "https://example.test/qr"}, {"qrStatus", "waiting"}, {"ok", true}};
++    });
++    NativeDownloads downloads(workStorage, music, nullptr, []() { return false; }, {}, false);
++    const auto remote = NativePlaybackSong({{"id", "queued"}, {"platform", "qq"}, {"name", "fixture"}});
++    downloads.enqueue(remote, 0, true);
++    CHECK(downloads.hasOngoingWork());
++    downloads.control({{"action", "pauseQueue"}});
++    CHECK(!downloads.hasOngoingWork());
++    NativeLogin login(music, nullptr, 45, 10);
++    CHECK(!login.hasOngoingWork());
++    CHECK(login.begin("qq", "lifecycle").value("status") == "waiting");
++    CHECK(login.hasOngoingWork());
++    CHECK(waitFor([&]() { return !login.hasOngoingWork(); }));
++    login.begin("qq", "cancel");
++    login.cancel();
++    CHECK(login.hasOngoingWork());
++    CHECK(waitFor([&]() { return !login.hasOngoingWork(); }));
++  }
++  puts("NATIVE_LIFECYCLE_PASS shared-core phone-close playing hidden-car paused-lease explicit-pause accepted-work scan downloads login idle cleanup");
++  return 0;
++}
+diff --git a/apps/mconnect/test/native_presentation_test.cc b/apps/mconnect/test/native_presentation_test.cc
+new file mode 100644
+index 0000000..1849140
+--- /dev/null
++++ b/apps/mconnect/test/native_presentation_test.cc
+@@ -0,0 +1,88 @@
++#include "../elinux/silica/native_presentation.h"
++
++#include <QCoreApplication>
++#include <QElapsedTimer>
++#include <QFile>
++#include <QGuiApplication>
++#include <QPointer>
++#include <QQuickItem>
++#include <QQmlContext>
++#include <QTemporaryDir>
++#include <QThread>
++#include <cstdio>
++#include <cstdlib>
++
++#define CHECK(condition) do { if (!(condition)) { fprintf(stderr, "PRESENTATION_CHECK_FAILED line=%d %s\n", __LINE__, #condition); std::exit(1); } } while (false)
++
++namespace {
++void wait(int duration) {
++  QElapsedTimer elapsed;
++  elapsed.start();
++  while (elapsed.elapsed() < duration) { QCoreApplication::processEvents(QEventLoop::AllEvents, 10); QThread::msleep(1); }
++}
++}
++
++int main(int argc, char** argv) {
++  QGuiApplication application(argc, argv);
++  application.setQuitOnLastWindowClosed(false);
++  QTemporaryDir temporary;
++  CHECK(temporary.isValid());
++  QFile qml(temporary.path() + "/main.qml");
++  CHECK(qml.open(QIODevice::WriteOnly));
++  qml.write("import QtQuick 2.0\nItem { property string owner: core.objectName }\n");
++  qml.close();
++  QObject core;
++  core.setObjectName("same-core");
++  QQuickView view;
++  view.rootContext()->setContextProperty("core", &core);
++  NativePresentation presentation;
++  presentation.attach(view);
++  bool work = false;
++  int leases = 1, idle = 0, closed = 0, prepared = 0;
++  presentation.keepAlive = [&]() { return work || leases > 0; };
++  presentation.prepare = [&]() {
++    if (view.source().isEmpty()) { view.setSource(QUrl::fromLocalFile(qml.fileName())); ++prepared; }
++    return view.status() != QQuickView::Error;
++  };
++  QObject::connect(&presentation, &NativePresentation::idle, [&]() { ++idle; });
++  QObject::connect(&presentation, &NativePresentation::presentationClosed, [&]() { ++closed; });
++  presentation.monitor(30, 5);
++  presentation.Show();
++  view.hide();
++  CHECK(presentation.requested && view.rootObject());
++  QPointer<QObject> original(view.rootObject());
++  CHECK(!view.close());
++  wait(80);
++  CHECK(!presentation.requested && !original && !view.rootObject() && closed == 1 && idle == 0);
++  presentation.Show();
++  view.hide();
++  CHECK(prepared == 2 && view.rootObject()->property("owner") == "same-core");
++  QPointer<QObject> reopened(view.rootObject());
++  CHECK(!view.close());
++  presentation.Show();
++  view.hide();
++  wait(20);
++  CHECK(presentation.requested && reopened && closed == 1 && prepared == 2);
++  CHECK(!view.close());
++  work = true;
++  leases = 0;
++  wait(80);
++  CHECK(closed == 2 && idle == 0);
++  work = false;
++  wait(80);
++  CHECK(idle > 0);
++  // Make new activity arrive between an idle poll and its exit callback.
++  for (bool lease : {false, true}) {
++    NativePresentation deferred;
++    bool pendingWork = false;
++    int pendingLeases = 0, exits = 0;
++    deferred.keepAlive = [&]() { return pendingWork || pendingLeases > 0; };
++    QObject::connect(&deferred, &NativePresentation::idle, [&]() { ++exits; });
++    deferred.monitor(25, 500);
++    QTimer::singleShot(10, &deferred, [&]() { pendingWork = !lease; pendingLeases = lease ? 1 : 0; });
++    wait(65);
++    CHECK(exits == 0);
++  }
++  puts("NATIVE_PRESENTATION_PASS close-event qml-release same-core reopen deferred-close hidden-lease work idle deadline-recheck");
++  return 0;
++}
+diff --git a/apps/mconnect/test/native_ui_test.cc b/apps/mconnect/test/native_ui_test.cc
+index 840771b..39ffb0e 100644
+--- a/apps/mconnect/test/native_ui_test.cc
++++ b/apps/mconnect/test/native_ui_test.cc
+@@ -49,10 +49,9 @@ int main(int argc, char** argv) {
+     if (args.value("query") == "slow") {
+       QTimer::singleShot(10, &application, [&]() { presentation->request("toggle"); });
+       QTimer::singleShot(30, &application, [&]() { presentation->request("next"); });
+-      QEventLoop wait;
+-      QTimer::singleShot(150, &wait, &QEventLoop::quit);
+-      wait.exec();
+-      responsive = current->player().currentSong().value("id") == "second" && current->player().snapshot().value("playing").toBool();
++      responsive = waitFor([&]() {
++        return current->player().currentSong().value("id") == "second" && current->player().snapshot().value("playing").toBool();
++      });
+     }
+     return QVariantMap{{"backend", "cpp-qq-catalog"}, {"songs", QVariantList{song("first"), song("second")}}};
+   }, []() { return false; }, [](const QVariantMap&) { return QString(); });
+diff --git a/apps/mconnect/tools/verify-rpm.py b/apps/mconnect/tools/verify-rpm.py
+index 5d007e8..6699f2f 100644
+--- a/apps/mconnect/tools/verify-rpm.py
++++ b/apps/mconnect/tools/verify-rpm.py
+@@ -15,7 +15,7 @@ def rpm(*arguments):
+ 
+ 
+ identity = rpm('-qp', '--qf', '%{NAME} %{VERSION} %{RELEASE} %{ARCH}').split()
+-assert identity == ['harbour-mconnect', '1.6.0', '51', 'aarch64'], identity
++assert identity == ['harbour-mconnect', '1.6.0', '52', 'aarch64'], identity
+ files = rpm('-qlp').splitlines()
+ for name in files:
+     assert '..' not in PurePosixPath(name).parts, name
+@@ -149,6 +149,9 @@ with tempfile.TemporaryDirectory(prefix='mconnect-rpm-check-') as temporary:
+             f'Exec=/usr/bin/{application}',
+             'X-Nemo-Single-Instance=no',
+             'X-Sailplay-BackgroundService=org.sailfishos.Mconnect',
++            'X-Sailplay-ApiVersion=1', 'X-Sailplay-Service=org.sailfishos.Mconnect',
++            'X-Sailplay-ObjectPath=/org/sailplay/v1/App',
++            'X-Sailplay-Presentation=template', 'X-Sailplay-Capabilities=media;',
+             'Categories=AudioVideo;Audio;Music;Player;', 'Icon=harbour-mconnect',
+             'X-Nemo-Application-Type=generic', '[X-Sailjail]',
+             'OrganizationName=org.sailfishos', 'ApplicationName=Mconnect',

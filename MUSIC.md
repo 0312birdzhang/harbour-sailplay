@@ -1,47 +1,53 @@
 # Background music integration
 
-Sailplay 0.1.1-42 activates the selected player's declared background service
-instead of launching its desktop UI. Already-running MPRIS players are reused.
-Opening the car music view prepares playback but never implicitly plays music;
-the play button sends MPRIS Play after the remembered player becomes ready.
+Sailplay activates the selected player's declared background service and reuses
+its MPRIS player. Opening the car music view prepares the backend. The play
+button sends MPRIS Play after the remembered player becomes ready.
 
 ## Mconnect adapter
 
-Source: `sfos-music/flutter-sailfishos/apps/mconnect`.
-Package: `harbour-mconnect-1.5.0-9.aarch64.rpm`.
+The current implementation uses the native C++/Silica runtime in
+`sfos-music/flutter-sailfishos/apps/mconnect`. The lifecycle integration produces
+Mconnect 1.6.0-52 and Sailplay 0.1.1-62. Its source patch and checked SDK overlay
+are published with Sailplay. [Integration](sdk/integrations/mconnect/README.md)
 
-The desktop declares:
+The desktop declares its existing activation identity and the media template.
 
 ```ini
 X-Sailplay-BackgroundService=org.sailfishos.Mconnect
+X-Sailplay-ApiVersion=1
+X-Sailplay-Service=org.sailfishos.Mconnect
+X-Sailplay-ObjectPath=/org/sailplay/v1/App
+X-Sailplay-Presentation=template
+X-Sailplay-Capabilities=media;
 ```
 
-The session D-Bus service runs `/usr/bin/harbour-mconnect --background`.
-That mode initializes one shared ProviderContainer, authentication, storage,
-PlayerNotifier, saved queue/position and MPRIS. It does not build the phone widget
-tree. The existing embedder needs an EGL rendering context before starting, so
-the host prepares it but defers the first phone buffer/presentation until the
-user explicitly opens the phone app. This is not a launch-then-minimize trick.
+The session D-Bus service launches the native binary through its Sailjail
+desktop identity with `--background`. It initializes one native storage,
+authentication, playback and MPRIS core, restoring the queue and position paused.
+Phone QML loads on Show or MPRIS Raise. Repeated activation uses the root D-Bus
+owner and the same core.
 
-A runtime flock and `org.sailfishos.Mconnect` control service serialize launches.
-A normal phone launch sends Show to the existing process. MPRIS Raise then builds
-the phone UI using the existing ProviderContainer; queue, track and playback
-remain owned by the same core. Raise itself never starts music. The car controls
-remain Sailplay QML controls reading and controlling that core through MPRIS.
-
-Pinned embedder implementation inspected during development:
-https://github.com/flutter-elinux/flutter-embedded-linux/blob/a98514bf569189f8534a887616dc5e33ca58b022/src/flutter/shell/platform/linux_embedded/flutter_elinux.cc
+Closing the phone window hides it, releases its QML tree and suspends phone
+polling. A later Show rebuilds the presentation over the live runtime.
+Sailplay holds a caller-owned car session while using the selected SDK player,
+including an already-running MPRIS player. Switching car pages changes session
+activity, while projection teardown or player replacement releases the lease.
+The compatibility desktop identity resolves to the visible native launcher.
 
 ## Scope
 
-Players without a background adapter are controlled when already running, but
-Sailplay no longer forces their phone window open. The card explains that such
-players need one manual launch on the phone.
+Legacy players with a background declaration retain their activation path.
+Already-running players remain available through MPRIS. The card identifies
+players requiring an initial phone launch.
 
-Explicitly closing an attached Mconnect phone window still exits its host under
-the current embedder lifecycle. Keeping playback alive after that explicit close
-is a separate lifecycle task. Minimizing or locking the phone is different from
-closing the app. This release does not claim the complete iOS lifecycle model.
+Car leases and ongoing playback, downloads, login calls, scans, lyric loading
+and accepted core/bridge requests retain Mconnect. A paused leased core stays
+paused. When the phone presentation, leases and work have ended, ten idle
+seconds permit exit. The deadline callback checks current activity again.
+
+Installed verification and remaining phone/car visual acceptance are recorded
+in `todo.md`.
 
 ## Verified deployment — 2026-10-22
 

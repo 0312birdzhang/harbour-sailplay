@@ -20,6 +20,12 @@ struct SailplayApplication
             && capabilities.contains(QStringLiteral("navigation"));
     }
 
+    bool mediaTemplate() const
+    {
+        return valid && presentation == QStringLiteral("template")
+            && capabilities.contains(QStringLiteral("media"));
+    }
+
     static SailplayApplication fromDesktopFile(const QString &filename);
 };
 
