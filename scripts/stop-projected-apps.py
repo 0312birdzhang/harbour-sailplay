@@ -15,5 +15,6 @@ if __name__ == '__main__':
             print('Projection cleanup skipped: display session still owns lock', flush=True)
         else:
             stop_projected_apps()
+            stop_projected_apps(workers=True)
     finally:
         os.close(fd)

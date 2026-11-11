@@ -14,7 +14,7 @@ spec.loader.exec_module(module)
 
 
 class ConnectionRecoveryTests(unittest.TestCase):
-    def test_only_a_confirmed_wireless_receiver_failure_requests_bluetooth_recovery(self):
+    def test_wireless_and_projection_failures_request_guarded_bluetooth_recovery(self):
         for stage in ('wireless', 'handover', 'projection'):
             with self.subTest(stage=stage):
                 worker = module.Worker('/org/bluez/hci1/dev_3C_28_6D_2C_FC_2E', Mock())
@@ -39,7 +39,7 @@ class ConnectionRecoveryTests(unittest.TestCase):
                         patch.object(module.threading, 'Thread'), \
                         patch.object(module.logging, 'exception'):
                     module.run_connection(worker, options)
-                self.assertEqual(worker.reconnect_bluetooth, stage != 'wireless')
+                self.assertTrue(worker.reconnect_bluetooth)
                 self.assertEqual(worker.phase, 'idle')
                 lease.close.assert_called_once()
 

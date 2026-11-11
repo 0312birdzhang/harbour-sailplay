@@ -21,6 +21,7 @@ class Session:
         self.phone_name = phone_name
         self.on_connected = on_connected
         self.discovery = None
+        self.early_notifications = []
         self.media = {}
         self.opened = set()
         self.requested = set()
@@ -49,6 +50,9 @@ class Session:
         logging.info('Android Auto head unit %s video=%d audio=%s input=%s', self.discovery.name,
                      self.discovery.video.id, self.discovery.audio.id if self.discovery.audio else None,
                      self.discovery.input.id if self.discovery.input else None)
+        notifications, self.early_notifications = self.early_notifications, []
+        for packet in notifications:
+            self.handle(packet)
 
     def channel_opened(self, channel, payload):
         if channel not in self.requested or Message(payload).integer(1, signed=True) != 0:
@@ -165,8 +169,25 @@ class Session:
             elif message_type == 13:
                 self.send(0, 14, field(1, 2))
             return
-        if self.discovery is None or channel not in self.requested:
-            raise ValueError('Android Auto message arrived on an unnegotiated channel')
+        if self.discovery is None:
+            # Surface focus and sensor updates can race the discovery response.
+            # Validate their channel identities against discovery before use.
+            if (message_type not in (0x8003, 0x8008) or len(payload) > 16384
+                    or len(self.early_notifications) >= 16):
+                raise ValueError('invalid Android Auto notification before discovery channel={} type={:#x}'.format(
+                    channel, message_type))
+            self.early_notifications.append(packet)
+            logging.info('Android Auto deferred notification channel=%d type=%#x', channel, message_type)
+            return
+        service = self.discovery.services.get(channel)
+        if service is not None and service.kind == 'sensor' and message_type == 0x8003:
+            # Navigation uses the phone's location and night-mode providers.
+            # Unsolicited receiver sensor batches do not change those providers.
+            Message(payload)
+            return
+        if channel not in self.requested:
+            raise ValueError('Android Auto message arrived on an unnegotiated channel={} type={:#x}'.format(
+                channel, message_type))
         if message_type == 8:
             self.channel_opened(channel, payload)
             return
@@ -265,6 +286,7 @@ class Session:
             except Exception as error:
                 errors.append(error)
         self.media.clear()
+        self.early_notifications.clear()
         self.input = self.media_keys = self.commands = None
         if errors:
             raise errors[0]

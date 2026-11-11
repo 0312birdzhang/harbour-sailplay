@@ -15,6 +15,7 @@
 #include <QVector>
 #include <cerrno>
 #include <cmath>
+#include <cstdio>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -243,7 +244,7 @@ void SailplayNavigationHost::receiveMap(const QVariantMap &result)
         return;
     }
     if (m_mapImage.isNull())
-        qInfo("carui: navigation map ready app=%s width=%d height=%d",
+        std::fprintf(stderr, "carui: navigation map ready app=%s width=%d height=%d\n",
             qPrintable(applicationId()), image.width(), image.height());
     m_mapImage = image;
     m_mapState = qdbus_cast<QVariantMap>(result.value(QStringLiteral("state")));

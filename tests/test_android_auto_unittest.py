@@ -36,7 +36,7 @@ from carplay_proto.networksession import restore_network, restore_previous_netwo
 from carplay_proto.session import SessionBusy, SessionLease, current_owner, selected_protocol
 
 
-def discovery_payload(video=17, input_channel=23, audio=29, codec=3):
+def discovery_payload(video=17, input_channel=23, audio=29, codec=3, name='DiAuto'):
     config = field(1, 2) + field(2, 2) + field(3, 0) + field(4, 240) + field(5, 160)
     sink = field(1, codec) + field(2, 0) + field(4, config)
     video_service = field(1, video) + field(3, sink)
@@ -44,7 +44,7 @@ def discovery_payload(video=17, input_channel=23, audio=29, codec=3):
     input_service = field(1, input_channel) + field(4, input_source)
     audio_config = field(1, 48000) + field(2, 16) + field(3, 2)
     audio_service = field(1, audio) + field(3, field(1, 1) + field(2, 3) + field(3, audio_config))
-    return b''.join(field(1, service) for service in (video_service, input_service, audio_service)) + field(14, 'DiAuto')
+    return b''.join(field(1, service) for service in (video_service, input_service, audio_service)) + field(14, name)
 
 
 def load_script(name):
@@ -325,7 +325,7 @@ class InputTests(unittest.TestCase):
         self.assertEqual(letterbox(720, 1280, 480, 1280), (120, 0, 480, 1280))
 
     def test_primary_pointer_cancel_and_release_are_display_scoped(self):
-        discovery = Discovery(discovery_payload())
+        discovery = Discovery(discovery_payload(name='Head Unit'))
         handler = InputHandler(discovery.input, discovery.video.configs[0], 1280, 480, path='/missing')
         sent = []
         handler.send = sent.append
@@ -335,6 +335,45 @@ class InputTests(unittest.TestCase):
         handler.report(field(1, 2) + field(3, field(3, 3)))
         self.assertEqual(sent[-1], 'T 0 640 240')
         handler.close()
+
+    def test_diauto_margin_origin_matches_visible_buttons(self):
+        for name, video_size, margins, canvas, point, expected in (
+                ('DiAuto', (1920, 1080), (0, 120), (1920, 960), (70, 895), (70, 895)),
+                ('DiAuto', (1080, 1920), (120, 0), (960, 1920), (895, 70), (895, 70)),
+                ('DiAuto', (1280, 720), (0, 240), (1280, 480), (640, 240), (640, 240)),
+                ('DiAuto', (1920, 1080), (0, 120), (1280, 480), (960, 480), (640, 240)),
+                ('DiAuto', (1920, 1080), (0, 0), (1920, 1080), (70, 895), (70, 895)),
+                ('Head Unit', (1920, 1080), (0, 120), (1920, 960), (70, 955), (70, 895))):
+            with self.subTest(name=name, canvas=canvas, margins=margins):
+                service = Discovery(discovery_payload(name=name)).input
+                service.touch_width, service.touch_height = video_size
+                video = SimpleNamespace(width=video_size[0], height=video_size[1],
+                                        margin_width=margins[0], margin_height=margins[1])
+                handler = InputHandler(service, video, *canvas, path='/missing')
+                try:
+                    handler.point(Message(field(1, point[0]) + field(2, point[1])))
+                    self.assertEqual((handler.x, handler.y), expected)
+                finally:
+                    handler.close()
+
+    def test_release_uses_final_primary_pointer_and_invalid_release_clears_press(self):
+        for action in (1, 6):
+            with self.subTest(action=action):
+                discovery = Discovery(discovery_payload(name='Head Unit'))
+                handler = InputHandler(discovery.input, discovery.video.configs[0], 1280, 480, path='/missing')
+                sent = []
+                handler.send = sent.append
+                down = field(1, 70) + field(2, 360) + field(3, 7)
+                up = field(1, 75) + field(2, 365) + field(3, 7)
+                handler.touch(Message(field(1, down) + field(3, 0)))
+                handler.touch(Message(field(1, up) + field(3, action)))
+                self.assertEqual(sent, ['T 1 70 240', 'T 0 75 245'])
+                handler.touch(Message(field(1, down) + field(3, 0)))
+                with self.assertRaises(ValueError):
+                    handler.touch(Message(field(1, field(3, 7)) + field(3, action)))
+                self.assertIsNone(handler.primary)
+                self.assertEqual(sent[-1], 'T 0 70 240')
+                handler.close()
 
     def test_media_repeat_is_debounced_and_keyboard_release_is_sent(self):
         discovery = Discovery(discovery_payload())
@@ -614,6 +653,45 @@ class SessionTests(unittest.TestCase):
                 with self.subTest(channel=channel, mode=mode), self.assertRaises(ValueError):
                     session.handle(Packet(channel, 0x8008, field(1, mode)))
             session.close()
+            lease.close()
+
+    def test_notifications_before_discovery_are_validated_before_use(self):
+        sensor = field(1, 1) + field(2, field(1, field(1, 10)))
+        payload = discovery_payload() + field(1, sensor)
+        with tempfile.TemporaryDirectory() as directory:
+            lease = SessionLease('android-auto', directory + '/lock', None)
+            lease.acquire()
+            session = Session(FakeTransport(), lease, FakeProducer, FakeProducer, publish=None)
+            session.handle(Packet(1, 0x8003, field(10, field(1, 0))))
+            session.handle(Packet(17, 0x8008, field(1, 1)))
+            self.assertFalse(session.video_focus)
+            session.handle(Packet(0, 6, payload))
+            self.assertTrue(session.video_focus)
+            self.assertEqual(session.early_notifications, [])
+            session.handle(Packet(1, 0x8003, field(10, field(1, 1))))
+            for packet in (Packet(1, 0x8008, field(1, 1)), Packet(77, 0x8003, b''),
+                           Packet(1, 0x8003, b'\x80')):
+                with self.subTest(packet=packet), self.assertRaises(ValueError):
+                    session.handle(packet)
+            session.close()
+            lease.close()
+
+    def test_pre_discovery_notification_limits_and_unknown_channel_rejection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lease = SessionLease('android-auto', directory + '/lock', None)
+            lease.acquire()
+            session = Session(FakeTransport(), lease, FakeProducer, FakeProducer, publish=None)
+            for packet in (Packet(1, 8, field(1, 0)), Packet(1, 0x8003, b'x' * 16385)):
+                with self.subTest(packet_type=packet.type), self.assertRaises(ValueError):
+                    session.handle(packet)
+            for _ in range(16):
+                session.handle(Packet(77, 0x8003, b''))
+            with self.assertRaises(ValueError):
+                session.handle(Packet(77, 0x8003, b''))
+            with self.assertRaisesRegex(ValueError, 'channel=77'):
+                session.handle(Packet(0, 6, discovery_payload()))
+            session.close()
+            self.assertEqual(session.early_notifications, [])
             lease.close()
 
 

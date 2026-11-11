@@ -80,6 +80,10 @@ class Discovery:
         self.audio = self.choose('audio', required=False)
         self.input = self.choose('input', required=False)
         self.sensor = self.choose('sensor', required=False)
+        if self.input is not None:
+            # DiAuto 0.3.12 advertises full video dimensions but reports touches
+            # relative to the UI after removing the negotiated video margins.
+            self.input.touch_content_coordinates = self.name == 'DiAuto'
 
     def choose(self, kind, required=True):
         candidates = [service for service in self.services.values() if service.kind == kind

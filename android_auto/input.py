@@ -30,6 +30,8 @@ class InputHandler:
         self.width, self.height = width, height
         self.video_width, self.video_height = video.width, video.height
         self.box = letterbox(video.width, video.height, width, height)
+        self.origin = ((video.margin_width // 2, video.margin_height // 2)
+                       if getattr(service, 'touch_content_coordinates', False) else (0, 0))
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         self.sock.setblocking(False)
         self.primary = None
@@ -51,6 +53,8 @@ class InputHandler:
         source_height = self.service.touch_height or self.video_height
         x = min(source_width - 1, x) * self.video_width // source_width
         y = min(source_height - 1, y) * self.video_height // source_height
+        x += self.origin[0]
+        y += self.origin[1]
         left, top, box_width, box_height = self.box
         self.x = max(0, min(self.width - 1, (x - left) * self.width // box_width))
         self.y = max(0, min(self.height - 1, (y - top) * self.height // box_height))
@@ -72,7 +76,13 @@ class InputHandler:
         if action not in range(7) or len(pointers) > 16:
             raise ValueError('invalid Android Auto touch action')
         if action in (1, 3, 4):
-            self.release_touch()
+            try:
+                if action == 1:
+                    pointer = next((point for point in pointers if point.integer(3) == self.primary), None)
+                    if self.primary is not None and pointer is not None:
+                        self.point(pointer)
+            finally:
+                self.release_touch()
             return
         if action in (0, 5, 6) and index >= len(pointers):
             raise ValueError('invalid Android Auto touch action index')
@@ -82,7 +92,10 @@ class InputHandler:
             if self.primary is None:
                 raise ValueError('Android Auto pointer identity missing')
         if action == 6 and pointers[index].integer(3) == self.primary:
-            self.release_touch()
+            try:
+                self.point(pointers[index])
+            finally:
+                self.release_touch()
             return
         pointer = next((point for point in pointers if point.integer(3) == self.primary), None)
         if self.primary is not None and pointer is not None:

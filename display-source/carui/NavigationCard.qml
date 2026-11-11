@@ -24,6 +24,8 @@ Rectangle {
     onHeightChanged: configureMap()
     onVisibleChanged: configureMap()
     onMapModeChanged: configureMap()
+    onProviderChanged: configureMap()
+    Component.onCompleted: configureMap()
 
     MapCanvas {
         id: canvas
@@ -57,7 +59,7 @@ Rectangle {
             width: parent.width - 24
             text: navigating ? card.symbol(guidance.maneuver || "unknown") + "  "
                   + card.distance(guidance.nextDistanceMeters || 0) + "  " + (guidance.nextRoad || "")
-                  : (provider.error || qsTranslate("Sailplay", "Loading map"))
+                  : ((provider ? provider.error : "") || qsTranslate("Sailplay", "Loading map"))
             color: palette.text
             font.pixelSize: compact ? 24 : 30
             wrapMode: Text.WordWrap
@@ -95,7 +97,7 @@ Rectangle {
         radius: 14
         color: palette.card
         opacity: 0.93
-        visible: mapMode && !compact && (navigating || mapState.place || mapState.building || mapState.built || mapState.error)
+        visible: mapMode && !compact && (navigating || !!mapState.place || !!mapState.building || !!mapState.built || !!mapState.error)
         Text {
             id: routeText
             x: 12
@@ -119,7 +121,7 @@ Rectangle {
             height: 58
             radius: 12
             color: palette.dock
-            visible: navigating || mapState.canStart || (mapState.place && !mapState.building)
+            visible: navigating || !!mapState.canStart || (!!mapState.place && !mapState.building)
             Text {
                 anchors.centerIn: parent
                 width: parent.width - 12

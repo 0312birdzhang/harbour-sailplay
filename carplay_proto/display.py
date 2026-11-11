@@ -1,6 +1,7 @@
 """Own a temporary Sailife compositor/UI/capture pipeline for projection."""
 import os
 import fcntl
+import re
 import select
 import signal
 import subprocess
@@ -82,11 +83,11 @@ class AnnexBFrames:
         return bytes([1,s[1],s[2],s[3],255,225])+struct.pack('>H',len(s))+s+b'\x01'+struct.pack('>H',len(p))+p
 
 
-def projected_apps(proc='/proc'):
+def projected_apps(proc='/proc', workers=False):
     """PID/start-time pairs belonging exclusively to our virtual Wayland output.
 
-    A detached Qt client can outlive its compositor. Require both the output
-    and launcher marker; never infer ownership from its executable name.
+    A detached Qt client can outlive its compositor. Require the output and
+    either its launcher marker or the exact projection shell entry point.
     """
     result = {}
     for name in os.listdir(proc):
@@ -96,10 +97,31 @@ def projected_apps(proc='/proc'):
         try:
             with open(base + '/environ', 'rb') as source:
                 env = dict(v.split(b'=', 1) for v in source.read().split(b'\0') if b'=' in v)
-            if (env.get(b'WAYLAND_DISPLAY') != b'imira-comp-0'
-                    or not env.get(b'CARLIFE_APP_KEY')
-                    or env.get(b'CARLIFE_APP_KEY') == b'sailplay-input-method'):
-                continue
+            if workers:
+                marker = env.get(b'SAILPLAY_DISPLAY_PIPELINE', b'')
+                if not re.fullmatch(rb'/tmp/sailplay-display-[0-9]+\.h264', marker):
+                    continue
+                with open(base + '/cmdline', 'rb') as source:
+                    arguments = source.read().split(b'\0')
+                compositor = arguments[0] == b'/opt/sailplay/imira-comp'
+                capture = arguments[0] == b'/opt/sailplay/carlife-capture' and marker in arguments
+                keyboard = (arguments[0] in (b'/usr/bin/python3', b'/bin/python3')
+                            and arguments[1:2] == [b'/opt/sailplay/scripts/keyboard-server.py'])
+                input_method = (arguments[:3] == [b'maliit-server', b'-override-address',
+                                b'unix:path=/run/user/100000/sailplay-maliit/socket']
+                                and env.get(b'CARLIFE_APP_KEY') == b'sailplay-input-method'
+                                and env.get(b'WAYLAND_DISPLAY') == b'imira-comp-0')
+                if not (compositor or capture or keyboard or input_method):
+                    continue
+            else:
+                if (env.get(b'WAYLAND_DISPLAY') != b'imira-comp-0'
+                        or env.get(b'CARLIFE_APP_KEY') == b'sailplay-input-method'):
+                    continue
+                if not env.get(b'CARLIFE_APP_KEY'):
+                    with open(base + '/cmdline', 'rb') as source:
+                        arguments = source.read().split(b'\0')
+                    if arguments[:2] != [b'/opt/sailplay/carui/carui', b'/opt/sailplay/carui/main.qml']:
+                        continue
             with open(base + '/stat') as source:
                 stat = source.read().rsplit(')', 1)[-1].split()
             if stat[0] != 'Z':
@@ -109,11 +131,12 @@ def projected_apps(proc='/proc'):
     return result
 
 
-def stop_projected_apps(grace=2):
+def stop_projected_apps(grace=2, workers=False):
     """Stop detached projected clients while the caller owns the display lock."""
-    owned = projected_apps()
+    scan = (lambda: projected_apps(workers=True)) if workers else projected_apps
+    owned = scan()
     for pid, started in owned.items():
-        if projected_apps().get(pid) != started:
+        if scan().get(pid) != started:
             continue
         try:
             os.kill(pid, signal.SIGTERM)
@@ -123,11 +146,11 @@ def stop_projected_apps(grace=2):
     deadline = time.monotonic() + grace
     pending = owned
     while pending and time.monotonic() < deadline:
-        current = projected_apps()
+        current = scan()
         pending = {pid:started for pid,started in owned.items() if current.get(pid) == started}
         if pending:
             time.sleep(.05)
-    current = projected_apps()
+    current = scan()
     for pid, started in pending.items():
         if current.get(pid) != started:
             continue
@@ -155,7 +178,9 @@ class DisplayPipeline:
         log=open('/home/defaultuser/sailplay-{}.log'.format(name),'ab')
         log.write(('\nSailplay launch {} at {}\n'.format(name,time.time())).encode());log.flush()
         self.logs.append(log)
-        process=subprocess.Popen(['su','defaultuser','-s','/bin/sh','-c','exec '+command],
+        # Keep su and its child in our process group for complete teardown.
+        command = 'exec env SAILPLAY_DISPLAY_PIPELINE=' + self.fifo + ' ' + command
+        process=subprocess.Popen(['su','defaultuser','-s','/bin/sh','--session-command',command],
             stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
         self.processes.append(process)
         return process
@@ -171,12 +196,17 @@ class DisplayPipeline:
             os.close(self.lock_fd)
             self.lock_fd=None
             raise RuntimeError('existing display pipeline active')
-        if subprocess.run(['pgrep','-f',r'(^|/)imira-comp( |$)'],stdout=subprocess.DEVNULL).returncode==0:
+        compositors = subprocess.run(['pgrep','-f',r'(^|/)imira-comp( |$)'],
+                                     stdout=subprocess.PIPE, text=True)
+        owned_workers = projected_apps(workers=True)
+        if compositors.returncode == 0 and any(int(pid) not in owned_workers
+                                               for pid in compositors.stdout.split()):
             os.close(self.lock_fd)
             self.lock_fd=None
             raise RuntimeError('existing compositor active; refusing conflicting display pipeline')
-        # Recover detached clients left by a previous crashed display session.
+        # Recover workers that PAM moved outside the service's systemd cgroup.
         stop_projected_apps()
+        stop_projected_apps(workers=True)
         if not os.path.exists('/run/display/wayland-0'):
             raise RuntimeError('lipstick display unavailable')
         os.mkfifo(self.fifo,0o666)
@@ -261,6 +291,7 @@ class DisplayPipeline:
         # Keep compositor and session bus alive for Qt/location teardown first.
         if self.comp is not None and self.lock_fd is not None:
             stop_projected_apps()
+            stop_projected_apps(workers=True)
         for process in reversed(self.processes):
             try:
                 os.killpg(process.pid,signal.SIGTERM)

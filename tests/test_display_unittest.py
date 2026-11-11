@@ -24,6 +24,16 @@ class DisplayFramesTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             AnnexBFrames().feed(bytes(8*1024*1024+1))
 
+    def test_launch_keeps_su_child_in_the_pipeline_process_group(self):
+        from unittest.mock import Mock
+        with patch('builtins.open', return_value=Mock()), patch('subprocess.Popen') as launch:
+            pipeline = DisplayPipeline()
+            pipeline.launch('carui', 'env WAYLAND_DISPLAY=test /opt/sailplay/carui/carui')
+            arguments = launch.call_args.args[0]
+            self.assertEqual(arguments[4], '--session-command')
+            self.assertIn('SAILPLAY_DISPLAY_PIPELINE=' + pipeline.fifo, arguments[5])
+            self.assertTrue(launch.call_args.kwargs['start_new_session'])
+
     def test_keyframe_signals_only_owned_capture_child(self):
         pipeline = DisplayPipeline()
         pipeline.capture = SimpleNamespace(pid=100)

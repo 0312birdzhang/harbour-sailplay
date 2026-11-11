@@ -81,6 +81,7 @@ def run_connection(worker, options, phone_name='SailfishOS'):
         lease.phase('connecting')
         context = server_context(options.certificate, options.key)
         if worker.sock is not None:
+            worker.phase = 'wireless'
             client = WppClient(worker.sock, worker.stop)
             credentials = client.negotiate(serial=phone_name)
             remember_head_unit(worker.device, LAST_HEAD_UNIT)
@@ -121,7 +122,8 @@ def run_connection(worker, options, phone_name='SailfishOS'):
     except (InterruptedError, KeyboardInterrupt):
         logging.info('Android Auto connection stopped')
     except Exception:
-        worker.reconnect_bluetooth = worker.device is not None and worker.phase in ('handover', 'projection')
+        # The main-loop reset verifies the saved, paired receiver before acting.
+        worker.reconnect_bluetooth = worker.device is not None and worker.phase in ('wireless', 'handover', 'projection')
         logging.exception('Android Auto connection failed')
     finally:
         worker.stop.set()
@@ -287,7 +289,7 @@ def main():
         def RequestDisconnection(self, device):
             worker = workers.get(str(device))
             if worker is not None:
-                if worker.phase == 'bluetooth':
+                if worker.phase in ('bluetooth', 'wireless'):
                     worker.stop.set()
                 worker.close_bluetooth()
 
