@@ -1,5 +1,6 @@
 """Choose a paired Android Auto head unit from the current BlueZ snapshot."""
 from .wireless import AA_UUID
+from carplay_proto.bluezadapter import resolve_device
 
 
 CARPLAY_UUID = '00000000-deca-fade-deca-deafdecacaff'
@@ -11,12 +12,14 @@ def supports(properties, identifier):
 
 
 def select_head_unit(objects, configured=None, previous=None, protocol='auto'):
+    configured = resolve_device(objects, configured)
+    previous = resolve_device(objects, previous)
     def eligible(path, connected=True):
         properties = objects.get(path, {}).get('org.bluez.Device1', {})
         advertised = supports(properties, AA_UUID)
         explicitly_selected = protocol == 'android-auto' and path == configured
         return (properties.get('Paired') and (properties.get('Connected') or not connected)
-                and (advertised or explicitly_selected)
+                and (advertised or explicitly_selected or path == previous)
                 and (protocol != 'auto' or not supports(properties, CARPLAY_UUID)))
 
     candidates = [str(path) for path in objects if eligible(path)]

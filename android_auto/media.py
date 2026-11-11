@@ -354,6 +354,7 @@ class MediaChannel:
         self.pending_generation = None
         self.allowed_indices = []
         self.frames_sent = 0
+        self.last_acknowledged_at = 0
 
     def configure(self, payload):
         response = Message(payload)
@@ -376,6 +377,7 @@ class MediaChannel:
         self.sent.clear()
         self.pending.clear()
         self.previous_config = None
+        self.last_acknowledged_at = 0
         self.started = True
         self.producer.set_enabled(True)
 
@@ -394,6 +396,8 @@ class MediaChannel:
         count = message.integer(2)
         if count is None or count > 4096:
             raise ValueError('invalid Android Auto media acknowledgement')
+        if count and self.sent:
+            self.last_acknowledged_at = time.monotonic()
         for _ in range(min(count, len(self.sent))):
             self.sent.popleft()
 
@@ -402,8 +406,9 @@ class MediaChannel:
             raise self.producer.error
         if not self.started:
             return False
-        if self.sent and time.monotonic() - self.sent[0] > 8:
-            raise TimeoutError('head unit stopped acknowledging Android Auto media')
+        if self.sent and time.monotonic() - max(self.sent[0], self.last_acknowledged_at) > 8:
+            raise TimeoutError('head unit stopped acknowledging Android Auto {} channel={} unacked={}'.format(
+                self.service.kind, self.service.id, len(self.sent)))
         if self.pending_generation != self.producer.generation:
             self.pending.clear()
             self.pending_generation = self.producer.generation

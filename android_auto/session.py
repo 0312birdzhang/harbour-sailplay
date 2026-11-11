@@ -170,9 +170,14 @@ class Session:
         if message_type == 8:
             self.channel_opened(channel, payload)
             return
+        service = self.discovery.services[channel]
+        # The receiver's projection surface can announce focus while its
+        # channel-open response is still pending. Retain that state for setup.
+        if service.kind == 'video' and message_type == 0x8008:
+            self.video_focus_changed(payload)
+            return
         if channel not in self.opened:
             raise ValueError('Android Auto message arrived before channel open')
-        service = self.discovery.services[channel]
         if message_type == 9:
             media = self.media.pop(channel, None)
             if media is not None:
@@ -195,8 +200,6 @@ class Session:
                 self.input.report(payload)
         elif message_type == 0x8003:
             self.media_configured(channel, payload)
-        elif service.kind == 'video' and message_type == 0x8008:
-            self.video_focus_changed(payload)
         elif message_type == 0x8004 and channel in self.media:
             self.media[channel].acknowledge(payload)
         elif message_type == 0x8002 and channel in self.media:

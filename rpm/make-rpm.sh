@@ -44,4 +44,6 @@ PY
 cd "$WORK"
 tar cjf harbour-sailplay-0.1.1.tar.bz2 harbour-sailplay-0.1.1
 rpmbuild -ta --target aarch64 --define 'debug_package %{nil}' --define '__os_install_post %{nil}' harbour-sailplay-0.1.1.tar.bz2
-test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-0.1.1-65.aarch64.rpm"
+VERSION=$(awk '$1 == "Version:" { print $2 }' "$REPO/rpm/harbour-sailplay.spec")
+RELEASE=$(awk '$1 == "Release:" { print $2 }' "$REPO/rpm/harbour-sailplay.spec")
+test -f "$HOME/rpmbuild/RPMS/aarch64/harbour-sailplay-$VERSION-$RELEASE.aarch64.rpm"

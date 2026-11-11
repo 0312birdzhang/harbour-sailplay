@@ -1,4 +1,5 @@
 """ConnMan handover for a paired head unit's WPP network credentials."""
+import errno
 import ipaddress
 import socket
 import threading
@@ -61,6 +62,26 @@ class NetworkHandover:
 
     def service(self, path):
         return network_interface(network_object(self.bus, 'net.connman', path), 'net.connman.Service')
+
+    def endpoint(self, credentials, interface, timeout=30):
+        deadline = time.monotonic() + timeout
+        last_error = None
+        while not self.stop.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                return connect_endpoint(credentials.address, credentials.port, interface, timeout=min(5, remaining))
+            except OSError as error:
+                if not isinstance(error, TimeoutError) and error.errno not in (
+                        errno.EHOSTUNREACH, errno.ENETUNREACH, errno.ECONNREFUSED, errno.ETIMEDOUT):
+                    raise
+                last_error = error
+                self.log('Android Auto waiting for the TCP endpoint on the associated Wi-Fi error={}'.format(error.errno))
+            self.stop.wait(min(.5, max(0, deadline - time.monotonic())))
+        if self.stop.is_set():
+            raise InterruptedError('Android Auto endpoint connection stopped')
+        raise TimeoutError('head-unit TCP endpoint did not become ready') from last_error
 
     def connect(self, credentials, timeout=40):
         import dbus
@@ -163,10 +184,11 @@ class NetworkHandover:
         raise TimeoutError('head-unit Wi-Fi association timed out')
 
     def close(self):
+        import dbus
         try:
             if self.agent is not None:
                 try:
-                    self.manager.UnregisterAgent(self.agent_path)
+                    self.manager.UnregisterAgent(dbus.ObjectPath(self.agent_path))
                 finally:
                     self.agent.remove_from_connection()
                     self.agent = None

@@ -11,6 +11,7 @@ import struct
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -120,6 +121,18 @@ class ProtobufTests(unittest.TestCase):
 
 
 class FramingTests(unittest.TestCase):
+    def test_stop_interrupts_a_fragmented_media_write(self):
+        transport = Transport.__new__(Transport)
+        transport.ready = True
+        transport.stop = threading.Event()
+        transport.sock = Mock()
+        transport.sock.sendall.side_effect = lambda data: transport.stop.set()
+        transport.tls = SimpleNamespace(write=lambda data: len(data))
+        transport.outgoing = SimpleNamespace(read=lambda: b'encrypted')
+        with self.assertRaises(InterruptedError):
+            transport.send(17, 0, b'x' * 32768)
+        transport.sock.sendall.assert_called_once()
+
     def test_codec_configuration_uses_media_flags_and_channel_open_uses_control(self):
         transport = Transport.__new__(Transport)
         transport.ready = True
@@ -245,6 +258,18 @@ class WirelessTests(unittest.TestCase):
 
 
 class NegotiationTests(unittest.TestCase):
+    def test_delayed_acknowledgements_preserve_a_progressing_media_window(self):
+        service = Discovery(discovery_payload()).video
+        media = MediaChannel(service, service.configs[0], FakeProducer())
+        media.started = True
+        media.session_id = 1
+        media.sent.extend([time.monotonic() - 20, time.monotonic() - 19])
+        media.acknowledge(field(1, 1) + field(2, 1))
+        self.assertFalse(media.pump(FakeTransport()))
+        media.last_acknowledged_at = time.monotonic() - 20
+        with self.assertRaises(TimeoutError):
+            media.pump(FakeTransport())
+
     def test_service_ids_and_margins_come_from_discovery(self):
         discovery = Discovery(discovery_payload())
         self.assertEqual((discovery.video.id, discovery.input.id, discovery.audio.id), (17, 23, 29))
@@ -412,7 +437,7 @@ class LegacyNetworkTests(unittest.TestCase):
             ('sailplay-wifi-restore-102.service', '', 'loaded', 'active', 'running', '', '/modern')]))
         self.manager = SimpleNamespace(GetServices=Mock(return_value=[
             (self.home_path, {'Type': 'wifi', 'State': 'idle'}),
-            (self.car_path, {'Type': 'wifi', 'State': 'ready'}),
+            (self.car_path, {'Type': 'wifi', 'State': 'ready', 'Favorite': True}),
             (self.other_path, {'Type': 'wifi', 'State': 'idle'})]))
         self.home = SimpleNamespace(Connect=Mock())
         self.car = SimpleNamespace(Disconnect=Mock(), Remove=Mock())
@@ -560,6 +585,34 @@ class SessionTests(unittest.TestCase):
             session.handle(Packet(17, 0x8008, field(1, 2) + field(2, 1)))
             self.assertFalse(session.media[17].producer.enabled)
             self.assertTrue(released)
+            session.close()
+            lease.close()
+
+    def test_early_video_focus_is_retained_until_channel_and_media_setup(self):
+        for mode in (1, 2, 3, 4):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                lease = SessionLease('android-auto', directory + '/lock', None)
+                lease.acquire()
+                session = Session(FakeTransport(), lease, FakeProducer, FakeProducer,
+                    lambda *args: SimpleNamespace(release=lambda: None, close=lambda: None), publish=None)
+                session.handle(Packet(0, 6, discovery_payload()))
+                session.handle(Packet(17, 0x8008, field(1, mode) + field(2, 1)))
+                self.assertNotIn(17, session.media)
+                session.handle(Packet(17, 8, field(1, 0)))
+                session.handle(Packet(17, 0x8003, field(1, 2) + field(2, 12) + field(3, 0)))
+                self.assertEqual(session.media[17].producer.enabled, mode in (1, 4))
+                session.close()
+                lease.close()
+
+    def test_early_focus_does_not_accept_other_channels_or_invalid_modes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lease = SessionLease('android-auto', directory + '/lock', None)
+            lease.acquire()
+            session = Session(FakeTransport(), lease, FakeProducer, FakeProducer, publish=None)
+            session.handle(Packet(0, 6, discovery_payload()))
+            for channel, mode in ((29, 1), (77, 1), (17, 9)):
+                with self.subTest(channel=channel, mode=mode), self.assertRaises(ValueError):
+                    session.handle(Packet(channel, 0x8008, field(1, mode)))
             session.close()
             lease.close()
 
@@ -736,11 +789,11 @@ class EntrypointTests(unittest.TestCase):
                 patch.object(entry, 'connect_endpoint'), patch.object(entry, 'Transport', return_value=transport), \
                 patch.object(entry, 'Session', return_value=session), \
                 patch('carplay_proto.mediakeys.MediaKeys') as media_keys, patch('carplay_proto.videodemo.UiCommands'), \
-                patch('carplay_proto.projectionpower.ProjectionPower', return_value=power), \
+                patch.object(entry, 'ProjectionPower', return_value=power), \
                 self.assertLogs(level='ERROR'):
             events.attach_mock(media_keys, 'media_keys')
             entry.run_connection(worker, options)
-        self.assertEqual([event[0] for event in events.mock_calls[:3]], ['handshake', 'media_keys', 'power'])
+        self.assertEqual([event[0] for event in events.mock_calls[:3]], ['power', 'handshake', 'media_keys'])
         power.close.assert_called_once_with()
         lease.close.assert_called_once_with()
         self.assertTrue(worker.stop.is_set())
@@ -841,6 +894,7 @@ class TlsTests(unittest.TestCase):
                             packet = read_frame()
                             self.assertEqual(packet.data[:2], b'\x00\x03')
                             incoming.write(packet.data[2:])
+                    send_plain(3)  # DiAuto's empty TLS completion envelope.
                     send_plain(4, field(1, 0))
                     assembler = MessageAssembler()
                     while True:

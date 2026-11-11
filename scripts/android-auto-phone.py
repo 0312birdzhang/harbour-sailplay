@@ -11,12 +11,14 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from android_auto.bluez import LAST_HEAD_UNIT, select_head_unit
+from android_auto.bluetooth import BTPROTO_RFCOMM, connect_bluetooth, discover_head_units
 from android_auto.network import NetworkHandover, connect_endpoint
 from android_auto.session import Session
 from android_auto.transport import Transport, server_context
 from android_auto.wireless import AA_UUID, WppClient
-from carplay_proto.bluezadapter import adapter_name, previous_head_unit, remember_head_unit, select_adapter
+from carplay_proto.bluezadapter import adapter_name, previous_head_unit, remember_head_unit, resolve_device, select_adapter
 from carplay_proto.networksession import restore_previous_network as restore_network
+from carplay_proto.projectionpower import ProjectionPower
 from carplay_proto.session import SessionBusy, SessionLease, selected_protocol
 
 
@@ -28,6 +30,7 @@ class Worker:
         self.device, self.sock = device, sock
         self.tcp = None
         self.stop = threading.Event()
+        self.reconnect_bluetooth = False
         self.thread = None
         self.phase = 'bluetooth'
         self.user_exit = False
@@ -66,12 +69,13 @@ def keep_wpp_alive(client, worker):
 def run_connection(worker, options, phone_name='SailfishOS'):
     import dbus
     from carplay_proto.mediakeys import MediaKeys
-    from carplay_proto.projectionpower import ProjectionPower
     from carplay_proto.videodemo import UiCommands
     lease = SessionLease('android-auto')
     bus = handover = session = power = keepalive = media_keys = commands = None
     try:
         lease.acquire()
+        power = ProjectionPower(phase='projection')
+        power.start()
         bus = dbus.SystemBus(private=True)
         restore_network(lease, bus, logging.info)
         lease.phase('connecting')
@@ -79,6 +83,8 @@ def run_connection(worker, options, phone_name='SailfishOS'):
         if worker.sock is not None:
             client = WppClient(worker.sock, worker.stop)
             credentials = client.negotiate(serial=phone_name)
+            remember_head_unit(worker.device, LAST_HEAD_UNIT)
+            logging.info('Android Auto WPP receiver confirmed device=%s', worker.device)
             worker.phase = 'handover'
             keepalive = threading.Thread(target=keep_wpp_alive, args=(client, worker), daemon=True)
             keepalive.start()
@@ -95,7 +101,7 @@ def run_connection(worker, options, phone_name='SailfishOS'):
                 client.join_status(0, local_address or None)
             except OSError:
                 logging.info('Head unit closed WPP after delivering credentials')
-            worker.tcp = connect_endpoint(credentials.address, credentials.port, interface)
+            worker.tcp = handover.endpoint(credentials, interface)
         else:
             worker.phase = 'handover'
             worker.tcp = connect_endpoint(options.tcp[0], int(options.tcp[1]))
@@ -107,8 +113,6 @@ def run_connection(worker, options, phone_name='SailfishOS'):
         connected = (lambda: remember_head_unit(worker.device, LAST_HEAD_UNIT)) if worker.device else None
         session = Session(transport, lease, media_keys=media_keys, commands=commands,
                           phone_name=phone_name, on_connected=connected)
-        power = ProjectionPower(phase='projection')
-        power.start()
         reason = session.run(options.seconds)
         worker.user_exit = reason == 'user-exit'
         logging.info('Android Auto session ended reason=%s', reason)
@@ -117,6 +121,7 @@ def run_connection(worker, options, phone_name='SailfishOS'):
     except (InterruptedError, KeyboardInterrupt):
         logging.info('Android Auto connection stopped')
     except Exception:
+        worker.reconnect_bluetooth = worker.device is not None and worker.phase in ('handover', 'projection')
         logging.exception('Android Auto connection failed')
     finally:
         worker.stop.set()
@@ -124,7 +129,7 @@ def run_connection(worker, options, phone_name='SailfishOS'):
         if keepalive is not None:
             keepalive.join(2)
         owned = [session] if session is not None else [commands, media_keys, worker.tcp]
-        for resource in owned + [power, handover, worker.sock, bus, lease]:
+        for resource in owned + [handover, worker.sock, bus, lease, power]:
             if resource is None:
                 continue
             try:
@@ -173,6 +178,100 @@ def main():
     adapter, options.device = select_adapter(objects, options.device)
     phone_name = adapter_name(objects[adapter]['org.bluez.Adapter1'])
     workers, pending, suppressed = {}, set(), set()
+    probe_thread = None
+    discovered_sockets = []
+    unavailable_probes = {}
+
+    def reset_bluetooth(device):
+        if stop.is_set() or workers or pending or device in suppressed or selected_protocol() == 'carplay':
+            return False
+        current = object_manager.GetManagedObjects()
+        properties = current.get(device, {}).get('org.bluez.Device1', {})
+        if (device != resolve_device(current, previous_head_unit(LAST_HEAD_UNIT))
+                or not properties.get('Paired') or not properties.get('Connected')):
+            return False
+        pending.add(device)
+
+        def finished(error=None):
+            pending.discard(device)
+            if error is not None:
+                logging.info('Android Auto Bluetooth recovery failed device=%s error=%s', device, error)
+            GLib.idle_add(lambda: (connect(), False)[1])
+
+        logging.info('Android Auto reconnecting verified receiver Bluetooth device=%s', device)
+        try:
+            receiver = dbus.Interface(bus.get_object('org.bluez', device), 'org.bluez.Device1')
+            receiver.Disconnect(reply_handler=finished, error_handler=finished, timeout=10)
+        except dbus.DBusException as error:
+            finished(error)
+        return False
+
+    def unavailable(device):
+        unavailable_probes[device] = unavailable_probes.get(device, 0) + 1
+        if unavailable_probes[device] == 3:
+            reset_bluetooth(device)
+        return False
+
+    def start_worker(device, sock):
+        device = str(device)
+        current = object_manager.GetManagedObjects()
+        paired = current.get(device, {}).get('org.bluez.Device1', {}).get('Paired')
+        previous = workers.get(device)
+        if (stop.is_set() or selected_protocol() == 'carplay' or not paired or device in suppressed
+                or previous is not None and previous.thread.is_alive()):
+            sock.close()
+            pending.discard(device)
+            return False
+        pending.discard(device)
+        unavailable_probes.pop(device, None)
+        worker = Worker(device, sock)
+        worker.thread = threading.Thread(target=run_connection,
+            args=(worker, options, phone_name), daemon=True)
+        workers[device] = worker
+        worker.thread.start()
+        return False
+
+    def probe_services(current, protocol, force=None):
+        nonlocal probe_thread
+        if probe_thread is not None and probe_thread.is_alive():
+            return
+        if force is not None:
+            current = dict(current)
+            interfaces = dict(current[force])
+            properties = dict(interfaces['org.bluez.Device1'])
+            properties['UUIDs'] = [uuid for uuid in properties.get('UUIDs', []) if str(uuid).lower() != AA_UUID]
+            interfaces['org.bluez.Device1'] = properties
+            current[force] = interfaces
+
+        def discover():
+            try:
+                enriched, channels = discover_head_units(current, adapter, stop,
+                    options.device or previous_head_unit(LAST_HEAD_UNIT))
+                target = select_head_unit(enriched, options.device, previous_head_unit(LAST_HEAD_UNIT), protocol)
+                if stop.is_set() or target in suppressed:
+                    return
+                if target not in channels:
+                    if target is not None:
+                        GLib.idle_add(unavailable, target)
+                    return
+                local = str(current[adapter]['org.bluez.Adapter1']['Address'])
+                remote = str(current[target]['org.bluez.Device1']['Address'])
+                sock = connect_bluetooth(local, remote, channels[target], BTPROTO_RFCOMM)
+                if stop.is_set():
+                    sock.close()
+                else:
+                    discovered_sockets.append(sock)
+
+                    def deliver():
+                        discovered_sockets.remove(sock)
+                        return start_worker(target, sock)
+
+                    GLib.idle_add(deliver)
+            except Exception:
+                logging.exception('Android Auto live Bluetooth discovery failed')
+
+        probe_thread = threading.Thread(target=discover, name='android-auto-sdp', daemon=True)
+        probe_thread.start()
 
     class Profile(dbus.service.Object):
         @dbus.service.method('org.bluez.Profile1', in_signature='', out_signature='')
@@ -181,22 +280,8 @@ def main():
 
         @dbus.service.method('org.bluez.Profile1', in_signature='oha{sv}', out_signature='')
         def NewConnection(self, device, descriptor, properties):
-            device = str(device)
             sock = socket.socket(fileno=descriptor.take())
-            current = object_manager.GetManagedObjects()
-            if not current.get(device, {}).get('org.bluez.Device1', {}).get('Paired'):
-                sock.close()
-                raise dbus.exceptions.DBusException('head unit must be paired')
-            previous = workers.get(device)
-            if previous is not None and previous.thread.is_alive():
-                sock.close()
-                return
-            pending.discard(device)
-            worker = Worker(device, sock)
-            worker.thread = threading.Thread(target=run_connection,
-                args=(worker, options, phone_name), daemon=True)
-            workers[device] = worker
-            worker.thread.start()
+            start_worker(device, sock)
 
         @dbus.service.method('org.bluez.Profile1', in_signature='o', out_signature='')
         def RequestDisconnection(self, device):
@@ -226,11 +311,15 @@ def main():
                     if worker.user_exit:
                         suppressed.add(device)
                     del workers[device]
+                    if not worker.user_exit and worker.reconnect_bluetooth:
+                        reset_bluetooth(device)
             target = select_head_unit(current, options.device, previous_head_unit(LAST_HEAD_UNIT), protocol)
-            if not target or target in pending or target in workers or target in suppressed:
+            if pending or workers or probe_thread is not None and probe_thread.is_alive():
                 return True
-            properties = current.get(target, {}).get('org.bluez.Device1', {})
-            if not properties.get('Connected'):
+            if not target or not current.get(target, {}).get('org.bluez.Device1', {}).get('Connected'):
+                probe_services(current, protocol)
+                return True
+            if target in suppressed:
                 return True
             pending.add(target)
 
@@ -238,6 +327,7 @@ def main():
                 pending.discard(target)
                 if error is not None:
                     logging.info('Android Auto profile connection failed %s', error.get_dbus_name())
+                    probe_services(current, protocol, force=target)
 
             device = dbus.Interface(bus.get_object('org.bluez', target), 'org.bluez.Device1')
             device.ConnectProfile(AA_UUID, reply_handler=finished, error_handler=finished, timeout=12)
@@ -250,9 +340,9 @@ def main():
     def changed(interface, properties, invalidated, path=None):
         if interface == 'org.bluez.Device1' and 'Connected' in properties and not properties['Connected']:
             suppressed.discard(str(path))
-        if path == adapter and interface == 'org.bluez.Adapter1' and 'Powered' in properties:
+        if path == adapter and interface == 'org.bluez.Adapter1' and 'Powered' in properties and not properties['Powered']:
             loop.quit()
-        elif interface == 'org.bluez.Device1' and properties.get('Connected'):
+        elif interface == 'org.bluez.Device1' and any(key in properties for key in ('Connected', 'UUIDs', 'ServicesResolved', 'Paired')):
             GLib.idle_add(lambda: (connect(), False)[1])
 
     bus.add_signal_receiver(changed, signal_name='PropertiesChanged',
@@ -265,6 +355,10 @@ def main():
         loop.run()
     finally:
         stop.set()
+        if probe_thread is not None:
+            probe_thread.join(10)
+        for sock in discovered_sockets:
+            sock.close()
         for worker in workers.values():
             try:
                 worker.close()

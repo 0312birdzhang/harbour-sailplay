@@ -1,0 +1,85 @@
+From b60ea3d2e7a17ad6dd5d01ef67ec1a46b6a188e8 Mon Sep 17 00:00:00 2001
+From: BirdZhang <0312birdzhang@gmail.com>
+Date: Wed, 11 Nov 2026 11:36:04 +0800
+Subject: [PATCH 1/2] Reinitialize Native AA when access point transport
+ changes
+
+---
+ .../main/java/com/andrerinas/openheadunit/aap/AapService.kt    | 3 ++-
+ .../java/com/andrerinas/openheadunit/main/SettingsFragment.kt  | 2 ++
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/app/src/main/java/com/andrerinas/openheadunit/aap/AapService.kt b/app/src/main/java/com/andrerinas/openheadunit/aap/AapService.kt
+index ea3e256..6d19e3a 100644
+--- a/app/src/main/java/com/andrerinas/openheadunit/aap/AapService.kt
++++ b/app/src/main/java/com/andrerinas/openheadunit/aap/AapService.kt
+@@ -1976,7 +1976,8 @@ class AapService : Service(), UsbReceiver.Listener {
+                     userExitCooldownUntil = 0L
+
+                     val settings = App.provide(this).settings
+-                    if (activeWifiMode != 3 || settings.wifiConnectionMode != 3) {
++                    if (activeWifiMode != 3 || settings.wifiConnectionMode != 3 ||
++                        nativeTransport() != activeNativeTransport) {
+                         AppLog.i("AapService: Initializing Native AA mode before poke...")
+                         initWifiMode(force = true)
+                     } else if (nativeAaHandshakeManager?.isActive() != true) {
+diff --git a/app/src/main/java/com/andrerinas/openheadunit/main/SettingsFragment.kt b/app/src/main/java/com/andrerinas/openheadunit/main/SettingsFragment.kt
+index 0f2b1d0..a59ac24 100644
+--- a/app/src/main/java/com/andrerinas/openheadunit/main/SettingsFragment.kt
++++ b/app/src/main/java/com/andrerinas/openheadunit/main/SettingsFragment.kt
+@@ -533,6 +533,7 @@ class SettingsFragment : Fragment() {
+
+         val oldWifiMode = settings.wifiConnectionMode
+         val oldHelperStrategy = settings.helperConnectionStrategy
++        val oldNativeApTransport = settings.nativeApTransport
+         val oldBluetoothManagerServiceName = settings.bluetoothManagerServiceName
+         pendingWifiConnectionMode?.let { settings.wifiConnectionMode = it }
+         pendingHelperConnectionStrategy?.let { settings.helperConnectionStrategy = it }
+@@ -568,6 +569,7 @@ class SettingsFragment : Fragment() {
+
+         if (oldWifiMode != settings.wifiConnectionMode ||
+             oldHelperStrategy != settings.helperConnectionStrategy ||
++            oldNativeApTransport != settings.nativeApTransport ||
+             oldBluetoothManagerServiceName != settings.bluetoothManagerServiceName) {
+             val intent = Intent(requireContext(), AapService::class.java).apply {
+                 val mode = settings.wifiConnectionMode
+--
+2.32.0.windows.2
+
+
+From b4bdfdedd46430eb190d4b5c9cbf55ce877aa799 Mon Sep 17 00:00:00 2001
+From: BirdZhang <0312birdzhang@gmail.com>
+Date: Wed, 11 Nov 2026 11:52:09 +0800
+Subject: [PATCH 2/2] Rearm Native AA after a failed wireless session
+
+---
+ .../java/com/andrerinas/openheadunit/aap/AapService.kt     | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/app/src/main/java/com/andrerinas/openheadunit/aap/AapService.kt b/app/src/main/java/com/andrerinas/openheadunit/aap/AapService.kt
+index 6d19e3a..891243b 100644
+--- a/app/src/main/java/com/andrerinas/openheadunit/aap/AapService.kt
++++ b/app/src/main/java/com/andrerinas/openheadunit/aap/AapService.kt
+@@ -1334,7 +1334,7 @@ class AapService : Service(), UsbReceiver.Listener {
+             AppLog.i("AapService: Disconnected. Restarting discovery loop in 2s...")
+             serviceScope.launch {
+                 delay(2000)
+-                if (!commManager.isConnected) {
++                if (!commManager.isBusy) {
+                     if (settings.wifiConnectionMode == 2 && settings.helperConnectionStrategy == 2) {
+                         nearbyManager?.start()
+                     } else if (settings.wifiConnectionMode == 2 && settings.helperConnectionStrategy == 1) {
+@@ -1342,6 +1342,11 @@ class AapService : Service(), UsbReceiver.Listener {
+                         if (wifiManager.isWifiEnabled) {
+                             wifiDirectManager?.makeVisible()
+                         }
++                    } else if (settings.wifiConnectionMode == 3 &&
++                        nativeAaHandshakeManager?.isActive() != true &&
++                        nativeAaHandshakeManager?.isAttemptInFlight() != true) {
++                        AppLog.i("AapService: Native AA disconnected with its Bluetooth listener closed. Re-arming.")
++                        initWifiMode(force = true)
+                     } else if (discoveryDormantAfterWifiLoss) {
+                         AppLog.i(
+                             "AapService: link-loss teardown — leaving discovery down until a " +
+--
+2.32.0.windows.2

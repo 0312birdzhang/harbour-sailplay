@@ -8,7 +8,7 @@ Wants=bluetooth.service connman.service
 Type=simple
 Restart=always
 RestartSec=2
-ExecStart=/usr/bin/python3 /opt/sailplay/scripts/projection-service.py --seconds 0 --device /org/bluez/hci0/dev_EC_A7_AD_81_EA_86 --accessory-key /opt/sailplay/diagnostics/corolla-accessory-key.json --session-out /tmp/sailplay-session.json --announce-wireless --wifi-handover --sustained
+ExecStart=/usr/bin/python3 /opt/sailplay/scripts/projection-service.py --seconds 0 --accessory-key /opt/sailplay/diagnostics/corolla-accessory-key.json --session-out /tmp/sailplay-session.json --announce-wireless --wifi-handover --sustained
 KillMode=control-group
 ExecStopPost=-/bin/sh -c '[ "$SERVICE_RESULT" = success ] && systemctl stop sailplay-handover-*.service || true'
 ExecStopPost=-/usr/bin/python3 /opt/sailplay/scripts/restore-projection-network.py

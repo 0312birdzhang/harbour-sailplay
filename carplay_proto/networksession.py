@@ -1,6 +1,7 @@
 """Restore a projection network while its shared session lease is held."""
 import re
 import subprocess
+import time
 
 from .networkdbus import network_interface, network_object
 
@@ -24,15 +25,34 @@ def restore_network(lease, bus, log=print):
     manager = network_interface(network_object(bus, 'net.connman', '/'), 'net.connman.Manager')
     services = {str(path): properties for path, properties in manager.GetServices()}
     if target and target != old and target in services:
-        try:
-            service(target).Disconnect()
-        except Exception as error:
-            if getattr(error, 'get_dbus_name', lambda: '')() != 'net.connman.Error.NotConnected':
-                raise
-        if plan.get('forget'):
+        if services[target].get('State') not in ('idle', 'failure', 'disconnect'):
+            try:
+                service(target).Disconnect()
+            except Exception as error:
+                name = getattr(error, 'get_dbus_name', lambda: '')()
+                current = dict(manager.GetServices()).get(target, {})
+                if name != 'net.connman.Error.NotConnected' and not (
+                        name == 'net.connman.Error.NotSupported'
+                        and current.get('State', 'idle') in ('idle', 'failure', 'disconnect')):
+                    raise
+        if plan.get('forget') and services[target].get('Favorite'):
             service(target).Remove()
     if old and old in services and services[old].get('State') not in ('ready', 'online'):
-        service(old).Connect(timeout=20)
+        try:
+            service(old).Connect(timeout=20)
+        except Exception as error:
+            if getattr(error, 'get_dbus_name', lambda: '')() != 'net.connman.Error.InProgress':
+                raise
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                state = dict(manager.GetServices()).get(old, {}).get('State')
+                if state in ('ready', 'online'):
+                    break
+                if state == 'failure':
+                    raise RuntimeError('previous Wi-Fi restoration failed') from error
+                time.sleep(.2)
+            else:
+                raise TimeoutError('previous Wi-Fi restoration timed out') from error
     if not plan.get('powered', True) and plan.get('wifi_path'):
         import dbus
         technology = network_interface(network_object(bus, 'net.connman', plan['wifi_path']),

@@ -61,8 +61,8 @@ obeys the receiver's ACK window and starts from an IDR after focus recovery.
 
 Current media support includes H.264 Baseline, PCM playback, and 48 kHz stereo
 AAC-LC with raw or ADTS framing. The installation generates a private self-signed
-TLS identity. Physical Bluetooth/Wi-Fi handover, OEM certificate policies and
-Android/vehicle display and audio output require receiver testing. Microphone,
+TLS identity. OEM certificate policies and vehicle display and audio output
+require receiver testing. Microphone,
 phone calls and Android Auto instrument navigation are future integration work.
 
 Host interoperability checks used DiAuto revision `71e6558`, compiling its
@@ -78,6 +78,22 @@ receiver. Landscape PCM, landscape AAC and portrait PCM cases produced 952
 independently decoded video frames in total, with decoded test-tone audio and
 successful focus/keyframe recovery. Device audio state, UI settings and service
 activation were restored. Test resources were cleaned after each case.
+
+Physical wireless checks on 2026-11-11 used JollaPhone2026 and the installed
+DAuto 0.3.12 APK on Pixel 3. Sailplay 0.1.1-75 selects the currently connected
+receiver and resolves saved Bluetooth identities across adapter renumbering.
+Live SDP supplies the receiver's dynamic RFCOMM channel and can reconnect a
+verified, paired receiver whose Bluetooth link is down. The packaged service
+uses discovery, and the reconnect command uses the same receiver selection.
+WPP, ConnMan association, TCP, TLS and hardware-decoded video passed on the
+real phones. Connection and network restoration hold the session CPU lease.
+Disconnected temporary networks can clear an earlier recovery journal.
+
+The receiver used Native Wireless mode with its existing 2.4 GHz compatibility
+setting enabled and overlay permission granted. A stale DAuto receive group
+required an application restart during diagnosis. A complementary DAuto
+transport/listener source patch is included with its build status.
+[DAuto patch](receiver-patches/README.md)
 
 An explicitly selected DiAuto TCP endpoint can also be used on the current
 network for protocol testing. Use the address and port reported by the receiver.

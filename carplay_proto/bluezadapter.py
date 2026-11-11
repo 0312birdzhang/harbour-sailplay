@@ -12,6 +12,8 @@ def adapter_name(properties):
 
 def select_head_unit(objects, configured=None, previous=None):
     """Prefer the connected, paired accessory over a previous vehicle."""
+    configured = resolve_device(objects, configured)
+    previous = resolve_device(objects, previous)
     uuid = '00000000-deca-fade-deca-deafdecacaff'
     candidates = [str(path) for path, interfaces in objects.items()
                   for props in [interfaces.get('org.bluez.Device1', {})]
@@ -51,6 +53,18 @@ def previous_head_unit(path='/var/lib/sailplay/last-head-unit'):
             return source.read().strip()
     except FileNotFoundError:
         return None
+
+
+def resolve_device(objects, device):
+    """Resolve saved Bluetooth identities when BlueZ renumbers an adapter."""
+    if not device or device in objects or not str(device).startswith('/org/bluez/'):
+        return device
+    basename = str(device).rsplit('/', 1)[-1]
+    matches = [str(path) for path, interfaces in objects.items()
+               if 'org.bluez.Device1' in interfaces and str(path).rsplit('/', 1)[-1] == basename]
+    if len(matches) == 1:
+        return matches[0]
+    return device
 
 
 def remember_head_unit(device, path='/var/lib/sailplay/last-head-unit'):

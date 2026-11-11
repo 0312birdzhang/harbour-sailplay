@@ -39,9 +39,7 @@ def projection_target(objects, configured, protocol):
 
 def configured_device(exec_start):
     match = re.search(r'--device\s+(/org/bluez/hci\d+/dev_[0-9A-Fa-f_]+)', exec_start)
-    if not match:
-        raise RuntimeError('Sailplay service has no configured head unit')
-    return match.group(1)
+    return match.group(1) if match else None
 
 
 def main():
@@ -54,7 +52,13 @@ def main():
     objects = manager.GetManagedObjects()
     adapter, target = select_adapter(objects, target)
     protocol = selected_protocol()
+    if protocol != 'carplay':
+        from android_auto.bluetooth import discover_head_units
+        from android_auto.bluez import LAST_HEAD_UNIT
+        objects, _ = discover_head_units(objects, adapter, known_device=target or previous_head_unit(LAST_HEAD_UNIT))
     target = projection_target(objects, target, protocol)
+    if target is None:
+        raise RuntimeError('no paired projection receiver is available')
     adapter, target = select_adapter(objects, target)
     logging.info('Reconnect target: %s', target)
     props = dbus.Interface(bus.get_object('org.bluez', adapter), 'org.freedesktop.DBus.Properties')
@@ -64,21 +68,37 @@ def main():
     ensure_wifi_powered(manager_wifi, lambda path, enabled:
         dbus.Interface(bus.get_object('net.connman', path), 'net.connman.Technology').SetProperty(
             'Powered', dbus.Boolean(enabled, variant_level=1)), log=logging.info)
-    # The service owns RFCOMM and all handover units. Restarting it retires
-    # stale workers/media before a fresh Bluetooth connection can trigger iAP2.
-    subprocess.run(['systemctl', 'restart', 'sailplay.service'], check=True, timeout=60)
+    from android_auto.bluez import LAST_HEAD_UNIT, select_head_unit as select_android_auto
+    android_auto = protocol == 'android-auto' or (protocol == 'auto' and not authenticated_head_unit(target)
+        and target == select_android_auto(objects, target, previous_head_unit(LAST_HEAD_UNIT), protocol))
     device = dbus.Interface(bus.get_object('org.bluez', target), 'org.bluez.Device1')
+    device_properties = dbus.Interface(bus.get_object('org.bluez', target), 'org.freedesktop.DBus.Properties')
+    # Retire the existing session before waking the receiver's Bluetooth listener.
+    subprocess.run(['systemctl', 'stop', 'sailplay.service'], check=True, timeout=60)
     try:
-        device.Connect(timeout=20)
-    except dbus.DBusException as error:
-        if error.get_dbus_name() != 'org.bluez.Error.AlreadyConnected':
-            raise
-    if protocol == 'android-auto':
-        from android_auto.bluez import LAST_HEAD_UNIT
+        connected = device_properties.Get('org.bluez.Device1', 'Connected')
+        if android_auto:
+            if connected:
+                device.Disconnect(timeout=10)
+            from android_auto.bluetooth import find_channel
+            local = str(props.Get('org.bluez.Adapter1', 'Address'))
+            remote = str(device_properties.Get('org.bluez.Device1', 'Address'))
+            # SDP establishes the authenticated ACL link even while the receiver
+            # is reopening its AA listener after the Bluetooth reconnect event.
+            find_channel(local, remote, timeout=10)
+        elif not connected:
+            try:
+                device.Connect(timeout=20)
+            except dbus.DBusException as error:
+                if error.get_dbus_name() != 'org.bluez.Error.AlreadyConnected':
+                    raise
+    finally:
+        subprocess.run(['systemctl', 'start', 'sailplay.service'], check=True, timeout=60)
+    if android_auto:
         remember_head_unit(target, LAST_HEAD_UNIT)
     else:
         remember_head_unit(target)
-    logging.info('Head-unit Bluetooth connected; Sailplay will negotiate projection protocol=%s', protocol)
+    logging.info('Head-unit reconnect requested; Sailplay will negotiate projection protocol=%s', protocol)
 
 
 if __name__ == '__main__':

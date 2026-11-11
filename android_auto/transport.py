@@ -156,7 +156,8 @@ class Transport:
         self.tls = context.wrap_bio(self.incoming, self.outgoing, server_side=True)
         self.ready = False
         self.partial_since = None
-        self.sock.settimeout(2)
+        # Wireless TCP can need several retransmissions during radio handover.
+        self.sock.settimeout(15)
 
     def stopped(self):
         return self.stop is not None and self.stop.is_set()
@@ -221,10 +222,21 @@ class Transport:
                 if packet.type != 3:
                     raise ValueError('AAP encapsulated TLS message expected')
                 self.incoming.write(packet.payload)
-        authentication = self.plain(deadline)
-        if authentication.type != 4 or Message(authentication.payload).integer(1, signed=True) != 0:
-            raise ValueError('head unit rejected Android Auto authentication')
-        self.ready = True
+        # DiAuto terminates its TLS exchange with an empty type-3 envelope
+        # before sending the separate authentication-complete notification.
+        for _ in range(128):
+            if time.monotonic() >= deadline:
+                raise TimeoutError('AAP authentication timed out')
+            authentication = self.plain(deadline)
+            if authentication.type == 3 and not authentication.payload:
+                continue
+            status = Message(authentication.payload).integer(1, signed=True) if authentication.type == 4 else None
+            if authentication.type != 4 or status != 0:
+                raise ValueError('head unit rejected Android Auto authentication type={} length={} status={}'.format(
+                    authentication.type, len(authentication.payload), status))
+            self.ready = True
+            return
+        raise ValueError('AAP authentication message count exceeds limit')
 
     def send(self, channel, message_type, payload=b''):
         if not self.ready or self.stopped():
@@ -236,6 +248,8 @@ class Transport:
         # must match media data so the receiver delivers it to the assembler.
         mode = ENCRYPTED | (CONTROL if channel != 0 and 2 <= message_type <= 26 else 0)
         for offset in range(0, len(data), CHUNK_BYTES):
+            if self.stopped():
+                raise InterruptedError('AAP media transmission stopped')
             chunk = data[offset:offset + CHUNK_BYTES]
             if self.tls.write(chunk) != len(chunk):
                 raise RuntimeError('incomplete AAP TLS write')
