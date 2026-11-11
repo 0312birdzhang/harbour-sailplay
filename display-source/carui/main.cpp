@@ -49,6 +49,7 @@
 #include <cstdio>
 #include <sailfishapp.h>
 #include "navigationhost.h"
+#include "mapcanvas.h"
 #include "contenthost.h"
 #include "musichost.h"
 
@@ -1621,6 +1622,7 @@ static void inheritSystemLocale()
 
 Q_DECL_EXPORT int main(int argc, char **argv)
 {
+    qmlRegisterType<SailplayMapCanvas>("Sailplay", 1, 0, "MapCanvas");
     ::signal(SIGPIPE, SIG_IGN);
     inheritSystemLocale();
     QGuiApplication app(argc, argv);

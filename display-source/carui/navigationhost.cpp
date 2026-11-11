@@ -7,6 +7,8 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QBuffer>
+#include <QImageReader>
 #include <QSaveFile>
 #include <QSet>
 #include <QSignalBlocker>
@@ -113,17 +115,29 @@ SailplayNavigationHost::SailplayNavigationHost(const QString &runtime, QObject *
             return;
         }
         if (ready) m_session.setActive(m_active);
+        else resetMap();
         publish();
         emit changed();
     });
     connect(&m_session, &SailplaySession::errorOccurred, this,
         [this](const QString &, const QString &message) { fail(message); });
     connect(&m_session, &SailplaySession::requestFinished, this,
-        [this](qulonglong, qulonglong, const QVariantMap &, const QString &error, const QString &message) {
+        [this](qulonglong request, qulonglong, const QVariantMap &result, const QString &error, const QString &message) {
+            if (request == m_mapRequest) {
+                m_mapRequest = 0;
+                if (error.isEmpty() && m_active) receiveMap(result);
+                else if (!error.isEmpty()) { m_mapImage = QImage(); emit mapChanged(); }
+            }
+            if (request == m_touchRequest) {
+                m_touchRequest = 0;
+                sendTouch();
+            }
             if (!error.isEmpty()) { m_error = message; emit changed(); }
         });
     connect(&m_heartbeat, &QTimer::timeout, this, &SailplayNavigationHost::publish);
     m_heartbeat.start(1000);
+    connect(&m_mapTimer, &QTimer::timeout, this, &SailplayNavigationHost::requestMap);
+    m_mapTimer.start(200);
 }
 
 SailplayNavigationHost::~SailplayNavigationHost()
@@ -150,6 +164,11 @@ void SailplayNavigationHost::open(const SailplayApplication &declaration, const 
 void SailplayNavigationHost::setActive(bool active)
 {
     m_active = active;
+    if (!active) {
+        m_touches.clear();
+        if (mapAvailable()) m_session.invoke(QStringLiteral("navigation.map.touch"),
+            {{QStringLiteral("phase"), QStringLiteral("cancel")}, {QStringLiteral("x"), 0.0}, {QStringLiteral("y"), 0.0}});
+    }
     if (m_session.ready()) m_session.setActive(active);
 }
 
@@ -157,6 +176,7 @@ void SailplayNavigationHost::close()
 {
     const QSignalBlocker blocker(&m_session);
     m_session.close();
+    resetMap();
     removeExport();
     m_guidance.clear();
     m_declaration = SailplayApplication();
@@ -168,6 +188,94 @@ void SailplayNavigationHost::close()
 void SailplayNavigationHost::stopNavigation()
 {
     if (m_session.ready()) m_session.invoke(QStringLiteral("navigation.stop"));
+}
+
+void SailplayNavigationHost::configureMap(int width, int height)
+{
+    m_mapSize = QSize(qBound(64, width, 1920), qBound(64, height, 1920));
+}
+
+void SailplayNavigationHost::requestMap()
+{
+    if (!m_active || !mapAvailable() || m_mapSize.isEmpty() || m_mapRequest) return;
+    m_mapRequest = m_session.invoke(QStringLiteral("navigation.map.frame"),
+        {{QStringLiteral("width"), m_mapSize.width()}, {QStringLiteral("height"), m_mapSize.height()}});
+}
+
+void SailplayNavigationHost::resetMap()
+{
+    m_mapRequest = 0;
+    m_touchRequest = 0;
+    m_touches.clear();
+    m_mapImage = QImage();
+    m_mapState.clear();
+    emit mapChanged();
+}
+
+void SailplayNavigationHost::receiveMap(const QVariantMap &result)
+{
+    const auto reject = [this] {
+        m_mapImage = QImage();
+        m_mapState.clear();
+        emit mapChanged();
+        fail(translated("Navigation provider returned invalid map data"));
+    };
+    const QVariant data = result.value(QStringLiteral("image"));
+    if (data.type() != QVariant::ByteArray || data.toByteArray().size() > 4 * 1024 * 1024) {
+        reject();
+        return;
+    }
+    QByteArray bytes = data.toByteArray();
+    if (bytes.isEmpty()) return;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::ReadOnly);
+    QImageReader reader(&buffer, "JPEG");
+    const QSize size = reader.size();
+    if (size.width() < 1 || size.height() < 1 || size.width() > 1920 || size.height() > 1920
+        || size.width() != result.value(QStringLiteral("width")).toInt()
+        || size.height() != result.value(QStringLiteral("height")).toInt()) {
+        reject();
+        return;
+    }
+    const QImage image = reader.read();
+    if (image.isNull()) {
+        reject();
+        return;
+    }
+    if (m_mapImage.isNull())
+        qInfo("carui: navigation map ready app=%s width=%d height=%d",
+            qPrintable(applicationId()), image.width(), image.height());
+    m_mapImage = image;
+    m_mapState = qdbus_cast<QVariantMap>(result.value(QStringLiteral("state")));
+    m_error.clear();
+    emit mapChanged();
+    emit changed();
+}
+
+void SailplayNavigationHost::mapTouch(const QString &phase, double x, double y)
+{
+    if (!m_active || !mapAvailable() || !mapReady() || !std::isfinite(x) || !std::isfinite(y)
+        || x < 0 || x > 1 || y < 0 || y > 1
+        || !QStringList{QStringLiteral("press"), QStringLiteral("move"), QStringLiteral("release"), QStringLiteral("cancel")}.contains(phase)) return;
+    const QVariantMap touch = {{QStringLiteral("phase"), phase}, {QStringLiteral("x"), x}, {QStringLiteral("y"), y}};
+    if (phase == QStringLiteral("move") && !m_touches.isEmpty()
+        && m_touches.back().value(QStringLiteral("phase")) == QStringLiteral("move")) m_touches.back() = touch;
+    else if (m_touches.size() < 32) m_touches.enqueue(touch);
+    else { m_touches.clear(); m_touches.enqueue({{QStringLiteral("phase"), QStringLiteral("cancel")},
+        {QStringLiteral("x"), 0.0}, {QStringLiteral("y"), 0.0}}); }
+    sendTouch();
+}
+
+void SailplayNavigationHost::sendTouch()
+{
+    if (m_touchRequest || m_touches.isEmpty() || !m_active || !mapAvailable()) return;
+    m_touchRequest = m_session.invoke(QStringLiteral("navigation.map.touch"), m_touches.dequeue());
+}
+
+void SailplayNavigationHost::mapControl(const QString &command)
+{
+    if (m_active && mapAvailable()) m_session.invoke(QStringLiteral("navigation.map.control"),
+        {{QStringLiteral("command"), command}});
 }
 
 void SailplayNavigationHost::receiveState()

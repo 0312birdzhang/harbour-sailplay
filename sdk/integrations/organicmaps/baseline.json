@@ -1,9 +1,9 @@
 {
   "source_repository": "https://github.com/0312birdzhang/organicmaps-sailfish",
   "baseline_commit": "abcdd8c3d518973d74d1d967c1f6d6ba34e500bf",
-  "integrated_commit": "b40a00d89a665b06374371b9b5e8914139174231",
+  "integrated_commit": "8056adcc1a457dd980699b8332437e19b6d45da5",
   "patch": "lifecycle.patch",
-  "patch_sha256": "a01c66666a893019a4922ab697fec9aa3881311e61c4a4d9a071b186aa486186",
+  "patch_sha256": "d5842c038afaf2437ccd6d2f7c8fb2f7636d0c890c4c5f5492c8f02c8bf3ea79",
   "files": [
     {
       "path": "libs/map/framework.cpp",
@@ -36,24 +36,34 @@
       "after": "deea838be0778929b14d3d4fc523a579d59901492b70cdb8a2f8728647440df0"
     },
     {
+      "path": "qt/qt_common/qtoglcontext.cpp",
+      "before": "fbbe8dacb3a28894e6f25f474882c2bb3e6bedd2024c52dde1c60d0b2b0c592d",
+      "after": "96c6571ef8929f1e9c6f32089455c814accf41ab17fd39778761237b534b77f1"
+    },
+    {
+      "path": "qt/qt_common/qtoglcontext.hpp",
+      "before": "c834def0aeee7fc7d52809aca85c2e6de96bc953d5a79c8478fecae07cc518ff",
+      "after": "d15c9a5215df12d794cbc4e3e92734575065b052e74d8422b499f669b50c1acb"
+    },
+    {
       "path": "qt/qt_common/qtoglcontextfactory.cpp",
       "before": "4158765bfd6aad6ad100e2d877a9e15447a508de7c6d8140bda6997eaffd92d5",
-      "after": "56bdbd63c51247ec1dc8385a5857b8d8c093778c9afcdacd70df1e1b8a57609b"
+      "after": "9d9a462f5633c1c4b8b8345585422f72a2ee75af1517db5fe034dc671d0d76b2"
     },
     {
       "path": "qt/qt_common/qtoglcontextfactory.hpp",
       "before": "e9d38e24e9dfed92b170e2d746bdb1f57f79b956ae56f83d78ce1a0938d33324",
-      "after": "fa9e0ff1165b1ecb0561af6a201758b54400a8d7526d00e77d220dd2073d792f"
+      "after": "3d545e6bfeee857adcbaf7f6ae5192906da6e5dac5bccc12db947f5a2fcd0fd0"
     },
     {
       "path": "sailfish/CMakeLists.txt",
       "before": "af22dd6da2e97ba671e72cdddd38c2c4709614a0bc1fa2dc15be0378afaf6e81",
-      "after": "3dbd952ec8a54228ae4bd22e16d6fd22792f03572b74cf5970af4d92322914e3"
+      "after": "d7b4e7b06936fe4185e1546c608c461c422080ebce1f41e9f85f3c2622706c65"
     },
     {
       "path": "sailfish/app.cpp",
       "before": "7f6064521588344bf14221e6bfbc4d632d7e1c1736d3f8da122e0e52468e34ae",
-      "after": "90a55be5f328b9c0fdc4614aae1487cfe73ea5658ff598bcf3834e62b8168e43"
+      "after": "6ed039000c347bfa05fdc7383eb829768fd7acf67515e41671e79bdf46bb1cb4"
     },
     {
       "path": "sailfish/bookmarks_io.cpp",
@@ -68,12 +78,12 @@
     {
       "path": "sailfish/map_item.cpp",
       "before": "441da60c388f782ebf4416015f7eb8df90fc9737e4af0f08d23e5d3da3e3c887",
-      "after": "0641bf7ab213b446ec55b58a14b2168cdb96bb69756e0c525fef1e7f6ee25c20"
+      "after": "5ba48a19817520a015c35fe0e99a13082093149b9f1edc91e924b89911ccfc38"
     },
     {
       "path": "sailfish/map_item.hpp",
       "before": "126843533f635eafdd97e1138fa48f0d57cee82f74a385591479e368a859121a",
-      "after": "c166cb6bdb2bab4328177132971c32f1045b89b14553940ad485d8e823d5a5e0"
+      "after": "45e28d570a466f8e43e55246b6930f6e0f9ad349efbcb1f25ca45115084eadce"
     },
     {
       "path": "sailfish/map_surface.cpp",
@@ -144,6 +154,16 @@
       "path": "sailfish/rpm/organicmaps.spec",
       "before": "cf223dc58ef1e80ed8a47d7f77b0394ad316c8629a2602195bfbf9e2018aa672",
       "after": "6a65d94297f7d07d3ef654112536fb85d9570ede927338a2765995d50024c83d"
+    },
+    {
+      "path": "sailfish/sailplay_map_canvas.cpp",
+      "before": null,
+      "after": "4ef3e0999992f0bc6d0832543b07eee7fd37352f2a5ce15ec5b55f6f33eb42ab"
+    },
+    {
+      "path": "sailfish/sailplay_map_canvas.hpp",
+      "before": null,
+      "after": "401ee112926c089255fccb7b854fb7be52b1862277e7cfccf12bfc7f54b85f0d"
     },
     {
       "path": "sailfish/sailplay_navigation.cpp",

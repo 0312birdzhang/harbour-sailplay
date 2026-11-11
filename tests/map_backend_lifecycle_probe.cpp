@@ -14,6 +14,7 @@
 #include "sailfish/place_editor.hpp"
 #include "sailfish/place_page.hpp"
 #include "sailfish/routing.hpp"
+#include "sailfish/sailplay_map_canvas.hpp"
 #include "sailfish/search_model.hpp"
 #include "sailfish/url_handler.hpp"
 
@@ -33,6 +34,7 @@
 #include <QQmlEngine>
 #include <QPointer>
 #include <QQuickWindow>
+#include <QSet>
 #include <QStandardPaths>
 #include <QSurfaceFormat>
 #include <QThread>
@@ -232,7 +234,49 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
   presentation.Close();
   WaitFor([&] { return !bookmarksIO.busy() && !routing->HasBackgroundWork(); });
   Check(!framework.IsDrapeEngineCreated(), "final closure retained the renderer");
+  sailfish::SailplayMapCanvas canvas(mapCore, presentation);
+  auto const frame = [&]
+  {
+    QVariantMap result;
+    WaitFor([&]
+    {
+      result = canvas.Frame(QSize(640, 360));
+      return !result.value("image").toByteArray().isEmpty();
+    });
+    auto const image = QImage::fromData(result.value("image").toByteArray(), "JPEG");
+    Check(!image.isNull() && image.width() == result.value("width").toInt() &&
+          image.height() == result.value("height").toInt(), "canvas returned invalid pixels");
+    Check(image.width() > 0 && image.height() > 0, "canvas frame has no dimensions");
+    QSet<QRgb> colors;
+    for (int y = 0; y < image.height(); y += 16)
+      for (int x = 0; x < image.width(); x += 16)
+        colors.insert(image.pixel(x, y));
+    Check(colors.size() > 4, "canvas frame is blank");
+    std::fprintf(stderr, "MAP_CANVAS_FRAME width=%d height=%d colors=%d phone=%d\n",
+                 image.width(), image.height(), colors.size(), presentation.isOpen());
+  };
+  frame();
+  Check(!presentation.isOpen() && framework.IsDrapeEngineCreated(), "cold car canvas opened a phone view");
+  canvas.Touch("press", 0.5, 0.5);
+  canvas.Touch("move", 0.6, 0.5);
+  canvas.Touch("release", 0.6, 0.5);
+  mapCore.zoomIn();
+  frame();
+  for (int cycle = 0; cycle < 3; ++cycle)
+  {
+    Check(presentation.Show(), "canvas prevented phone reopen");
+    for (auto * window : QGuiApplication::allWindows()) window->hide();
+    frame();
+    Check(mapCore.window() && mapCore.window()->inherits("QQuickView"), "canvas displaced the phone viewport");
+    presentation.Close();
+    frame();
+    Check(!presentation.isOpen() && mapCore.window() && framework.IsDrapeEngineCreated(),
+          "phone closure stopped the car canvas");
+    Check(!routing->active(), "canvas restored explicitly stopped navigation");
+  }
+  WaitFor([&] { return !framework.IsDrapeEngineCreated(); }, 5000);
+  Check(mapCore.window() == nullptr, "expired canvas retained its offscreen window");
   std::puts("MAP_BACKEND_LIFECYCLE_PASS full-phone-qml window-close reopen same-core drape-release headless-gps "
-            "offline-route-progress recording-statistics saved-recording explicit-stop");
+            "offline-route-progress recording-statistics saved-recording explicit-stop car-canvas touch expiry");
   return EXIT_SUCCESS;
 }

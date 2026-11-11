@@ -276,11 +276,107 @@ index 8260db8f..673180e6 100644
    /// \brief It saves route points to file.
    void SaveRoutePoints();
    /// \brief It deletes file with saved route points if it exists.
+diff --git a/qt/qt_common/qtoglcontext.cpp b/qt/qt_common/qtoglcontext.cpp
+index bf8056b5..7da7f901 100644
+--- a/qt/qt_common/qtoglcontext.cpp
++++ b/qt/qt_common/qtoglcontext.cpp
+@@ -30,6 +30,7 @@ void QtRenderOGLContext::Present()
+   std::lock_guard<std::mutex> lock(m_frameMutex);
+   std::swap(m_frontFrame, m_backFrame);
+   m_frameUpdated = true;
++  ++m_frameNumber;
+   if (m_onPresent)
+     m_onPresent();
+ }
+@@ -119,6 +120,37 @@ GLuint QtRenderOGLContext::GetTextureHandle() const
+   return m_acquiredFrame->texture();
+ }
+
++QImage QtRenderOGLContext::CaptureFrame(QOpenGLFunctions & functions)
++{
++  std::lock_guard lock(m_frameMutex);
++  auto const & frame = m_frameUpdated ? m_frontFrame : m_acquiredFrame;
++  QRectF const & rect = m_frameUpdated ? m_frameRect : m_acquiredFrameRect;
++  int const width = qRound(rect.width() * m_width);
++  int const height = qRound(rect.height() * m_height);
++  if (m_frameNumber == 0 || !frame || width <= 0 || height <= 0 || width > 4096 || height > 4096)
++    return {};
++
++  // Framebuffer names belong to a context. Attach the shared texture to a
++  // readback-context framebuffer while keeping the renderer's frame stable.
++  GLuint framebuffer = 0;
++  GLint previous = 0;
++  functions.glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
++  functions.glGenFramebuffers(1, &framebuffer);
++  functions.glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
++  functions.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, frame->texture(), 0);
++  QImage image;
++  if (functions.glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE)
++  {
++    image = QImage(width, height, QImage::Format_RGBA8888);
++    functions.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, image.bits());
++    if (functions.glGetError() != GL_NO_ERROR)
++      image = {};
++  }
++  functions.glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
++  functions.glDeleteFramebuffers(1, &framebuffer);
++  return image.mirrored();
++}
++
+ QtUploadOGLContext::QtUploadOGLContext(QOpenGLContext * rootContext, QOffscreenSurface * surface)
+   : m_surface(surface)
+   , m_ctx(std::make_unique<QOpenGLContext>())
+diff --git a/qt/qt_common/qtoglcontext.hpp b/qt/qt_common/qtoglcontext.hpp
+index 4a727538..40a2f563 100644
+--- a/qt/qt_common/qtoglcontext.hpp
++++ b/qt/qt_common/qtoglcontext.hpp
+@@ -3,6 +3,7 @@
+ #include "drape/oglcontext.hpp"
+
+ #include <QOpenGLFramebufferObject>
++#include <QOpenGLFunctions>
+
+ #include <QtGui/QOffscreenSurface>
+ #include <QtGui/QOpenGLContext>
+@@ -30,6 +31,8 @@ public:
+   bool AcquireFrame();
+   GLuint GetTextureHandle() const;
+   QRectF const & GetTexRect() const;
++  QImage CaptureFrame(QOpenGLFunctions & functions);
++  uint64_t FrameNumber() const { return m_frameNumber; }
+   // Called on the render thread after each new frame.
+   void SetPresentListener(std::function<void()> fn);
+
+@@ -46,6 +49,7 @@ private:
+   QRectF m_acquiredFrameRect = QRectF(0.0, 0.0, 0.0, 0.0);
+   QRectF m_frameRect = QRectF(0.0, 0.0, 0.0, 0.0);
+   bool m_frameUpdated = false;
++  std::atomic<uint64_t> m_frameNumber = 0;
+
+   std::atomic<bool> m_isContextAvailable;
+   int m_width = 0;
 diff --git a/qt/qt_common/qtoglcontextfactory.cpp b/qt/qt_common/qtoglcontextfactory.cpp
-index 75b02b76..f2e7226e 100644
+index 75b02b76..e04c0f95 100644
 --- a/qt/qt_common/qtoglcontextfactory.cpp
 +++ b/qt/qt_common/qtoglcontextfactory.cpp
-@@ -91,7 +91,16 @@ void QtOGLContextFactory::WaitForInitialization(dp::GraphicsContext * context)
+@@ -60,6 +60,16 @@ GLuint QtOGLContextFactory::GetTextureHandle() const
+   return m_drawContext->GetTextureHandle();
+ }
+
++QImage QtOGLContextFactory::CaptureFrame(QOpenGLFunctions & functions)
++{
++  return !m_preparedToShutdown && m_drawContext ? m_drawContext->CaptureFrame(functions) : QImage();
++}
++
++uint64_t QtOGLContextFactory::FrameNumber() const
++{
++  return !m_preparedToShutdown && m_drawContext ? m_drawContext->FrameNumber() : 0;
++}
++
+ dp::GraphicsContext * QtOGLContextFactory::GetDrawContext()
+ {
+   if (!m_drawContext)
+@@ -91,7 +101,16 @@ void QtOGLContextFactory::WaitForInitialization(dp::GraphicsContext * context)
      m_contextsCreated.wait();
    }
    else
@@ -298,7 +394,7 @@ index 75b02b76..f2e7226e 100644
 
  std::unique_ptr<QOffscreenSurface> QtOGLContextFactory::CreateSurface()
 diff --git a/qt/qt_common/qtoglcontextfactory.hpp b/qt/qt_common/qtoglcontextfactory.hpp
-index 2143365d..d57cac30 100644
+index 2143365d..6290f53e 100644
 --- a/qt/qt_common/qtoglcontextfactory.hpp
 +++ b/qt/qt_common/qtoglcontextfactory.hpp
 @@ -8,6 +8,7 @@
@@ -309,7 +405,16 @@ index 2143365d..d57cac30 100644
 
  namespace qt
  {
-@@ -47,6 +48,7 @@ private:
+@@ -27,6 +28,8 @@ public:
+   bool AcquireFrame();
+   GLuint GetTextureHandle() const;
+   QRectF const & GetTexRect() const;
++  QImage CaptureFrame(QOpenGLFunctions & functions);
++  uint64_t FrameNumber() const;
+
+   // dp::GraphicsContextFactory overrides:
+   dp::GraphicsContext * GetDrawContext() override;
+@@ -47,6 +50,7 @@ private:
    std::unique_ptr<QOffscreenSurface> m_uploadSurface;
    bool m_preparedToShutdown = false;
 
@@ -318,7 +423,7 @@ index 2143365d..d57cac30 100644
    std::latch m_contextsCreated = std::latch(2);
  };
 diff --git a/sailfish/CMakeLists.txt b/sailfish/CMakeLists.txt
-index 8b23ed0a..9943bc17 100644
+index 8b23ed0a..f6f16e4d 100644
 --- a/sailfish/CMakeLists.txt
 +++ b/sailfish/CMakeLists.txt
 @@ -1,6 +1,8 @@
@@ -348,7 +453,7 @@ index 8b23ed0a..9943bc17 100644
    prompt_player.cpp
    prompt_player.hpp
    routing.cpp
-@@ -102,6 +108,23 @@ target_link_libraries(${PROJECT_NAME}_lib
+@@ -102,6 +108,24 @@ target_link_libraries(${PROJECT_NAME}_lib
      ${PULSE_LIBRARIES}
  )
 
@@ -358,7 +463,8 @@ index 8b23ed0a..9943bc17 100644
 +    message(FATAL_ERROR "The Sailplay backend requires the application's Sailjail service identity")
 +  endif()
 +  add_subdirectory("${SAILPLAY_SDK_QT_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/sailplay-sdk")
-+  target_sources(${PROJECT_NAME}_lib PRIVATE sailplay_navigation.cpp sailplay_navigation.hpp)
++  target_sources(${PROJECT_NAME}_lib PRIVATE sailplay_navigation.cpp sailplay_navigation.hpp
++    sailplay_map_canvas.cpp sailplay_map_canvas.hpp)
 +  target_link_libraries(${PROJECT_NAME}_lib PRIVATE sailplay_sdk_provider)
 +  target_compile_definitions(${PROJECT_NAME}_lib PRIVATE OMIM_SAILPLAY)
 +  set(SAILPLAY_SDK_LICENSE "${SAILPLAY_SDK_QT_DIR}/../../LICENSE")
@@ -366,17 +472,17 @@ index 8b23ed0a..9943bc17 100644
 +    set(SAILPLAY_SDK_LICENSE "${SAILPLAY_SDK_QT_DIR}/../LICENSE")
 +  endif()
 +  install(FILES "${SAILPLAY_SDK_LICENSE}" DESTINATION ${APP_DATA_DIR} RENAME sailplay-sdk-LICENSE)
-+  set(SAILPLAY_METADATA "X-Sailplay-ApiVersion=1\nX-Sailplay-Service=${DBUS_SERVICE}\nX-Sailplay-ObjectPath=/org/sailplay/v1/App\nX-Sailplay-Presentation=template\nX-Sailplay-Capabilities=navigation;")
++  set(SAILPLAY_METADATA "X-Sailplay-ApiVersion=1\nX-Sailplay-Service=${DBUS_SERVICE}\nX-Sailplay-ObjectPath=/org/sailplay/v1/App\nX-Sailplay-Presentation=template\nX-Sailplay-Capabilities=navigation;navigation-map;")
 +endif()
 +
  add_executable(${PROJECT_NAME} main.cpp)
  set_target_properties(${PROJECT_NAME} PROPERTIES
    OUTPUT_NAME ${APP_NAME}
 diff --git a/sailfish/app.cpp b/sailfish/app.cpp
-index 70fd841b..09b7020b 100644
+index 70fd841b..e92b2cc2 100644
 --- a/sailfish/app.cpp
 +++ b/sailfish/app.cpp
-@@ -6,15 +6,22 @@
+@@ -6,15 +6,23 @@
  #include "sailfish/countries_model.hpp"
  #include "sailfish/framework_access.hpp"
  #include "sailfish/map_item.hpp"
@@ -392,6 +498,7 @@ index 70fd841b..09b7020b 100644
  #include "sailfish/url_handler.hpp"
 
 +#ifdef OMIM_SAILPLAY
++#include "sailfish/sailplay_map_canvas.hpp"
 +#include "sailfish/sailplay_navigation.hpp"
 +#include "sailplayprovider.h"
 +#endif
@@ -399,7 +506,12 @@ index 70fd841b..09b7020b 100644
  #include "map/framework.hpp"
 
  #include "platform/platform.hpp"
-@@ -26,7 +33,9 @@
+@@ -22,11 +30,14 @@
+
+ #include "base/logging.hpp"
+
++#include <qnumeric.h>
+ #include <qqml.h>
  #include <QDir>
  #include <QEventLoop>
  #include <QGuiApplication>
@@ -409,7 +521,7 @@ index 70fd841b..09b7020b 100644
  #include <QQmlError>
  #include <QQuickItem>
  #include <QQuickView>
-@@ -66,9 +75,9 @@ void SetDefaultSurfaceFormat()
+@@ -66,9 +77,9 @@ void SetDefaultSurfaceFormat()
 
  // The copy can take minutes, e.g. to a slow memory card, so its progress is shown meanwhile. Without text: the
  // strings come from the platform, which may only start once the maps folder is known.
@@ -421,7 +533,7 @@ index 70fd841b..09b7020b 100644
      return sailfish::MapsStorage::ApplyPendingMove([](double) {});
 
    std::unique_ptr<QQuickView> view(SailfishApp::createView());
-@@ -90,11 +99,11 @@ QString MoveMaps()
+@@ -90,11 +101,11 @@ QString MoveMaps()
    return dir;
  }
 
@@ -435,7 +547,7 @@ index 70fd841b..09b7020b 100644
    if (writableDir.isEmpty())
      writableDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
    QDir().mkpath(writableDir);
-@@ -107,7 +116,8 @@ void SetupPlatform()
+@@ -107,7 +118,8 @@ void SetupPlatform()
 
  void RegisterQmlTypes()
  {
@@ -445,7 +557,7 @@ index 70fd841b..09b7020b 100644
    qmlRegisterType<sailfish::CountriesModel>("app.organicmaps", 1, 0, "CountriesModel");
    qmlRegisterType<sailfish::SearchModel>("app.organicmaps", 1, 0, "SearchModel");
    qmlRegisterType<sailfish::BookmarkCategoriesModel>("app.organicmaps", 1, 0, "BookmarkCategoriesModel");
-@@ -134,24 +144,30 @@ Framework & GetFramework()
+@@ -134,24 +146,30 @@ Framework & GetFramework()
  __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv[])
  {
    SetDefaultSurfaceFormat();
@@ -479,7 +591,7 @@ index 70fd841b..09b7020b 100644
 
    Framework framework;
    framework.SetupMeasurementSystem();
-@@ -169,32 +185,130 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
+@@ -169,32 +187,209 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
    sailfish::MapsStorage mapsStorage(framework);
    sailfish::DownloadStatus downloads(framework.GetStorage());
    sailfish::UrlHandler urlHandler(framework, bookmarksIO);
@@ -522,7 +634,8 @@ index 70fd841b..09b7020b 100644
 +  QObject::connect(&urlHandler, &sailfish::UrlHandler::cancelDownloadsRequested, &downloads,
 +                   &sailfish::DownloadStatus::cancelAll);
 +  QObject::connect(&urlHandler, &sailfish::UrlHandler::stopTrackRecordingRequested, &mapCore, [&]
-+  {
+   {
+-    for (auto const & error : view->errors())
 +    if (!presentation.isOpen() && mapCore.trackRecording())
 +      mapCore.saveAndStopTrackRecording();
 +  });
@@ -533,8 +646,7 @@ index 70fd841b..09b7020b 100644
 +  QQmlComponent backendComponent(&backendEngine, SailfishApp::pathTo(QStringLiteral("qml/Backend.qml")));
 +  std::unique_ptr<QObject> backendObject(backendComponent.create());
 +  if (!backendObject)
-   {
--    for (auto const & error : view->errors())
++  {
 +    for (auto const & error : backendComponent.errors())
        LOG(LERROR, (error.toString().toStdString()));
      return EXIT_FAILURE;
@@ -552,7 +664,86 @@ index 70fd841b..09b7020b 100644
 +                       {"recording", mapCore.trackRecording()},
 +                       {"downloading", downloads.inProgress()}};
 +  };
-+  SailplayProvider provider(QStringLiteral(SAILFISH_APP_NAME), state(), {QStringLiteral("navigation")});
++  sailfish::SailplayMapCanvas canvas(mapCore, presentation);
++  SailplayProvider provider(QStringLiteral(SAILFISH_APP_NAME), state(),
++                            {QStringLiteral("navigation"), QStringLiteral("navigation-map")});
++  provider.setActionHandler(QStringLiteral("navigation.map.frame"),
++                            [&](qulonglong invocation, QVariantMap const & parameters)
++  {
++    auto const integer = [](QVariant const & value)
++    { return value.type() == QVariant::Int || value.type() == QVariant::UInt; };
++    auto const width = parameters.value("width");
++    auto const height = parameters.value("height");
++    if (parameters.size() != 2 || !integer(width) || !integer(height) || width.toLongLong() < 64 ||
++        width.toLongLong() > 1920 || height.toLongLong() < 64 || height.toLongLong() > 1920)
++    {
++      provider.fail(invocation, "InvalidArgument", "Map dimensions must be integers between 64 and 1920");
++      return;
++    }
++    try
++    {
++      provider.complete(invocation, canvas.Frame(QSize(width.toInt(), height.toInt())));
++    }
++    catch (std::exception const & error)
++    {
++      provider.fail(invocation, "Unavailable", QString::fromUtf8(error.what()));
++    }
++  });
++  provider.setActionHandler(QStringLiteral("navigation.map.touch"),
++                            [&](qulonglong invocation, QVariantMap const & parameters)
++  {
++    auto const phase = parameters.value("phase");
++    auto const x = parameters.value("x");
++    auto const y = parameters.value("y");
++    // Qt's exported checks retain NaN rejection under the bridge's fast-math flags.
++    if (parameters.size() != 3 || phase.type() != QVariant::String ||
++        !QStringList{"press", "move", "release", "cancel"}.contains(phase.toString()) || x.type() != QVariant::Double ||
++        y.type() != QVariant::Double || !qIsFinite(x.toDouble()) || !qIsFinite(y.toDouble()) || x.toDouble() < 0 ||
++        x.toDouble() > 1 || y.toDouble() < 0 || y.toDouble() > 1)
++    {
++      provider.fail(invocation, "InvalidArgument", "Map touch requires a phase and normalized finite coordinates");
++      return;
++    }
++    canvas.Touch(phase.toString(), x.toDouble(), y.toDouble());
++    provider.complete(invocation);
++  });
++  provider.setActionHandler(QStringLiteral("navigation.map.control"),
++                            [&](qulonglong invocation, QVariantMap const & parameters)
++  {
++    auto const command = parameters.value("command");
++    if (parameters.size() != 1 || command.type() != QVariant::String ||
++        !QStringList{"zoom-in", "zoom-out", "position", "route-to-place", "start"}.contains(command.toString()))
++    {
++      provider.fail(invocation, "InvalidArgument", "Unknown map control");
++      return;
++    }
++    auto const name = command.toString();
++    if (name == "zoom-in")
++      mapCore.zoomIn();
++    else if (name == "zoom-out")
++      mapCore.zoomOut();
++    else if (name == "position")
++      mapCore.switchMyPositionMode();
++    else if (name == "route-to-place")
++    {
++      if (!mapCore.placePage()->open())
++      {
++        provider.fail(invocation, "Unavailable", "Select a place on the map first");
++        return;
++      }
++      mapCore.routing()->routeToPlace();
++    }
++    else
++    {
++      if (!mapCore.routing()->canStart() || !mapCore.routing()->disclaimerAccepted())
++      {
++        provider.fail(invocation, "Unavailable", "Confirm navigation readiness and the disclaimer on the phone");
++        return;
++      }
++      mapCore.routing()->start();
++    }
++    provider.complete(invocation);
++  });
 +  provider.setActionHandler(QStringLiteral("navigation.stop"),
 +                            [&](qulonglong invocation, QVariantMap const & parameters)
 +  {
@@ -727,7 +918,7 @@ index 587404ec..43720d81 100644
    QTimer m_backupTimer;
  };
 diff --git a/sailfish/map_item.cpp b/sailfish/map_item.cpp
-index c3cc0025..fbf77a6b 100644
+index c3cc0025..5c39b625 100644
 --- a/sailfish/map_item.cpp
 +++ b/sailfish/map_item.cpp
 @@ -118,6 +118,9 @@ MapItem::MapItem(QQuickItem * parent)
@@ -740,7 +931,7 @@ index c3cc0025..fbf77a6b 100644
  }
 
  MapItem::~MapItem()
-@@ -130,6 +133,11 @@ MapItem::~MapItem()
+@@ -130,14 +133,21 @@ MapItem::~MapItem()
    m_framework.SetUserPositionListener(nullptr);
    m_framework.GetStorage().Unsubscribe(m_storageSlot);
    m_locationService->Stop();
@@ -752,7 +943,9 @@ index c3cc0025..fbf77a6b 100644
    if (!m_contextFactory)
      return;
 
-@@ -138,6 +146,7 @@ MapItem::~MapItem()
++  CancelTouch();
+   m_framework.EnterBackground();
+   m_framework.SetRenderingDisabled(true);
    m_contextFactory->PrepareToShutdown();
    m_framework.DestroyDrapeEngine();
    m_contextFactory.reset();
@@ -760,7 +953,45 @@ index c3cc0025..fbf77a6b 100644
  }
 
  void MapItem::zoomIn()
-@@ -564,8 +573,12 @@ void MapItem::OnWindowChanged(QQuickWindow * window)
+@@ -156,6 +166,37 @@ void MapItem::switchMyPositionMode()
+     m_framework.SwitchMyPositionNextMode();
+ }
+
++void MapItem::SetCarViewActive(bool active)
++{
++  m_carViewActive = active;
++  UpdateRenderingState();
++}
++
++QImage MapItem::CaptureCarFrame(QOpenGLFunctions & functions)
++{
++  return m_contextFactory ? m_contextFactory->CaptureFrame(functions) : QImage();
++}
++
++uint64_t MapItem::CarFrameNumber() const
++{
++  return m_contextFactory ? m_contextFactory->FrameNumber() : 0;
++}
++
++void MapItem::CarTouch(QString const & phase, double x, double y)
++{
++  if (phase == QStringLiteral("cancel"))
++  {
++    CancelTouch();
++    return;
++  }
++  df::TouchEvent::ETouchType const type = phase == QStringLiteral("press")   ? df::TouchEvent::TOUCH_DOWN
++                                        : phase == QStringLiteral("release") ? df::TouchEvent::TOUCH_UP
++                                                                             : df::TouchEvent::TOUCH_MOVE;
++  QMouseEvent event(QEvent::MouseMove, QPointF(x * width(), y * height()), Qt::LeftButton, Qt::LeftButton,
++                    Qt::NoModifier);
++  SendMouseTouch(&event, type);
++}
++
+ int MapItem::enabledLayers() const
+ {
+   int mask = 0;
+@@ -564,8 +605,12 @@ void MapItem::OnWindowChanged(QQuickWindow * window)
    {
      connect(window, &QWindow::visibleChanged, this, &MapItem::UpdateRenderingState, Qt::UniqueConnection);
      CreateEngine();
@@ -774,20 +1005,20 @@ index c3cc0025..fbf77a6b 100644
  }
 
  void MapItem::OnApplicationStateChanged(Qt::ApplicationState)
-@@ -580,8 +593,10 @@ void MapItem::UpdateRenderingState()
+@@ -580,8 +625,10 @@ void MapItem::UpdateRenderingState()
    // follows the app process, which Sailplay retires on session end.
    bool const projected = qgetenv("WAYLAND_DISPLAY").contains("imira-comp") &&
                           qgetenv("SAILPLAY_NAVIGATION_EXPORT") == "1";
 -  bool const inBackground = !projected && QGuiApplication::applicationState() != Qt::ApplicationActive;
 -  if (!m_contextFactory || inBackground == m_inBackground)
 +  bool const inBackground =
-+      !window() ||
-+      (!projected && (!window()->isVisible() || QGuiApplication::applicationState() != Qt::ApplicationActive));
++      !window() || (!projected && !m_carViewActive &&
++                    (!window()->isVisible() || QGuiApplication::applicationState() != Qt::ApplicationActive));
 +  if (inBackground == m_inBackground)
      return;
 
    m_inBackground = inBackground;
-@@ -639,7 +654,6 @@ void MapItem::CreateEngine()
+@@ -639,7 +686,6 @@ void MapItem::CreateEngine()
 
    m_framework.SetMyPositionModeListener([this](location::EMyPositionMode mode, bool /* routingActive */)
    { OnMyPositionModeChanged(mode); });
@@ -795,7 +1026,7 @@ index c3cc0025..fbf77a6b 100644
    m_framework.GetIsolinesManager().SetStateListener([this](IsolinesManager::IsolinesState state)
    {
      GetPlatform().RunTask(Platform::Thread::Gui, [self = QPointer<MapItem>(this), state]
-@@ -658,6 +672,7 @@ void MapItem::CreateEngine()
+@@ -658,6 +704,7 @@ void MapItem::CreateEngine()
    // A recording goes on after a restart.
    WatchRecording();
    m_framework.EnterForeground();
@@ -804,10 +1035,21 @@ index c3cc0025..fbf77a6b 100644
    UpdateWidgetLayout();
    UpdateVisibleViewport();
 diff --git a/sailfish/map_item.hpp b/sailfish/map_item.hpp
-index 0e8338e1..cc8da663 100644
+index 0e8338e1..dc3968d1 100644
 --- a/sailfish/map_item.hpp
 +++ b/sailfish/map_item.hpp
-@@ -181,6 +181,7 @@ private:
+@@ -96,6 +96,10 @@ public:
+   Q_INVOKABLE void zoomIn();
+   Q_INVOKABLE void zoomOut();
+   Q_INVOKABLE void switchMyPositionMode();
++  void SetCarViewActive(bool active);
++  QImage CaptureCarFrame(QOpenGLFunctions & functions);
++  uint64_t CarFrameNumber() const;
++  void CarTouch(QString const & phase, double x, double y);
+
+   Q_INVOKABLE void setLayerEnabled(int layer, bool enabled);
+   // Location keeps running in the background while recording.
+@@ -181,6 +185,7 @@ private:
    void OnApplicationStateChanged(Qt::ApplicationState state);
    void UpdateRenderingState();
    void CreateEngine();
@@ -815,12 +1057,13 @@ index 0e8338e1..cc8da663 100644
    void Resize(int width, int height);
    void UpdateWidgetLayout();
    void UpdateVisibleViewport();
-@@ -224,7 +225,7 @@ private:
+@@ -224,7 +229,8 @@ private:
    qreal m_viewportBottomInset = 0;
    qreal m_leftInset = 0;
    qreal m_rightInset = 0;
 -  bool m_inBackground = false;
 +  bool m_inBackground = true;
++  bool m_carViewActive = false;
    bool m_locationActive = false;
    bool m_locationErrorShown = false;
    bool m_locationLost = false;
@@ -1580,6 +1823,216 @@ index 233d7434..dfbde43d 100644
    -DBUILD_TESTING=OFF
  cmake --build build --target organicmaps_sailfish
 
+diff --git a/sailfish/sailplay_map_canvas.cpp b/sailfish/sailplay_map_canvas.cpp
+new file mode 100644
+index 00000000..8656af21
+--- /dev/null
++++ b/sailfish/sailplay_map_canvas.cpp
+@@ -0,0 +1,153 @@
++#include "sailfish/sailplay_map_canvas.hpp"
++
++#include "sailfish/map_item.hpp"
++#include "sailfish/phone_presentation.hpp"
++#include "sailfish/place_page.hpp"
++#include "sailfish/routing.hpp"
++
++#include <QBuffer>
++#include <QOffscreenSurface>
++#include <QOpenGLContext>
++#include <QQuickWindow>
++
++#include <stdexcept>
++
++namespace sailfish
++{
++SailplayMapCanvas::SailplayMapCanvas(MapItem & map, PhonePresentation & phone, QObject * parent)
++  : QObject(parent)
++  , m_map(map)
++  , m_phone(phone)
++{
++  m_expiry.setInterval(1000);
++  connect(&m_expiry, &QTimer::timeout, this, [this]
++  {
++    if (m_lastRequest.isValid() && m_lastRequest.elapsed() > 2500)
++      Release();
++  });
++  connect(&m_phone, &PhonePresentation::changed, this, [this]
++  {
++    if (m_touching)
++      m_map.CarTouch(QStringLiteral("cancel"), 0, 0);
++    m_touching = false;
++    m_image.clear();
++    if (m_lastRequest.isValid() && m_lastRequest.elapsed() <= 2500)
++      Attach();
++  });
++}
++
++SailplayMapCanvas::~SailplayMapCanvas()
++{
++  Release();
++}
++
++void SailplayMapCanvas::Attach()
++{
++  m_map.SetCarViewActive(true);
++  if (m_phone.isOpen())
++  {
++    m_window.reset();
++    return;
++  }
++  if (!m_window)
++  {
++    m_window = std::make_unique<QQuickWindow>();
++    m_window->setSurfaceType(QSurface::OpenGLSurface);
++  }
++  m_window->setGeometry(0, 0, m_size.width(), m_size.height());
++  m_map.setViewportBottomInset(0);
++  m_map.setLeftInset(0);
++  m_map.setRightInset(0);
++  m_map.setBottomWidgetsOffset(0);
++  m_map.setTopWidgetsOffset(0);
++  if (QSizeF(m_map.width(), m_map.height()) != QSizeF(m_size))
++    m_map.setSize(m_size);
++  if (m_map.parentItem() != m_window->contentItem())
++    m_map.setParentItem(m_window->contentItem());
++}
++
++void SailplayMapCanvas::Release()
++{
++  if (m_touching)
++    m_map.CarTouch(QStringLiteral("cancel"), 0, 0);
++  m_touching = false;
++  m_map.SetCarViewActive(false);
++  if (m_window && m_map.window() == m_window.get())
++    m_map.setParentItem(nullptr);
++  m_window.reset();
++  m_context.reset();
++  m_surface.reset();
++  m_image.clear();
++  m_imageSize = {};
++  m_lastRequest.invalidate();
++  m_expiry.stop();
++}
++
++QVariantMap SailplayMapCanvas::Frame(QSize const & size)
++{
++  if (size != m_size)
++    m_image.clear();
++  m_size = size;
++  m_lastRequest.restart();
++  m_expiry.start();
++  Attach();
++  if (!m_context)
++  {
++    auto * shared = QOpenGLContext::globalShareContext();
++    if (!shared)
++      throw std::runtime_error("Map OpenGL sharing is unavailable");
++    auto surface = std::make_unique<QOffscreenSurface>(shared->screen());
++    surface->setFormat(shared->format());
++    surface->create();
++    auto context = std::make_unique<QOpenGLContext>();
++    context->setFormat(shared->format());
++    context->setShareContext(shared);
++    if (!context->create() || !surface->isValid())
++      throw std::runtime_error("Map readback context creation failed");
++    m_surface = std::move(surface);
++    m_context = std::move(context);
++  }
++  uint64_t const number = m_map.CarFrameNumber();
++  if (number != m_frame || m_image.isEmpty())
++  {
++    if (!m_context->makeCurrent(m_surface.get()))
++      throw std::runtime_error("Map readback context binding failed");
++    QImage image = m_map.CaptureCarFrame(*m_context->functions());
++    m_context->doneCurrent();
++    if (!image.isNull())
++    {
++      if (image.width() > 1920 || image.height() > 1920)
++        image = image.scaled(1920, 1920, Qt::KeepAspectRatio, Qt::SmoothTransformation);
++      QByteArray encoded;
++      QBuffer buffer(&encoded);
++      buffer.open(QIODevice::WriteOnly);
++      if (!image.save(&buffer, "JPEG", 85) || encoded.size() > 4 * 1024 * 1024)
++        throw std::runtime_error("Map image encoding failed");
++      m_frame = number;
++      m_image = encoded;
++      m_imageSize = image.size();
++    }
++  }
++  auto const * routing = m_map.routing();
++  QVariantMap const state = {{"place", m_map.placePage()->open() ? m_map.placePage()->title().left(1024) : QString()},
++                             {"building", routing->building()},
++                             {"built", routing->built()},
++                             {"canStart", routing->canStart()},
++                             {"disclaimerAccepted", routing->disclaimerAccepted()},
++                             {"summary", routing->summary().left(1024)},
++                             {"error", routing->errorTitle().left(1024)}};
++  return {{"image", m_image}, {"width", m_imageSize.width()}, {"height", m_imageSize.height()}, {"state", state}};
++}
++
++void SailplayMapCanvas::Touch(QString const & phase, double x, double y)
++{
++  if (!m_lastRequest.isValid())
++    return;
++  if (phase == QStringLiteral("press"))
++    m_touching = true;
++  if (m_touching)
++    m_map.CarTouch(phase, x, y);
++  if (phase == QStringLiteral("release") || phase == QStringLiteral("cancel"))
++    m_touching = false;
++}
++}  // namespace sailfish
+diff --git a/sailfish/sailplay_map_canvas.hpp b/sailfish/sailplay_map_canvas.hpp
+new file mode 100644
+index 00000000..a2ba083d
+--- /dev/null
++++ b/sailfish/sailplay_map_canvas.hpp
+@@ -0,0 +1,45 @@
++#pragma once
++
++#include <QByteArray>
++#include <QElapsedTimer>
++#include <QObject>
++#include <QSize>
++#include <QTimer>
++#include <QVariantMap>
++
++#include <memory>
++
++class QOffscreenSurface;
++class QOpenGLContext;
++class QQuickWindow;
++
++namespace sailfish
++{
++class MapItem;
++class PhonePresentation;
++
++class SailplayMapCanvas : public QObject
++{
++public:
++  SailplayMapCanvas(MapItem & map, PhonePresentation & phone, QObject * parent = nullptr);
++  ~SailplayMapCanvas() override;
++  QVariantMap Frame(QSize const & size);
++  void Touch(QString const & phase, double x, double y);
++
++private:
++  void Attach();
++  void Release();
++  MapItem & m_map;
++  PhonePresentation & m_phone;
++  QTimer m_expiry;
++  QElapsedTimer m_lastRequest;
++  QSize m_size;
++  std::unique_ptr<QQuickWindow> m_window;
++  std::unique_ptr<QOffscreenSurface> m_surface;
++  std::unique_ptr<QOpenGLContext> m_context;
++  uint64_t m_frame = 0;
++  QByteArray m_image;
++  QSize m_imageSize;
++  bool m_touching = false;
++};
++}  // namespace sailfish
 diff --git a/sailfish/sailplay_navigation.cpp b/sailfish/sailplay_navigation.cpp
 new file mode 100644
 index 00000000..61941709

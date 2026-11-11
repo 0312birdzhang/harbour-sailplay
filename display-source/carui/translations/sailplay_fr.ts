@@ -319,6 +319,26 @@ Lancez la musique sur votre téléphone</translation>
       <source>Content provider identity does not match its desktop declaration</source>
       <translation>L’identité du fournisseur de contenu ne correspond pas à sa déclaration d’application</translation>
     </message>
+    <message>
+      <source>Loading map</source>
+      <translation>Chargement de la carte</translation>
+    </message>
+    <message>
+      <source>Building route</source>
+      <translation>Calcul de l’itinéraire</translation>
+    </message>
+    <message>
+      <source>Start navigation</source>
+      <translation>Démarrer la navigation</translation>
+    </message>
+    <message>
+      <source>Route here</source>
+      <translation>Itinéraire vers ce lieu</translation>
+    </message>
+    <message>
+      <source>Navigation provider returned invalid map data</source>
+      <translation>Le fournisseur de navigation a renvoyé des données cartographiques invalides</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

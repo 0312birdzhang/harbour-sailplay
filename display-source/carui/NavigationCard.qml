@@ -1,4 +1,5 @@
 import QtQuick 2.0
+import Sailplay 1.0
 
 Rectangle {
     id: card
@@ -7,10 +8,137 @@ Rectangle {
     property bool compact: false
     property var guidance: provider ? provider.guidance : ({})
     property bool navigating: guidance.state === "active"
+    property bool mapMode: provider ? provider.mapAvailable : false
+    property var mapState: mapMode ? provider.mapState : ({})
     signal activated()
     radius: 22
     color: palette.card
     clip: true
+
+    function configureMap() {
+        if (!visible || !provider || !mapMode || width <= 0 || height <= 0) return
+        var scale = Math.min(1, 1280 / Math.max(width, height))
+        provider.configureMap(Math.round(width * scale), Math.round(height * scale))
+    }
+    onWidthChanged: configureMap()
+    onHeightChanged: configureMap()
+    onVisibleChanged: configureMap()
+    onMapModeChanged: configureMap()
+
+    MapCanvas {
+        id: canvas
+        objectName: "navigationMapCanvas"
+        anchors.fill: parent
+        visible: mapMode
+        provider: card.provider
+        MouseArea {
+            anchors.fill: parent
+            enabled: !compact && mapMode
+            onPressed: canvas.touch("press", mouse.x, mouse.y)
+            onPositionChanged: if (pressed) canvas.touch("move", mouse.x, mouse.y)
+            onReleased: canvas.touch("release", mouse.x, mouse.y)
+            onCanceled: canvas.touch("cancel", 0, 0)
+        }
+    }
+
+    Rectangle {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.margins: 16
+        width: Math.max(0, parent.width - (compact ? 32 : 112))
+        height: mapStatus.height + 24
+        radius: 14
+        color: palette.card
+        opacity: 0.93
+        visible: mapMode && (navigating || !provider.mapReady || provider.error)
+        Text {
+            id: mapStatus
+            anchors.centerIn: parent
+            width: parent.width - 24
+            text: navigating ? card.symbol(guidance.maneuver || "unknown") + "  "
+                  + card.distance(guidance.nextDistanceMeters || 0) + "  " + (guidance.nextRoad || "")
+                  : (provider.error || qsTranslate("Sailplay", "Loading map"))
+            color: palette.text
+            font.pixelSize: compact ? 24 : 30
+            wrapMode: Text.WordWrap
+            maximumLineCount: 2
+            elide: Text.ElideRight
+        }
+    }
+
+    Column {
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.margins: 16
+        spacing: 12
+        visible: mapMode && !compact
+        Repeater {
+            model: [{label: "+", command: "zoom-in"}, {label: "−", command: "zoom-out"}, {label: "◎", command: "position"}]
+            Rectangle {
+                width: 68
+                height: 68
+                radius: 14
+                color: palette.card
+                opacity: 0.93
+                Text { anchors.centerIn: parent; text: modelData.label; color: palette.text; font.pixelSize: 38 }
+                MouseArea { anchors.fill: parent; onClicked: provider.mapControl(modelData.command) }
+            }
+        }
+    }
+
+    Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 16
+        height: Math.max(58, routeText.height) + 24
+        radius: 14
+        color: palette.card
+        opacity: 0.93
+        visible: mapMode && !compact && (navigating || mapState.place || mapState.building || mapState.built || mapState.error)
+        Text {
+            id: routeText
+            x: 12
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.max(0, parent.width - routeAction.width - 36)
+            text: navigating ? qsTranslate("Sailplay", "%1 min").arg(Math.ceil((guidance.remainingSeconds || 0) / 60))
+                  + " · " + card.distance(guidance.remainingDistanceMeters || 0)
+                  : (mapState.error || mapState.summary || mapState.place || qsTranslate("Sailplay", "Building route"))
+            color: palette.text
+            font.pixelSize: 26
+            maximumLineCount: 2
+            wrapMode: Text.WordWrap
+            elide: Text.ElideRight
+        }
+        Rectangle {
+            id: routeAction
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.rightMargin: 12
+            width: Math.min(230, parent.width * 0.45)
+            height: 58
+            radius: 12
+            color: palette.dock
+            visible: navigating || mapState.canStart || (mapState.place && !mapState.building)
+            Text {
+                anchors.centerIn: parent
+                width: parent.width - 12
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                font.pixelSize: 24
+                color: palette.text
+                text: navigating ? qsTranslate("Sailplay", "Stop navigation")
+                    : (mapState.canStart ? qsTranslate("Sailplay", "Start navigation") : qsTranslate("Sailplay", "Route here"))
+            }
+            MouseArea {
+                anchors.fill: parent
+                onClicked: {
+                    if (navigating) provider.stopNavigation()
+                    else provider.mapControl(mapState.canStart ? "start" : "route-to-place")
+                }
+            }
+        }
+    }
 
     function distance(meters) {
         return meters >= 1000 ? (meters / 1000).toFixed(1) + " km" : Math.round(meters) + " m"
@@ -41,6 +169,7 @@ Rectangle {
     }
 
     Column {
+        visible: !mapMode
         width: Math.max(0, card.width - 48)
         anchors.centerIn: parent
         spacing: compact ? 12 : 20

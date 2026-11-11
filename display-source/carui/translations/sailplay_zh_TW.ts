@@ -319,6 +319,26 @@ Start music on your phone</source>
       <source>Content provider identity does not match its desktop declaration</source>
       <translation>內容服務身分與應用程式宣告不一致</translation>
     </message>
+    <message>
+      <source>Loading map</source>
+      <translation>正在載入地圖</translation>
+    </message>
+    <message>
+      <source>Building route</source>
+      <translation>正在規劃路線</translation>
+    </message>
+    <message>
+      <source>Start navigation</source>
+      <translation>開始導航</translation>
+    </message>
+    <message>
+      <source>Route here</source>
+      <translation>導航到此處</translation>
+    </message>
+    <message>
+      <source>Navigation provider returned invalid map data</source>
+      <translation>導航服務傳回了無效地圖資料</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

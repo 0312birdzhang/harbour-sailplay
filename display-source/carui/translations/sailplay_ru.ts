@@ -319,6 +319,26 @@ Start music on your phone</source>
       <source>Content provider identity does not match its desktop declaration</source>
       <translation>Идентификатор поставщика содержимого не соответствует объявлению приложения</translation>
     </message>
+    <message>
+      <source>Loading map</source>
+      <translation>Загрузка карты</translation>
+    </message>
+    <message>
+      <source>Building route</source>
+      <translation>Построение маршрута</translation>
+    </message>
+    <message>
+      <source>Start navigation</source>
+      <translation>Начать навигацию</translation>
+    </message>
+    <message>
+      <source>Route here</source>
+      <translation>Маршрут сюда</translation>
+    </message>
+    <message>
+      <source>Navigation provider returned invalid map data</source>
+      <translation>Поставщик навигации вернул некорректные данные карты</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

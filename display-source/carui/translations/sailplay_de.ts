@@ -319,6 +319,26 @@ Musik auf dem Telefon starten</translation>
       <source>Content provider identity does not match its desktop declaration</source>
       <translation>Die Identität des Inhaltsanbieters stimmt nicht mit seinem Anwendungseintrag überein</translation>
     </message>
+    <message>
+      <source>Loading map</source>
+      <translation>Karte wird geladen</translation>
+    </message>
+    <message>
+      <source>Building route</source>
+      <translation>Route wird berechnet</translation>
+    </message>
+    <message>
+      <source>Start navigation</source>
+      <translation>Navigation starten</translation>
+    </message>
+    <message>
+      <source>Route here</source>
+      <translation>Route hierher</translation>
+    </message>
+    <message>
+      <source>Navigation provider returned invalid map data</source>
+      <translation>Der Navigationsanbieter hat ungültige Kartendaten zurückgegeben</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>
