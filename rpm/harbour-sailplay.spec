@@ -1,6 +1,6 @@
 Name: harbour-sailplay
 Version: 0.1.1
-Release: 88
+Release: 91
 Summary: SailfishOS wireless CarPlay and Android Auto phone with virtual display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
@@ -9,6 +9,7 @@ Requires: ffmpeg-tools
 Requires: maliit-framework-wayland
 Requires: maliit-framework-wayland-inputcontext
 Requires: python3-base
+Requires(pre): python3-base
 Requires: python3-dbus
 Requires: python3-gobject
 Requires: sailfishsilica-qt5
@@ -73,10 +74,24 @@ install -D -m 0644 rpm/sailplay-reconnect.service %{buildroot}/usr/lib/systemd/s
 install -D -m 0644 rpm/sailplay-xpolicy.conf %{buildroot}/etc/pulse/xpolicy.conf.d/sailplay.conf
 install -D -m 0644 rpm/50-sailplay.rules %{buildroot}/etc/polkit-1/rules.d/50-sailplay.rules
 
+%pre
+python3 - <<'PY'
+import hashlib
+import os
+from pathlib import Path
+policy = Path('/etc/pulse/xpolicy.conf.d/sailplay.conf')
+previous = hashlib.sha256(policy.read_bytes()).hexdigest() if policy.exists() else ''
+descriptor = os.open('/run/sailplay-audio-policy.previous-sha256',
+                     os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+with os.fdopen(descriptor, 'w') as record:
+    record.write(previous)
+PY
+
 %post
 systemctl daemon-reload || :
 systemctl enable sailplay.service || :
-su defaultuser -s /bin/sh -c 'env XDG_RUNTIME_DIR=/run/user/100000 python3 /opt/sailplay/scripts/reload-audio-policy.py' || echo 'Sailplay audio policy activation failed; see PulseAudio logs'
+su defaultuser -s /bin/sh -c 'env XDG_RUNTIME_DIR=/run/user/100000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100000/dbus/user_bus_socket python3 /opt/sailplay/scripts/reload-audio-policy.py' || echo 'Sailplay audio policy activation failed; see PulseAudio logs'
+rm -f /run/sailplay-audio-policy.previous-sha256
 systemctl try-restart sailplay.service || :
 
 %preun

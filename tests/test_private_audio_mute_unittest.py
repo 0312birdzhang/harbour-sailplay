@@ -1,6 +1,13 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from contextlib import contextmanager
+from unittest.mock import Mock, patch
+import types
+import os
+import subprocess
+import sys
+import tempfile
 spec=importlib.util.spec_from_file_location('pulse',Path(__file__).resolve().parents[1]/'scripts/pulse-capture.py')
 pulse=importlib.util.module_from_spec(spec);spec.loader.exec_module(pulse)
 class PrivateMuteTests(unittest.TestCase):
@@ -105,3 +112,122 @@ class ChangedVolumeContextTests(unittest.TestCase):
                 command.reset_mock()
                 pulse.restore_outputs()
                 command.assert_not_called()
+
+
+class StreamRestoreEntryTests(unittest.TestCase):
+    @contextmanager
+    def backend(self,volume=65536,device='sailplay_cast_9',mute=False):
+        connection,extension,properties,entry=Mock(),Mock(),Mock(),Mock()
+        values={'Device':device,'Volume':[[0,volume]],'Mute':mute}
+        properties.GetAll.return_value=values
+        interfaces={'org.PulseAudio.Ext.StreamRestore1':extension,
+                    'org.freedesktop.DBus.Properties':properties,
+                    'org.PulseAudio.Ext.StreamRestore1.RestoreEntry':entry}
+        class MissingEntry(Exception):
+            def get_dbus_name(self):return 'org.PulseAudio.Error.NotFound'
+        module=types.SimpleNamespace(Interface=lambda obj,iface:interfaces[iface],
+            Array=lambda values,signature:values,DBusException=MissingEntry)
+        with patch.object(pulse,'pulse_connection',return_value=connection), \
+             patch.dict('sys.modules',{'dbus':module}),patch.object(pulse,'save_recovery') as save:
+            yield connection,extension,properties,entry,save,MissingEntry
+        connection.close.assert_called_once()
+
+    def test_remembers_entry_before_stream_is_moved(self):
+        state={'cast':'sailplay_cast_9'}
+        with self.backend(volume=16384,device='') as (_,_,_,_,save,_):
+            pulse.remember_stream_restore(state,{'module-stream-restore.id':'feedback'})
+            self.assertEqual(state['restoreEntries']['feedback'],{'device':'','volume':[[0,16384]],'mute':False})
+            save.assert_called_once_with(state)
+
+    def test_repeated_boost_keeps_original_entry(self):
+        old={'device':'phone','volume':[[0,16384]],'mute':False}
+        state={'cast':'sailplay_cast_9','restoreEntries':{'feedback':old}}
+        with self.backend() as (_,_,_,_,save,_):
+            pulse.remember_stream_restore(state,{'module-stream-restore.id':'feedback'})
+            self.assertEqual(state['restoreEntries']['feedback'],old)
+            save.assert_not_called()
+
+    def test_new_user_level_is_remembered_without_private_device(self):
+        state={'cast':'sailplay_cast_9','restoreEntries':{'feedback':{'device':'phone','volume':[[0,16384]],'mute':False}}}
+        with self.backend(volume=9000):
+            pulse.remember_stream_restore(state,{'module-stream-restore.id':'feedback'})
+            self.assertEqual(state['restoreEntries']['feedback'],{'device':'phone','volume':[[0,9000]],'mute':False})
+
+    def test_finished_stream_restores_volume_and_device(self):
+        state={'cast':'sailplay_cast_9','restoreEntries':{'feedback':{'device':'','volume':[[0,16384]],'mute':False}}}
+        with self.backend() as (_,extension,_,_,_,_):
+            pulse.restore_stream_entries(state)
+            extension.AddEntry.assert_called_once_with('feedback','',[[0,16384]],False,False)
+
+    def test_original_empty_channel_volume_is_restored(self):
+        state={'cast':'sailplay_cast_9','restoreEntries':{'feedback':{'device':'','volume':[],'mute':False}}}
+        with self.backend() as (_,extension,_,entry,save,_):
+            pulse.restore_stream_entries(state)
+            entry.Remove.assert_called_once()
+            save.assert_called_once_with(state)
+            self.assertEqual(state['pendingRestoreEntries']['feedback'],state['restoreEntries']['feedback'])
+            extension.AddEntry.assert_called_once_with('feedback','',[],False,False)
+
+    def test_interrupted_empty_volume_recreation_can_be_retried(self):
+        old={'device':'','volume':[],'mute':False}
+        state={'cast':'sailplay_cast_9','restoreEntries':{'feedback':old},'pendingRestoreEntries':{'feedback':old}}
+        with self.backend() as (_,extension,_,_,_,missing):
+            extension.GetEntryByName.side_effect=missing()
+            pulse.restore_stream_entries(state)
+            extension.AddEntry.assert_called_once_with('feedback','',[],False,False)
+
+    def test_changed_user_volume_is_preserved_while_private_device_is_cleared(self):
+        state={'cast':'sailplay_cast_9','restoreEntries':{'feedback':{'device':'','volume':[[0,16384]],'mute':False}}}
+        with self.backend(volume=9000,mute=True) as (_,extension,_,_,_,_):
+            pulse.restore_stream_entries(state)
+            extension.AddEntry.assert_called_once_with('feedback','',[[0,9000]],True,False)
+
+    def test_current_user_volume_mute_and_device_are_preserved(self):
+        state={'cast':'sailplay_cast_9','restoreEntries':{'feedback':{'device':'phone','volume':[[0,16384]],'mute':False}}}
+        with self.backend(volume=9000,device='headset',mute=True) as (_,extension,_,_,_,_):
+            pulse.restore_stream_entries(state)
+            extension.AddEntry.assert_not_called()
+
+    def test_new_entry_is_removed_only_with_owned_boost(self):
+        state={'cast':'sailplay_cast_9','restoreEntries':{'feedback':None}}
+        with self.backend() as (_,_,_,entry,_,_):
+            pulse.restore_stream_entries(state)
+            entry.Remove.assert_called_once()
+        with self.backend(volume=9000) as (_,_,_,entry,_,_):
+            pulse.restore_stream_entries(state)
+            entry.Remove.assert_not_called()
+
+    def test_missing_original_entry_is_recorded(self):
+        state={'cast':'sailplay_cast_9'}
+        with self.backend() as (_,extension,_,_,_,missing):
+            extension.GetEntryByName.side_effect=missing()
+            pulse.remember_stream_restore(state,{'module-stream-restore.id':'feedback'})
+            self.assertIsNone(state['restoreEntries']['feedback'])
+
+    def test_already_removed_entry_does_not_block_recovery(self):
+        state={'cast':'sailplay_cast_9','restoreEntries':{'feedback':None}}
+        with self.backend() as (_,extension,_,_,_,missing):
+            extension.GetEntryByName.side_effect=missing()
+            pulse.restore_stream_entries(state)
+            extension.AddEntry.assert_not_called()
+
+
+class RoutingLockTests(unittest.TestCase):
+    @unittest.skipIf(os.name=='nt','Production routing uses Unix flock')
+    def test_recovery_waits_for_the_active_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            record=str(Path(directory)/'recovery.json')
+            script='''import fcntl
+descriptor=open(PATH,'a')
+print('waiting',flush=True)
+fcntl.flock(descriptor,fcntl.LOCK_EX)
+print('locked',flush=True)
+'''.replace('PATH',repr(record+'.lock'))
+            with patch.object(pulse,'ROUTE_STATE',record):
+                with pulse.routing_lock():
+                    process=subprocess.Popen([sys.executable,'-c',script],stdout=subprocess.PIPE,text=True)
+                    self.assertEqual(process.stdout.readline().strip(),'waiting')
+                    self.assertIsNone(process.poll())
+                output,_=process.communicate(timeout=3)
+                self.assertEqual(process.returncode,0)
+                self.assertEqual(output.strip(),'locked')

@@ -11,6 +11,7 @@ import time
 import threading
 import json
 import audioop
+from contextlib import contextmanager
 
 
 class BufferAttr(C.Structure):
@@ -48,7 +49,7 @@ def stream_diagnostics(output, heading='Sink Input'):
         for field in ('Sink','Source','Corked','Mute','Volume'):
             match=re.search(r'(?m)^\s*'+field+r':\s*(.+)$',block)
             if match:item[field.lower()]=match.group(1).strip()
-        for field in ('application.process.binary','media.role','policy.group'):
+        for field in ('application.process.binary','media.role','policy.group','module-stream-restore.id'):
             match=re.search(r'(?m)^\s*'+re.escape(field)+r'\s*=\s*"([^"]*)"',block)
             if match:item[field]=match.group(1)
         result.append(item)
@@ -88,16 +89,110 @@ def hardware_volumes(output):
     return result
 
 
-def main_volume_properties():
+def pulse_connection():
     import dbus
     bus=dbus.bus.BusConnection(os.environ.get('DBUS_SESSION_BUS_ADDRESS') or
                                'unix:path=/run/user/{}/dbus/user_bus_socket'.format(os.getuid()))
     lookup=dbus.Interface(bus.get_object('org.PulseAudio1','/org/pulseaudio/server_lookup1'),
                           'org.freedesktop.DBus.Properties')
     address=lookup.Get('org.PulseAudio.ServerLookup1','Address')
-    connection=dbus.connection.Connection(str(address))
+    return dbus.connection.Connection(str(address))
+
+
+def main_volume_properties():
+    import dbus
+    connection=pulse_connection()
     return dbus.Interface(connection.get_object(object_path='/com/meego/mainvolume2'),
                           'org.freedesktop.DBus.Properties')
+
+
+@contextmanager
+def routing_lock():
+    import fcntl
+    os.makedirs(os.path.dirname(ROUTE_STATE),mode=0o700,exist_ok=True)
+    fd=os.open(ROUTE_STATE+'.lock',os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW,0o600)
+    try:
+        fcntl.flock(fd,fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+def remember_stream_restore(state,item):
+    name=item.get('module-stream-restore.id')
+    if not name:return
+    import dbus
+    connection=pulse_connection()
+    try:
+        extension=dbus.Interface(connection.get_object(None,'/org/pulseaudio/stream_restore1'),
+                                 'org.PulseAudio.Ext.StreamRestore1')
+        try:
+            path=extension.GetEntryByName(name)
+            values=dbus.Interface(connection.get_object(None,path),'org.freedesktop.DBus.Properties').GetAll(
+                'org.PulseAudio.Ext.StreamRestore1.RestoreEntry')
+            current={'device':str(values['Device']),'volume':[[int(c),int(v)] for c,v in values['Volume']],
+                     'mute':bool(values['Mute'])}
+        except dbus.DBusException as error:
+            if not error.get_dbus_name().endswith('.NotFound'):raise
+            current=None
+        entries=state.setdefault('restoreEntries',{})
+        if name in entries and current is not None:
+            if current['volume'] and all(v==65536 for c,v in current['volume']):return
+            if current['device']==state.get('cast'):
+                current['device']=(entries[name] or {}).get('device','')
+        if name not in entries or entries[name]!=current:
+            entries[name]=current
+            save_recovery(state)
+    finally:
+        connection.close()
+
+
+def restore_stream_entries(state):
+    if not state.get('restoreEntries'):return
+    import dbus
+    connection=pulse_connection()
+    try:
+        extension=dbus.Interface(connection.get_object(None,'/org/pulseaudio/stream_restore1'),
+                                 'org.PulseAudio.Ext.StreamRestore1')
+        for name,old in state['restoreEntries'].items():
+            try:
+                path=extension.GetEntryByName(name)
+                values=dbus.Interface(connection.get_object(None,path),'org.freedesktop.DBus.Properties').GetAll(
+                    'org.PulseAudio.Ext.StreamRestore1.RestoreEntry')
+            except dbus.DBusException as error:
+                if error.get_dbus_name().endswith('.NotFound'):
+                    pending=state.get('pendingRestoreEntries',{}).get(name)
+                    if pending is not None:
+                        extension.AddEntry(name,pending['device'],dbus.Array(pending['volume'],signature='(uu)'),
+                                           pending['mute'],False)
+                    continue
+                raise
+            volume=[[int(c),int(v)] for c,v in values['Volume']]
+            boosted=bool(volume) and all(v==65536 for c,v in volume)
+            owned=str(values['Device'])==state.get('cast')
+            if old is None:
+                if boosted and owned:
+                    dbus.Interface(connection.get_object(None,path),
+                        'org.PulseAudio.Ext.StreamRestore1.RestoreEntry').Remove()
+                continue
+            if not boosted and not owned:continue
+            # Finished streams have no sink-input ID left. Revert only fields
+            # still carrying this capture's temporary values.
+            target={'device':old['device'] if owned else str(values['Device']),
+                    'volume':old['volume'] if boosted else volume,
+                    'mute':old['mute'] if boosted and not values['Mute'] else bool(values['Mute'])}
+            if not target['volume']:
+                # Nemo's AddEntry aborts the server when an existing entry is
+                # updated with an empty volume. Recreate it through the safe
+                # new-entry path, recording the gap for interrupted recovery.
+                state.setdefault('pendingRestoreEntries',{})[name]=target
+                save_recovery(state)
+                dbus.Interface(connection.get_object(None,path),
+                    'org.PulseAudio.Ext.StreamRestore1.RestoreEntry').Remove()
+            extension.AddEntry(name,target['device'],dbus.Array(target['volume'],signature='(uu)'),
+                               target['mute'],False)
+    finally:
+        connection.close()
 
 
 def save_main_volume():
@@ -202,6 +297,7 @@ def restore_outputs():
         values=state.get('volumes',{}).get(sink)
         pactl('set-sink-volume',sink,*(values or ['25%']))
     restore_main_volume(state)
+    restore_stream_entries(state)
     for sink,muted in state['mutes'].items():
         pactl('set-sink-mute',sink,str(int(muted)))
     os.unlink(ROUTE_STATE)
@@ -271,6 +367,7 @@ def main():
                 moved.setdefault(index,sink)
                 if index not in recovery['streams'] and index in before:
                     item,volumes=before[index]
+                    remember_stream_restore(recovery,item)
                     recovery['streams'][index]={'binary':item.get('application.process.binary'),
                         'mute':item.get('mute')=='yes','volumes':volumes}
                     save_recovery(recovery)
@@ -280,6 +377,7 @@ def main():
         for item,volumes in private_playback(inputs,sink_index):
             if item.get('mute')!='yes' and volumes and all(int(v)==65536 for v in volumes):continue
             key=item['id']
+            remember_stream_restore(recovery,item)
             if key not in recovery['streams']:
                 recovery['streams'][key]={'binary':item.get('application.process.binary'),
                     'mute':item.get('mute')=='yes','volumes':volumes}
@@ -309,7 +407,7 @@ def main():
     def routing_loop():
         while not route_stop.is_set() and not stop[0]:
             try:route()
-            except (subprocess.SubprocessError,OSError) as error:
+            except Exception as error:
                 print('Audio routing maintenance failed: '+type(error).__name__,file=sys.stderr,flush=True)
             route_wake.wait(1);route_wake.clear()
     try:
@@ -414,8 +512,9 @@ def main():
 
 if __name__=='__main__':
     try:
-        if '--restore-routing' in sys.argv:restore_outputs()
-        else:main()
+        with routing_lock():
+            if '--restore-routing' in sys.argv:restore_outputs()
+            else:main()
     except Exception as error:
         print('Audio capture failed: '+type(error).__name__+' '+str(error),file=sys.stderr,flush=True)
         sys.exit(1)
