@@ -1,4 +1,5 @@
 import importlib.util
+import errno
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -11,6 +12,25 @@ spec.loader.exec_module(module)
 
 
 class ConfiguredHeadUnitTests(unittest.TestCase):
+    def test_busy_sdp_connection_retries_with_a_fresh_socket(self):
+        with patch('android_auto.bluetooth.find_channel', side_effect=[OSError(errno.EALREADY, 'busy'), 9]) as sdp, \
+                patch.object(module.time, 'sleep') as sleep:
+            self.assertEqual(module.wake_android_auto('local', 'remote'), 9)
+        self.assertEqual(sdp.call_count, 2)
+        sleep.assert_called_once_with(.5)
+        self.assertTrue(all(call.kwargs['timeout'] == 10 for call in sdp.call_args_list))
+
+    def test_sdp_retries_are_bounded_and_preserve_terminal_errors(self):
+        for number, count in ((errno.EINPROGRESS, 3), (errno.EALREADY, 3), (errno.EACCES, 1)):
+            error = OSError(number, 'Bluetooth connection failed')
+            with self.subTest(number=number), \
+                    patch('android_auto.bluetooth.find_channel', side_effect=error) as sdp, \
+                    patch.object(module.time, 'sleep') as sleep, self.assertRaises(OSError) as raised:
+                module.wake_android_auto('local', 'remote')
+            self.assertIs(raised.exception, error)
+            self.assertEqual(sdp.call_count, count)
+            self.assertEqual(sleep.call_count, count - 1)
+
     def test_extracts_device_from_systemd_execstart(self):
         target = '/org/bluez/hci1/dev_EC_A7_AD_81_EA_86'
         self.assertEqual(module.configured_device(

@@ -233,6 +233,7 @@ class DisplayPipeline:
             time.sleep(.1)
         self.ui=self.launch('carui','env XDG_RUNTIME_DIR=/run/user/100000 '
                     'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100000/dbus/user_bus_socket '
+                    'QT_IM_MODULE=Maliit MALIIT_SERVER_ADDRESS=unix:path=/run/user/100000/sailplay-maliit/socket '
                     'QT_QPA_PLATFORM=wayland '
                     'WAYLAND_DISPLAY=imira-comp-0 /opt/sailplay/carui/carui /opt/sailplay/carui/main.qml {} {}'.format(self.width,self.height))
         self.capture=self.launch('capture','env XDG_RUNTIME_DIR=/run/user/100000 /opt/sailplay/carlife-capture '

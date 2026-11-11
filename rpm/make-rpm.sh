@@ -23,6 +23,7 @@ cp "$REPO/display-source/carui/main.qml" "$REPO/display-source/carui/carui-apps.
 cp "$REPO/display-source/carui/CarPalette.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/WeatherCard.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/NavigationCard.qml" "$STAGE/display-source/carui/"
+cp "$REPO/display-source/carui/MapDestinationPanel.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/ContentPage.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/MusicPlayer.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/AboutPage.qml" "$STAGE/display-source/carui/"

@@ -423,7 +423,7 @@ index 2143365d..6290f53e 100644
    std::latch m_contextsCreated = std::latch(2);
  };
 diff --git a/sailfish/CMakeLists.txt b/sailfish/CMakeLists.txt
-index 8b23ed0a..f6f16e4d 100644
+index 8b23ed0a..14a3dd2f 100644
 --- a/sailfish/CMakeLists.txt
 +++ b/sailfish/CMakeLists.txt
 @@ -1,6 +1,8 @@
@@ -464,7 +464,7 @@ index 8b23ed0a..f6f16e4d 100644
 +  endif()
 +  add_subdirectory("${SAILPLAY_SDK_QT_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/sailplay-sdk")
 +  target_sources(${PROJECT_NAME}_lib PRIVATE sailplay_navigation.cpp sailplay_navigation.hpp
-+    sailplay_map_canvas.cpp sailplay_map_canvas.hpp)
++    sailplay_map_canvas.cpp sailplay_map_canvas.hpp sailplay_map_browser.cpp sailplay_map_browser.hpp)
 +  target_link_libraries(${PROJECT_NAME}_lib PRIVATE sailplay_sdk_provider)
 +  target_compile_definitions(${PROJECT_NAME}_lib PRIVATE OMIM_SAILPLAY)
 +  set(SAILPLAY_SDK_LICENSE "${SAILPLAY_SDK_QT_DIR}/../../LICENSE")
@@ -479,10 +479,10 @@ index 8b23ed0a..f6f16e4d 100644
  set_target_properties(${PROJECT_NAME} PROPERTIES
    OUTPUT_NAME ${APP_NAME}
 diff --git a/sailfish/app.cpp b/sailfish/app.cpp
-index 70fd841b..e92b2cc2 100644
+index 70fd841b..d38c3dab 100644
 --- a/sailfish/app.cpp
 +++ b/sailfish/app.cpp
-@@ -6,15 +6,23 @@
+@@ -6,15 +6,24 @@
  #include "sailfish/countries_model.hpp"
  #include "sailfish/framework_access.hpp"
  #include "sailfish/map_item.hpp"
@@ -498,6 +498,7 @@ index 70fd841b..e92b2cc2 100644
  #include "sailfish/url_handler.hpp"
 
 +#ifdef OMIM_SAILPLAY
++#include "sailfish/sailplay_map_browser.hpp"
 +#include "sailfish/sailplay_map_canvas.hpp"
 +#include "sailfish/sailplay_navigation.hpp"
 +#include "sailplayprovider.h"
@@ -506,7 +507,7 @@ index 70fd841b..e92b2cc2 100644
  #include "map/framework.hpp"
 
  #include "platform/platform.hpp"
-@@ -22,11 +30,14 @@
+@@ -22,11 +31,14 @@
 
  #include "base/logging.hpp"
 
@@ -521,7 +522,7 @@ index 70fd841b..e92b2cc2 100644
  #include <QQmlError>
  #include <QQuickItem>
  #include <QQuickView>
-@@ -66,9 +77,9 @@ void SetDefaultSurfaceFormat()
+@@ -66,9 +78,9 @@ void SetDefaultSurfaceFormat()
 
  // The copy can take minutes, e.g. to a slow memory card, so its progress is shown meanwhile. Without text: the
  // strings come from the platform, which may only start once the maps folder is known.
@@ -533,7 +534,7 @@ index 70fd841b..e92b2cc2 100644
      return sailfish::MapsStorage::ApplyPendingMove([](double) {});
 
    std::unique_ptr<QQuickView> view(SailfishApp::createView());
-@@ -90,11 +101,11 @@ QString MoveMaps()
+@@ -90,11 +102,11 @@ QString MoveMaps()
    return dir;
  }
 
@@ -547,7 +548,7 @@ index 70fd841b..e92b2cc2 100644
    if (writableDir.isEmpty())
      writableDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
    QDir().mkpath(writableDir);
-@@ -107,7 +118,8 @@ void SetupPlatform()
+@@ -107,7 +119,8 @@ void SetupPlatform()
 
  void RegisterQmlTypes()
  {
@@ -557,7 +558,7 @@ index 70fd841b..e92b2cc2 100644
    qmlRegisterType<sailfish::CountriesModel>("app.organicmaps", 1, 0, "CountriesModel");
    qmlRegisterType<sailfish::SearchModel>("app.organicmaps", 1, 0, "SearchModel");
    qmlRegisterType<sailfish::BookmarkCategoriesModel>("app.organicmaps", 1, 0, "BookmarkCategoriesModel");
-@@ -134,24 +146,30 @@ Framework & GetFramework()
+@@ -134,24 +147,30 @@ Framework & GetFramework()
  __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv[])
  {
    SetDefaultSurfaceFormat();
@@ -591,7 +592,7 @@ index 70fd841b..e92b2cc2 100644
 
    Framework framework;
    framework.SetupMeasurementSystem();
-@@ -169,32 +187,209 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
+@@ -169,32 +188,227 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
    sailfish::MapsStorage mapsStorage(framework);
    sailfish::DownloadStatus downloads(framework.GetStorage());
    sailfish::UrlHandler urlHandler(framework, bookmarksIO);
@@ -665,6 +666,7 @@ index 70fd841b..e92b2cc2 100644
 +                       {"downloading", downloads.inProgress()}};
 +  };
 +  sailfish::SailplayMapCanvas canvas(mapCore, presentation);
++  sailfish::SailplayMapBrowser browser(mapCore);
 +  SailplayProvider provider(QStringLiteral(SAILFISH_APP_NAME), state(),
 +                            {QStringLiteral("navigation"), QStringLiteral("navigation-map")});
 +  provider.setActionHandler(QStringLiteral("navigation.map.frame"),
@@ -682,7 +684,11 @@ index 70fd841b..e92b2cc2 100644
 +    }
 +    try
 +    {
-+      provider.complete(invocation, canvas.Frame(QSize(width.toInt(), height.toInt())));
++      auto frame = canvas.Frame(QSize(width.toInt(), height.toInt()));
++      auto mapState = frame.value("state").toMap();
++      mapState["browser"] = browser.Snapshot();
++      frame["state"] = mapState;
++      provider.complete(invocation, frame);
 +    }
 +    catch (std::exception const & error)
 +    {
@@ -743,6 +749,19 @@ index 70fd841b..e92b2cc2 100644
 +      mapCore.routing()->start();
 +    }
 +    provider.complete(invocation);
++  });
++  provider.setActionHandler(QStringLiteral("navigation.map.browse"),
++                            [&](qulonglong invocation, QVariantMap const & parameters)
++  {
++    try
++    {
++      browser.Invoke(parameters);
++      provider.complete(invocation, browser.Snapshot());
++    }
++    catch (std::invalid_argument const & error)
++    {
++      provider.fail(invocation, "InvalidArgument", QString::fromUtf8(error.what()));
++    }
 +  });
 +  provider.setActionHandler(QStringLiteral("navigation.stop"),
 +                            [&](qulonglong invocation, QVariantMap const & parameters)
@@ -1823,12 +1842,303 @@ index 233d7434..dfbde43d 100644
    -DBUILD_TESTING=OFF
  cmake --build build --target organicmaps_sailfish
 
+diff --git a/sailfish/sailplay_map_browser.cpp b/sailfish/sailplay_map_browser.cpp
+new file mode 100644
+index 00000000..abb1ecf6
+--- /dev/null
++++ b/sailfish/sailplay_map_browser.cpp
+@@ -0,0 +1,245 @@
++#include "sailfish/sailplay_map_browser.hpp"
++
++#include "sailfish/map_item.hpp"
++#include "sailfish/place_page.hpp"
++#include "sailfish/routing.hpp"
++
++#include <QSet>
++#include <QTextDocument>
++
++#include <algorithm>
++#include <stdexcept>
++
++namespace sailfish
++{
++namespace
++{
++int constexpr kPageSize = 40;
++
++QString Text(QString const & text)
++{
++  auto points = text.toUcs4();
++  points.erase(std::remove(points.begin(), points.end(), 0), points.end());
++  return QString::fromUcs4(points.constData(), std::min(512, points.size()));
++}
++
++QString PlainText(QVariant const & value)
++{
++  QTextDocument document;
++  document.setHtml(value.toString());
++  return Text(document.toPlainText());
++}
++
++void Fields(QVariantMap const & parameters, QStringList const & names)
++{
++  if (QSet<QString>::fromList(parameters.keys()) != QSet<QString>::fromList(names))
++    throw std::invalid_argument("Unexpected map browsing parameters");
++  for (auto const & name : names)
++  {
++    auto const value = parameters.value(name);
++    if (value.type() != QVariant::String || value.toString().contains(QChar::Null) ||
++        value.toString().toUcs4().size() > 256)
++      throw std::invalid_argument("Map browsing parameters must be bounded strings");
++  }
++}
++}  // namespace
++
++SailplayMapBrowser::SailplayMapBrowser(MapItem & map) : m_map(map)
++{
++  for (auto * model : {static_cast<QAbstractItemModel *>(&m_search), static_cast<QAbstractItemModel *>(&m_groups),
++                       static_cast<QAbstractItemModel *>(&m_bookmarks)})
++    connect(model, &QAbstractItemModel::modelReset, this, [this] { ++m_revision; });
++  connect(&m_search, &SearchModel::queryChanged, this, [this]
++  {
++    ++m_revision;
++    m_offset = 0;
++  });
++  connect(&m_search, &SearchModel::historyChanged, this, [this] { ++m_revision; });
++}
++
++void SailplayMapBrowser::SetPage(QString const & page)
++{
++  m_page = page;
++  m_offset = 0;
++  ++m_revision;
++}
++
++QVariantList SailplayMapBrowser::Rows() const
++{
++  if (m_cachedRevision == m_revision)
++    return m_cachedRows;
++  QVariantList rows;
++  auto const add = [&](int index, QString const & title, QString const & subtitle, QString const & kind,
++                       QString const & value = QString())
++  {
++    rows.append(QVariantMap{{"id", QString::number(m_revision) + '/' + QString::number(index)},
++                            {"title", Text(title)},
++                            {"subtitle", Text(subtitle)},
++                            {"kind", kind},
++                            {"value", value},
++                            {"index", index}});
++  };
++  if (m_page == "history")
++  {
++    auto const history = m_search.history();
++    for (int row = 0; row < history.size(); ++row)
++      add(row, history[row], {}, "query");
++  }
++  else if (m_page == "categories")
++  {
++    auto const categories = m_search.categories();
++    for (int row = 0; row < categories.size(); ++row)
++    {
++      auto const category = categories[row].toMap();
++      add(row, category.value("name").toString(), {}, "category");
++    }
++  }
++  else if (m_page == "search")
++  {
++    if (m_search.searching() || m_search.resultsQuery() != m_search.query())
++      return rows;
++    for (int row = 0; row < m_search.rowCount(); ++row)
++    {
++      auto const index = m_search.index(row);
++      QStringList detail;
++      for (int role : {SearchModel::DescriptionRole, SearchModel::AddressRole, SearchModel::DistanceRole})
++      {
++        auto const text = PlainText(m_search.data(index, role));
++        if (!text.isEmpty())
++          detail.append(text);
++      }
++      add(row, PlainText(m_search.data(index, SearchModel::NameRole)), detail.join(" · "),
++          m_search.data(index, SearchModel::SuggestRole).toBool() ? "suggestion" : "place");
++    }
++  }
++  else if (m_page == "bookmark-groups")
++  {
++    for (int row = 0; row < m_groups.rowCount(); ++row)
++    {
++      auto const index = m_groups.index(row);
++      int const count = m_groups.data(index, BookmarkCategoriesModel::BookmarksCountRole).toInt();
++      if (count > 0)
++        add(row, m_groups.data(index, BookmarkCategoriesModel::NameRole).toString(), QString::number(count), "group",
++            m_groups.data(index, BookmarkCategoriesModel::IdRole).toString());
++    }
++  }
++  else if (m_page == "bookmarks")
++  {
++    for (int row = 0; row < m_bookmarks.rowCount(); ++row)
++    {
++      auto const index = m_bookmarks.index(row);
++      if (m_bookmarks.data(index, BookmarksModel::IsTrackRole).toBool())
++        continue;
++      QStringList detail;
++      for (int role : {BookmarksModel::TypeRole, BookmarksModel::DistanceRole})
++      {
++        auto const text = m_bookmarks.data(index, role).toString();
++        if (!text.isEmpty())
++          detail.append(text);
++      }
++      add(row, m_bookmarks.data(index, BookmarksModel::NameRole).toString(), detail.join(" · "), "place");
++    }
++  }
++  m_cachedRows = rows;
++  m_cachedRevision = m_revision;
++  return rows;
++}
++
++QVariantMap SailplayMapBrowser::Snapshot() const
++{
++  auto const rows = Rows();
++  int const offset = rows.isEmpty() ? 0 : std::min(m_offset, (rows.size() - 1) / kPageSize * kPageSize);
++  QVariantList visible;
++  for (int row = offset; row < std::min(offset + kPageSize, rows.size()); ++row)
++    visible.append(rows[row]);
++  auto const * routing = m_map.routing();
++  return {{"page", m_page},
++          {"query", Text(m_search.query())},
++          {"title", Text(m_bookmarks.name())},
++          {"searching", m_page == "search" && (m_search.searching() || m_search.resultsQuery() != m_search.query())},
++          {"rows", visible},
++          {"previous", offset > 0},
++          {"next", offset + kPageSize < rows.size()},
++          {"routerType", routing->routerType()},
++          {"voiceEnabled", routing->voiceEnabled()},
++          {"voiceAvailable", routing->voiceAvailable()}};
++}
++
++void SailplayMapBrowser::Select(QString const & id)
++{
++  auto const rows = Rows();
++  auto const found = std::find_if(rows.begin(), rows.end(),
++                                  [&](QVariant const & value) { return value.toMap().value("id").toString() == id; });
++  if (found == rows.end())
++    throw std::invalid_argument("The destination list has changed. Select its current item");
++  auto const row = found->toMap();
++  int const index = row.value("index").toInt();
++  if (m_page == "history" || m_page == "categories")
++  {
++    if (m_page == "categories")
++      m_search.searchCategory(m_search.categories().value(index).toMap().value("name").toString());
++    else
++      m_search.setQuery(m_search.history().value(index));
++    SetPage("search");
++  }
++  else if (m_page == "bookmark-groups")
++  {
++    m_bookmarks.setListId(row.value("value").toULongLong());
++    SetPage("bookmarks");
++  }
++  else if (m_page == "bookmarks")
++  {
++    m_bookmarks.showOnMap(index);
++    SetPage({});
++  }
++  else if (m_search.activate(index))
++    SetPage({});
++}
++
++void SailplayMapBrowser::Invoke(QVariantMap const & parameters)
++{
++  auto const command = parameters.value("command").toString();
++  if (command == "search")
++  {
++    Fields(parameters, {"command", "query"});
++    m_search.setQuery(parameters.value("query").toString());
++    SetPage("search");
++  }
++  else if (command == "select")
++  {
++    Fields(parameters, {"command", "id"});
++    Select(parameters.value("id").toString());
++  }
++  else
++  {
++    Fields(parameters, {"command"});
++    if (QStringList{"history", "categories", "bookmark-groups", "settings"}.contains(command))
++      SetPage(command);
++    else if (command == "close")
++      SetPage({});
++    else if (command == "next" || command == "previous")
++    {
++      auto const state = Snapshot();
++      if (!state.value(command).toBool())
++        throw std::invalid_argument("Destination page is unavailable");
++      int const count = Rows().size();
++      m_offset = std::min(m_offset, std::max(0, (count - 1) / kPageSize * kPageSize));
++      m_offset += command == "next" ? kPageSize : -kPageSize;
++    }
++    else if (command == "mute")
++      m_map.routing()->setVoiceEnabled(!m_map.routing()->voiceEnabled());
++    else if (command == "clear-place")
++      m_map.placePage()->close();
++    else if (command == "toggle-bookmark")
++    {
++      if (!m_map.placePage()->open())
++        throw std::invalid_argument("Select a place before saving a bookmark");
++      m_map.placePage()->toggleBookmark();
++    }
++    else if (QStringList{"vehicle", "walking", "cycling"}.contains(command))
++      m_map.routing()->setRouterType(QStringList{"vehicle", "walking", "cycling"}.indexOf(command));
++    else
++      throw std::invalid_argument("Unknown map browsing command");
++  }
++}
++}  // namespace sailfish
+diff --git a/sailfish/sailplay_map_browser.hpp b/sailfish/sailplay_map_browser.hpp
+new file mode 100644
+index 00000000..21922d1d
+--- /dev/null
++++ b/sailfish/sailplay_map_browser.hpp
+@@ -0,0 +1,34 @@
++#pragma once
++
++#include "sailfish/bookmarks_model.hpp"
++#include "sailfish/search_model.hpp"
++
++#include <QVariantMap>
++
++namespace sailfish
++{
++class MapItem;
++
++class SailplayMapBrowser : public QObject
++{
++public:
++  explicit SailplayMapBrowser(MapItem & map);
++  QVariantMap Snapshot() const;
++  void Invoke(QVariantMap const & parameters);
++
++private:
++  void Select(QString const & id);
++  void SetPage(QString const & page);
++  QVariantList Rows() const;
++
++  MapItem & m_map;
++  SearchModel m_search;
++  BookmarkCategoriesModel m_groups;
++  BookmarksModel m_bookmarks;
++  QString m_page;
++  uint64_t m_revision = 1;
++  mutable uint64_t m_cachedRevision = 0;
++  mutable QVariantList m_cachedRows;
++  int m_offset = 0;
++};
++}  // namespace sailfish
 diff --git a/sailfish/sailplay_map_canvas.cpp b/sailfish/sailplay_map_canvas.cpp
 new file mode 100644
-index 00000000..8656af21
+index 00000000..10e387b5
 --- /dev/null
 +++ b/sailfish/sailplay_map_canvas.cpp
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,154 @@
 +#include "sailfish/sailplay_map_canvas.hpp"
 +
 +#include "sailfish/map_item.hpp"
@@ -1961,6 +2271,7 @@ index 00000000..8656af21
 +  }
 +  auto const * routing = m_map.routing();
 +  QVariantMap const state = {{"place", m_map.placePage()->open() ? m_map.placePage()->title().left(1024) : QString()},
++                             {"bookmarked", m_map.placePage()->open() && m_map.placePage()->isBookmark()},
 +                             {"building", routing->building()},
 +                             {"built", routing->built()},
 +                             {"canStart", routing->canStart()},
@@ -2112,6 +2423,61 @@ index 00000000..20e234f8
 +{
 +QVariantMap SailplayGuidance(QJsonObject const & navigation);
 +}  // namespace sailfish
+diff --git a/sailfish/search_model.cpp b/sailfish/search_model.cpp
+index 460d2e94..ad16f623 100644
+--- a/sailfish/search_model.cpp
++++ b/sailfish/search_model.cpp
+@@ -137,6 +137,7 @@ void SearchModel::setQuery(QString const & query)
+   if (query == m_query)
+     return;
+   m_query = query;
++  ++m_timestamp;
+   m_linkLocale.clear();
+   emit queryChanged();
+   if (m_query.isEmpty())
+@@ -233,11 +234,13 @@ void SearchModel::Run()
+   m_runTimer.stop();
+   // The old results stay until the new ones arrive.
+   auto const timestamp = ++m_timestamp;
++  m_runningQuery = m_query;
+   auto & api = m_framework.GetSearchAPI();
+   if (m_query.isEmpty())
+   {
+     beginResetModel();
+     m_results->Clear();
++    m_resultsQuery.clear();
+     endResetModel();
+     api.CancelAllSearches();
+     SetSearching(false);
+@@ -272,6 +275,7 @@ void SearchModel::OnResults(uint64_t timestamp, search::Results && results)
+
+   beginResetModel();
+   *m_results = std::move(results);
++  m_resultsQuery = m_runningQuery;
+   endResetModel();
+   if (m_results->IsEndMarker())
+     SetSearching(false);
+diff --git a/sailfish/search_model.hpp b/sailfish/search_model.hpp
+index 8159c339..8505eec4 100644
+--- a/sailfish/search_model.hpp
++++ b/sailfish/search_model.hpp
+@@ -64,6 +64,7 @@ public:
+   QString query() const { return m_query; }
+   void setQuery(QString const & query);
+   bool searching() const { return m_searching; }
++  QString resultsQuery() const { return m_resultsQuery; }
+   QStringList history() const;
+
+   // As {key, name} in the search language.
+@@ -89,6 +90,8 @@ private:
+
+   Framework & m_framework;
+   QString m_query;
++  QString m_runningQuery;
++  QString m_resultsQuery;
+   QString m_categoryQuery;
+   std::string m_linkLocale;
+   std::unique_ptr<search::Results> m_results;
 diff --git a/sailfish/url_handler.cpp b/sailfish/url_handler.cpp
 index 095e2c15..fa1c5e0c 100644
 --- a/sailfish/url_handler.cpp

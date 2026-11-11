@@ -339,6 +339,82 @@ Start music on your phone</source>
       <source>Navigation provider returned invalid map data</source>
       <translation>導航服務傳回了無效地圖資料</translation>
     </message>
+    <message>
+      <source>Choose destination</source>
+      <translation>選擇目的地</translation>
+    </message>
+    <message>
+      <source>Bookmarks</source>
+      <translation>收藏</translation>
+    </message>
+    <message>
+      <source>Map settings</source>
+      <translation>地圖設定</translation>
+    </message>
+    <message>
+      <source>Nearby places</source>
+      <translation>附近地點</translation>
+    </message>
+    <message>
+      <source>Recent</source>
+      <translation>最近</translation>
+    </message>
+    <message>
+      <source>Search places or addresses</source>
+      <translation>搜尋地點或地址</translation>
+    </message>
+    <message>
+      <source>Searching</source>
+      <translation>正在搜尋</translation>
+    </message>
+    <message>
+      <source>No recent searches</source>
+      <translation>沒有最近搜尋</translation>
+    </message>
+    <message>
+      <source>No bookmarks</source>
+      <translation>沒有收藏</translation>
+    </message>
+    <message>
+      <source>No results</source>
+      <translation>沒有搜尋結果</translation>
+    </message>
+    <message>
+      <source>%1 places</source>
+      <translation>%1 個地點</translation>
+    </message>
+    <message>
+      <source>Previous</source>
+      <translation>上一頁</translation>
+    </message>
+    <message>
+      <source>Next</source>
+      <translation>下一頁</translation>
+    </message>
+    <message>
+      <source>Route type</source>
+      <translation>路線類型</translation>
+    </message>
+    <message>
+      <source>Driving</source>
+      <translation>開車</translation>
+    </message>
+    <message>
+      <source>Walking</source>
+      <translation>步行</translation>
+    </message>
+    <message>
+      <source>Cycling</source>
+      <translation>騎行</translation>
+    </message>
+    <message>
+      <source>Mute guidance</source>
+      <translation>關閉導航語音</translation>
+    </message>
+    <message>
+      <source>Enable guidance voice</source>
+      <translation>開啟導航語音</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

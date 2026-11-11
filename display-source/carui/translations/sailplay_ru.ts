@@ -339,6 +339,82 @@ Start music on your phone</source>
       <source>Navigation provider returned invalid map data</source>
       <translation>Поставщик навигации вернул некорректные данные карты</translation>
     </message>
+    <message>
+      <source>Choose destination</source>
+      <translation>Выбрать пункт назначения</translation>
+    </message>
+    <message>
+      <source>Bookmarks</source>
+      <translation>Метки</translation>
+    </message>
+    <message>
+      <source>Map settings</source>
+      <translation>Настройки карты</translation>
+    </message>
+    <message>
+      <source>Nearby places</source>
+      <translation>Места поблизости</translation>
+    </message>
+    <message>
+      <source>Recent</source>
+      <translation>Недавние</translation>
+    </message>
+    <message>
+      <source>Search places or addresses</source>
+      <translation>Поиск мест или адресов</translation>
+    </message>
+    <message>
+      <source>Searching</source>
+      <translation>Поиск</translation>
+    </message>
+    <message>
+      <source>No recent searches</source>
+      <translation>Нет недавних запросов</translation>
+    </message>
+    <message>
+      <source>No bookmarks</source>
+      <translation>Нет меток</translation>
+    </message>
+    <message>
+      <source>No results</source>
+      <translation>Ничего не найдено</translation>
+    </message>
+    <message>
+      <source>%1 places</source>
+      <translation>Мест — %1</translation>
+    </message>
+    <message>
+      <source>Previous</source>
+      <translation>Назад</translation>
+    </message>
+    <message>
+      <source>Next</source>
+      <translation>Далее</translation>
+    </message>
+    <message>
+      <source>Route type</source>
+      <translation>Тип маршрута</translation>
+    </message>
+    <message>
+      <source>Driving</source>
+      <translation>Автомобиль</translation>
+    </message>
+    <message>
+      <source>Walking</source>
+      <translation>Пешком</translation>
+    </message>
+    <message>
+      <source>Cycling</source>
+      <translation>Велосипед</translation>
+    </message>
+    <message>
+      <source>Mute guidance</source>
+      <translation>Выключить голосовые подсказки</translation>
+    </message>
+    <message>
+      <source>Enable guidance voice</source>
+      <translation>Включить голосовые подсказки</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

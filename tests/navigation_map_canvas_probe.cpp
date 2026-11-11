@@ -66,13 +66,19 @@ int main(int argc, char **argv)
     int frames = 0;
     bool malformed = false;
     QVector<QVariantMap> touches;
+    QVector<QVariantMap> browseActions;
+    QVariantMap browser{{QStringLiteral("page"), QString()}, {QStringLiteral("query"), QString()},
+        {QStringLiteral("rows"), QVariantList{QVariantMap{{QStringLiteral("id"), QStringLiteral("1/0")},
+            {QStringLiteral("title"), QString::fromUtf8("测试目的地 🌍")}, {QStringLiteral("subtitle"), QStringLiteral("Address")},
+            {QStringLiteral("kind"), QStringLiteral("place")}}}}, {QStringLiteral("searching"), false}};
     provider.setActionHandler(QStringLiteral("navigation.map.frame"), [&](qulonglong request, const QVariantMap &parameters) {
         ++frames;
         check(parameters.value(QStringLiteral("width")) == 640 && parameters.value(QStringLiteral("height")) == 360,
             "host did not request its configured dimensions");
         provider.complete(request, {{QStringLiteral("image"), malformed ? QByteArray("bad JPEG") : jpeg},
             {QStringLiteral("width"), 320}, {QStringLiteral("height"), 160},
-            {QStringLiteral("state"), QVariantMap{{QStringLiteral("place"), QStringLiteral("Test place")}}}});
+            {QStringLiteral("state"), QVariantMap{{QStringLiteral("place"), QStringLiteral("Test place")},
+                {QStringLiteral("browser"), browser}}}});
     });
     provider.setActionHandler(QStringLiteral("navigation.map.touch"), [&](qulonglong request, const QVariantMap &parameters) {
         touches.append(parameters);
@@ -81,6 +87,11 @@ int main(int argc, char **argv)
     provider.setActionHandler(QStringLiteral("navigation.stop"), [&](qulonglong request, const QVariantMap &) {
         provider.complete(request);
     });
+    provider.setActionHandler(QStringLiteral("navigation.map.browse"), [&](qulonglong request, const QVariantMap &parameters) {
+        browseActions.append(parameters);
+        browser[QStringLiteral("page")] = parameters.value(QStringLiteral("command"));
+        provider.complete(request, browser);
+    });
     check(provider.start(), "provider export failed");
     SailplayNavigationHost host(runtime.path());
     host.configureMap(640, 360);
@@ -88,6 +99,14 @@ int main(int argc, char **argv)
     waitFor([&] { return host.mapReady(); });
     check(host.mapAvailable() && host.mapState().value(QStringLiteral("place")) == QStringLiteral("Test place"),
         "map capability or nested state unavailable");
+    check(host.mapBrowser().value(QStringLiteral("rows")).toList().first().toMap().value(QStringLiteral("title"))
+        == QString::fromUtf8("测试目的地 🌍"), "nested destination rows were not decoded");
+    host.mapBrowse(QStringLiteral("search"), {{QStringLiteral("query"), QStringLiteral("Address")}});
+    check(host.mapBrowseBusy(), "browsing request did not become busy");
+    host.mapBrowse(QStringLiteral("history"));
+    waitFor([&] { return !host.mapBrowseBusy() && host.mapBrowser().value(QStringLiteral("page")) == QStringLiteral("search"); });
+    check(browseActions.size() == 1 && browseActions.first().value(QStringLiteral("query")) == QStringLiteral("Address"),
+        "destination request parameters or concurrency bound failed");
     SailplayMapCanvas canvas;
     canvas.setProvider(&host);
     canvas.setSize(QSizeF(400, 400));
@@ -139,9 +158,18 @@ int main(int argc, char **argv)
         for (const QSize &size : {QSize(1920, 720), QSize(1280, 720), QSize(720, 1280), QSize(960, 1920)}) {
             item->setSize(size);
             check(map->width() == item->width() && map->height() == item->height(), "map canvas did not fill the card");
+            card->setProperty("panelOpen", true);
+            auto *panel = card->findChild<QQuickItem *>(QStringLiteral("navigationDestinationPanel"));
+            check(panel && panel->width() > 0 && panel->height() > 0
+                && panel->x() + panel->width() <= item->width() && panel->y() + panel->height() <= item->height(),
+                "destination panel exceeded its map viewport");
+            auto *input = card->findChild<QQuickItem *>(QStringLiteral("navigationSearchInput"));
+            check(input && input->width() > 0, "destination search input has no width");
         }
         card->setProperty("compact", true);
         check(card->property("mapMode").toBool(), "compact navigation lost the map canvas");
+        check(card->findChild<QObject *>(QStringLiteral("navigationDestinationPanel"))
+            && card->findChild<QObject *>(QStringLiteral("navigationSearchInput")), "destination search UI is missing");
         card.reset();
         host.configureMap(640, 360);
     }

@@ -10,6 +10,8 @@ Rectangle {
     property bool navigating: guidance.state === "active"
     property bool mapMode: provider ? provider.mapAvailable : false
     property var mapState: mapMode ? provider.mapState : ({})
+    property bool browserAvailable: !!provider && provider.mapBrowser.page !== undefined
+    property bool panelOpen: false
     signal activated()
     radius: 22
     color: palette.card
@@ -22,7 +24,8 @@ Rectangle {
     }
     onWidthChanged: configureMap()
     onHeightChanged: configureMap()
-    onVisibleChanged: configureMap()
+    onVisibleChanged: { configureMap(); if (!visible) panelOpen = false }
+    onNavigatingChanged: if (navigating && panelOpen) { provider.mapBrowse("close"); panelOpen = false }
     onMapModeChanged: configureMap()
     onProviderChanged: configureMap()
     Component.onCompleted: configureMap()
@@ -35,7 +38,7 @@ Rectangle {
         provider: card.provider
         MouseArea {
             anchors.fill: parent
-            enabled: !compact && mapMode
+            enabled: !compact && mapMode && !panelOpen
             onPressed: canvas.touch("press", mouse.x, mouse.y)
             onPositionChanged: if (pressed) canvas.touch("move", mouse.x, mouse.y)
             onReleased: canvas.touch("release", mouse.x, mouse.y)
@@ -44,15 +47,57 @@ Rectangle {
     }
 
     Rectangle {
+        id: mapToolbar
+        objectName: "navigationMapToolbar"
+        x: 16; y: 16; width: parent.width - 32; height: 62; radius: 14
+        color: palette.card; opacity: 0.96
+        visible: mapMode && !compact && browserAvailable && !panelOpen
+        Rectangle {
+            objectName: "navigationDestinationButton"
+            x: 6; y: 6; width: navigating ? 64 : Math.min(300, parent.width - 92); height: 50
+            radius: 10; color: palette.button
+            Text {
+                anchors.centerIn: parent; width: parent.width - 16; horizontalAlignment: Text.AlignHCenter
+                text: navigating ? (provider.mapBrowser.voiceEnabled ? "♪" : "♫") : qsTranslate("Sailplay", "Choose destination")
+                textFormat: Text.PlainText; color: palette.text; font.pixelSize: 26; elide: Text.ElideRight
+            }
+            MouseArea {
+                anchors.fill: parent; enabled: !!provider && !provider.mapBrowseBusy
+                onClicked: {
+                    if (navigating) provider.mapBrowse("mute")
+                    else { panelOpen = true; provider.mapBrowse("history") }
+                }
+            }
+        }
+        Rectangle {
+            anchors.right: parent.right; anchors.rightMargin: 6; y: 6
+            width: navigating ? Math.min(230, parent.width * 0.45) : 64; height: 50; radius: 10; color: palette.button
+            Text {
+                anchors.centerIn: parent; width: parent.width - 12; horizontalAlignment: Text.AlignHCenter
+                text: navigating ? qsTranslate("Sailplay", "Stop navigation") : "⚙"
+                color: palette.text; font.pixelSize: 26; elide: Text.ElideRight
+            }
+            MouseArea {
+                anchors.fill: parent; enabled: !!provider && !provider.mapBrowseBusy
+                onClicked: {
+                    if (navigating) provider.stopNavigation()
+                    else { panelOpen = true; provider.mapBrowse("settings") }
+                }
+            }
+        }
+    }
+
+    Rectangle {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.margins: 16
+        anchors.topMargin: mapToolbar.visible ? 92 : 16
         width: Math.max(0, parent.width - (compact ? 32 : 112))
         height: mapStatus.height + 24
         radius: 14
         color: palette.card
         opacity: 0.93
-        visible: mapMode && (navigating || !provider.mapReady || provider.error)
+        visible: mapMode && !panelOpen && (navigating || !provider.mapReady || provider.error)
         Text {
             id: mapStatus
             anchors.centerIn: parent
@@ -69,16 +114,20 @@ Rectangle {
     }
 
     Column {
+        id: mapControls
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.margins: 16
+        anchors.topMargin: mapToolbar.visible ? 92 : 16
         spacing: 12
+        property real buttonSize: Math.max(44, Math.min(68, (card.height - (mapToolbar.visible ? 92 : 16)
+            - (routePreview.visible ? routePreview.height + 32 : 16) - 24) / 3))
         visible: mapMode && !compact
         Repeater {
-            model: [{label: "+", command: "zoom-in"}, {label: "−", command: "zoom-out"}, {label: "◎", command: "position"}]
+            model: [{label: "◎", command: "position"}, {label: "+", command: "zoom-in"}, {label: "−", command: "zoom-out"}]
             Rectangle {
-                width: 68
-                height: 68
+                width: mapControls.buttonSize
+                height: mapControls.buttonSize
                 radius: 14
                 color: palette.card
                 opacity: 0.93
@@ -89,6 +138,7 @@ Rectangle {
     }
 
     Rectangle {
+        id: routePreview
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
@@ -97,12 +147,12 @@ Rectangle {
         radius: 14
         color: palette.card
         opacity: 0.93
-        visible: mapMode && !compact && (navigating || !!mapState.place || !!mapState.building || !!mapState.built || !!mapState.error)
+        visible: mapMode && !compact && !panelOpen && (navigating || !!mapState.place || !!mapState.building || !!mapState.built || !!mapState.error)
         Text {
             id: routeText
             x: 12
             anchors.verticalCenter: parent.verticalCenter
-            width: Math.max(0, parent.width - routeAction.width - 36)
+            width: Math.max(0, parent.width - routeAction.width - (bookmarkPlace.visible ? 140 : clearPlace.visible ? 88 : 36))
             text: navigating ? qsTranslate("Sailplay", "%1 min").arg(Math.ceil((guidance.remainingSeconds || 0) / 60))
                   + " · " + card.distance(guidance.remainingDistanceMeters || 0)
                   : (mapState.error || mapState.summary || mapState.place || qsTranslate("Sailplay", "Building route"))
@@ -116,7 +166,7 @@ Rectangle {
             id: routeAction
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            anchors.rightMargin: 12
+            anchors.rightMargin: bookmarkPlace.visible ? 116 : clearPlace.visible ? 64 : 12
             width: Math.min(230, parent.width * 0.45)
             height: 58
             radius: 12
@@ -140,6 +190,39 @@ Rectangle {
                 }
             }
         }
+        Rectangle {
+            id: bookmarkPlace
+            anchors.right: clearPlace.left; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
+            width: 44; height: 58; radius: 12; color: palette.dock; visible: clearPlace.visible && !!mapState.place
+            Text { anchors.centerIn: parent; text: mapState.bookmarked ? "★" : "☆"; color: palette.text; font.pixelSize: 30 }
+            MouseArea { anchors.fill: parent; onClicked: provider.mapBrowse("toggle-bookmark") }
+        }
+        Rectangle {
+            id: clearPlace
+            objectName: "navigationPreviewCloseButton"
+            anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
+            width: 44; height: 58; radius: 12; color: palette.dock
+            visible: browserAvailable && !navigating && (!!mapState.place || !!mapState.building || !!mapState.built || !!mapState.error)
+            Text { anchors.centerIn: parent; text: "×"; color: palette.text; font.pixelSize: 30 }
+            MouseArea {
+                anchors.fill: parent
+                onClicked: {
+                    if (mapState.building || mapState.built || mapState.error) provider.stopNavigation()
+                    else provider.mapBrowse("clear-place")
+                }
+            }
+        }
+    }
+
+    MapDestinationPanel {
+        id: destinationPanel
+        objectName: "navigationDestinationPanel"
+        x: 16; y: 16
+        width: Math.max(0, Math.min(card.width - 112, Math.max(360, card.width * 0.36)))
+        height: Math.max(0, card.height - 32)
+        provider: card.provider; palette: card.palette; navigating: card.navigating
+        visible: card.panelOpen && !compact && mapMode
+        onDismissed: card.panelOpen = false
     }
 
     function distance(meters) {

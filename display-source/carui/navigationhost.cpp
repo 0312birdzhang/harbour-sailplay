@@ -1,4 +1,5 @@
 #include "navigationhost.h"
+#include "sailplaycontent.h"
 
 #include <QCoreApplication>
 #include <QDBusArgument>
@@ -133,6 +134,11 @@ SailplayNavigationHost::SailplayNavigationHost(const QString &runtime, QObject *
                 m_touchRequest = 0;
                 sendTouch();
             }
+            if (request == m_browserRequest) {
+                m_browserRequest = 0;
+                if (error.isEmpty() && m_active) m_mapBrowser = SailplayContent::decode(result).toMap();
+                emit mapBrowserChanged();
+            }
             if (!error.isEmpty()) { m_error = message; emit changed(); }
         });
     connect(&m_heartbeat, &QTimer::timeout, this, &SailplayNavigationHost::publish);
@@ -207,9 +213,12 @@ void SailplayNavigationHost::resetMap()
 {
     m_mapRequest = 0;
     m_touchRequest = 0;
+    m_browserRequest = 0;
     m_touches.clear();
     m_mapImage = QImage();
     m_mapState.clear();
+    m_mapBrowser.clear();
+    emit mapBrowserChanged();
     emit mapChanged();
 }
 
@@ -247,7 +256,12 @@ void SailplayNavigationHost::receiveMap(const QVariantMap &result)
         std::fprintf(stderr, "carui: navigation map ready app=%s width=%d height=%d\n",
             qPrintable(applicationId()), image.width(), image.height());
     m_mapImage = image;
-    m_mapState = qdbus_cast<QVariantMap>(result.value(QStringLiteral("state")));
+    m_mapState = SailplayContent::decode(result.value(QStringLiteral("state"))).toMap();
+    const QVariantMap browser = m_mapState.value(QStringLiteral("browser")).toMap();
+    if (!m_browserRequest && browser != m_mapBrowser) {
+        m_mapBrowser = browser;
+        emit mapBrowserChanged();
+    }
     m_error.clear();
     emit mapChanged();
     emit changed();
@@ -277,6 +291,15 @@ void SailplayNavigationHost::mapControl(const QString &command)
 {
     if (m_active && mapAvailable()) m_session.invoke(QStringLiteral("navigation.map.control"),
         {{QStringLiteral("command"), command}});
+}
+
+void SailplayNavigationHost::mapBrowse(const QString &command, const QVariantMap &parameters)
+{
+    if (!m_active || !mapAvailable() || m_browserRequest) return;
+    QVariantMap arguments = parameters;
+    arguments[QStringLiteral("command")] = command;
+    m_browserRequest = m_session.invoke(QStringLiteral("navigation.map.browse"), arguments);
+    emit mapBrowserChanged();
 }
 
 void SailplayNavigationHost::receiveState()

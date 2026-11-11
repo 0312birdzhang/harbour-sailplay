@@ -14,7 +14,7 @@ The patch targets the Sailfish source at
 `abcdd8c3d518973d74d1d967c1f6d6ba34e500bf`. `baseline.json` records the patch
 digest, source commit and before/after hashes of every changed file. The
 downstream repository also contains the integrated source.
-The current integrated source is `8056adcc1a457dd980699b8332437e19b6d45da5`.
+The current integrated source is `74014dcf5467d4d3a5e99a4099dfd7f77e5cc16e`.
 [Organic Maps Sailfish source](https://github.com/0312birdzhang/organicmaps-sailfish/tree/sailfish)
 
 Apply `lifecycle.patch` from a clean checkout at that baseline. Use a native Git
@@ -97,6 +97,27 @@ cards. A map frame result stays outside the revisioned navigation state.
 | `navigation.map.frame` | `width` and `height`, signed or unsigned 32-bit integers from 64 to 1920 | JPEG `image` as a byte array, integer `width` and `height`, and a `state` map |
 | `navigation.map.touch` | `phase` of `press`, `move`, `release` or `cancel`, plus double `x` and `y` from 0 to 1 | Empty completion |
 | `navigation.map.control` | String `command` of `zoom-in`, `zoom-out`, `position`, `route-to-place` or `start` | Empty completion |
+| `navigation.map.browse` | String `command` and the command-specific strings described below | Destination browser snapshot |
+
+The expanded map follows Organic Maps' iOS CarPlay destination flow. Choose
+destination opens recent searches, with search and bookmark tabs. Search accepts
+text or an offline category. Bookmarks open a group and then its saved places.
+Map settings expose driving, walking, cycling and guidance voice. Selecting a
+place opens the existing route preview. Its close button cancels a planned route
+or clears the selected place. Navigation hides the destination panel and exposes
+voice and stop controls. A compact card opens the expanded map for these actions.
+
+Browser commands are `history`, `categories`, `bookmark-groups`, `settings`,
+`search`, `select`, `previous`, `next`, `close`, `toggle-bookmark`, `clear-place`,
+`vehicle`, `walking`, `cycling` and `mute`. `search` requires a `query` string.
+`select` requires the current row's `id` string. Other commands accept only
+`command`. Strings are limited to 256 Unicode code points and reject NUL.
+The snapshot contains `page`, `query`, `title`, `rows`, `searching`, `previous`,
+`next`, `routerType`, `voiceEnabled` and `voiceAvailable`. Each page holds at most
+40 rows with `id`, `title`, `subtitle` and `kind`. Row IDs expire when the page
+or its model changes. Pending searches hide old results, and carui permits one
+browser request at a time. The same snapshot appears as `state.browser` in map
+frames. Carui detects this field to expose destination controls.
 
 Frames have a maximum dimension of 1920 pixels and an encoded limit of 4 MiB.
 Carui requests at most one frame at a time, every 200 milliseconds while its
@@ -155,8 +176,13 @@ physical phone/vehicle acceptance are recorded separately in `todo.md`.
 The lifecycle fixture also decodes backend map pixels, checks image diversity,
 reopens and closes the phone while retaining the canvas, sends a car gesture
 and verifies idle rendering-resource release.
+It also searches an offline coordinate, selects the result, builds its route,
+saves and opens bookmarks, checks 40-row pagination, changes route settings and
+rejects stale row IDs and invalid parameters in an isolated profile.
 `tests/navigation_map_canvas_probe.pro` builds the host-side fixture for
 JPEG validation, nested state, aspect-fit painting, normalized input, hidden
 leases, retry and owner loss. Passing the carui QML directory as its optional
 argument also constructs the production navigation card at 1920x720,
-1280x720, 720x1280 and 960x1920 and verifies compact canvas binding.
+1280x720, 720x1280 and 960x1920 and verifies compact canvas binding and destination
+panel bounds. It checks nested browser row decoding and the request concurrency
+limit through the production host.

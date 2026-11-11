@@ -339,6 +339,82 @@ Musik auf dem Telefon starten</translation>
       <source>Navigation provider returned invalid map data</source>
       <translation>Der Navigationsanbieter hat ungültige Kartendaten zurückgegeben</translation>
     </message>
+    <message>
+      <source>Choose destination</source>
+      <translation>Ziel auswählen</translation>
+    </message>
+    <message>
+      <source>Bookmarks</source>
+      <translation>Lesezeichen</translation>
+    </message>
+    <message>
+      <source>Map settings</source>
+      <translation>Karteneinstellungen</translation>
+    </message>
+    <message>
+      <source>Nearby places</source>
+      <translation>Orte in der Nähe</translation>
+    </message>
+    <message>
+      <source>Recent</source>
+      <translation>Zuletzt gesucht</translation>
+    </message>
+    <message>
+      <source>Search places or addresses</source>
+      <translation>Orte oder Adressen suchen</translation>
+    </message>
+    <message>
+      <source>Searching</source>
+      <translation>Suche läuft</translation>
+    </message>
+    <message>
+      <source>No recent searches</source>
+      <translation>Keine letzten Suchanfragen</translation>
+    </message>
+    <message>
+      <source>No bookmarks</source>
+      <translation>Keine Lesezeichen</translation>
+    </message>
+    <message>
+      <source>No results</source>
+      <translation>Keine Ergebnisse</translation>
+    </message>
+    <message>
+      <source>%1 places</source>
+      <translation>%1 Orte</translation>
+    </message>
+    <message>
+      <source>Previous</source>
+      <translation>Zurück</translation>
+    </message>
+    <message>
+      <source>Next</source>
+      <translation>Weiter</translation>
+    </message>
+    <message>
+      <source>Route type</source>
+      <translation>Routenart</translation>
+    </message>
+    <message>
+      <source>Driving</source>
+      <translation>Auto</translation>
+    </message>
+    <message>
+      <source>Walking</source>
+      <translation>Zu Fuß</translation>
+    </message>
+    <message>
+      <source>Cycling</source>
+      <translation>Fahrrad</translation>
+    </message>
+    <message>
+      <source>Mute guidance</source>
+      <translation>Sprachführung stummschalten</translation>
+    </message>
+    <message>
+      <source>Enable guidance voice</source>
+      <translation>Sprachführung aktivieren</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

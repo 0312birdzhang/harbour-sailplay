@@ -19,6 +19,8 @@ class SailplayNavigationHost : public QObject
     Q_PROPERTY(bool mapAvailable READ mapAvailable NOTIFY changed)
     Q_PROPERTY(bool mapReady READ mapReady NOTIFY mapChanged)
     Q_PROPERTY(QVariantMap mapState READ mapState NOTIFY mapChanged)
+    Q_PROPERTY(QVariantMap mapBrowser READ mapBrowser NOTIFY mapBrowserChanged)
+    Q_PROPERTY(bool mapBrowseBusy READ mapBrowseBusy NOTIFY mapBrowserChanged)
 
 public:
     explicit SailplayNavigationHost(const QString &runtime = QString(), QObject *parent = nullptr);
@@ -32,6 +34,8 @@ public:
     bool mapAvailable() const { return ready() && m_session.capabilities().contains(QStringLiteral("navigation-map")); }
     bool mapReady() const { return !m_mapImage.isNull(); }
     QVariantMap mapState() const { return m_mapState; }
+    QVariantMap mapBrowser() const { return m_mapBrowser; }
+    bool mapBrowseBusy() const { return m_browserRequest != 0; }
     QImage mapImage() const { return m_mapImage; }
 
     void open(const SailplayApplication &declaration, const QString &name);
@@ -41,10 +45,12 @@ public:
     Q_INVOKABLE void configureMap(int width, int height);
     Q_INVOKABLE void mapTouch(const QString &phase, double x, double y);
     Q_INVOKABLE void mapControl(const QString &command);
+    Q_INVOKABLE void mapBrowse(const QString &command, const QVariantMap &parameters = QVariantMap());
 
 signals:
     void changed();
     void mapChanged();
+    void mapBrowserChanged();
 
 private:
     void receiveState();
@@ -63,9 +69,11 @@ private:
     QSize m_mapSize;
     QImage m_mapImage;
     QVariantMap m_mapState;
+    QVariantMap m_mapBrowser;
     QQueue<QVariantMap> m_touches;
     qulonglong m_mapRequest = 0;
     qulonglong m_touchRequest = 0;
+    qulonglong m_browserRequest = 0;
     QString m_name;
     QString m_error;
     QString m_directory;

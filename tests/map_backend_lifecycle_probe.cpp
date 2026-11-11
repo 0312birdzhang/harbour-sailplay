@@ -15,11 +15,13 @@
 #include "sailfish/place_page.hpp"
 #include "sailfish/routing.hpp"
 #include "sailfish/sailplay_map_canvas.hpp"
+#include "sailfish/sailplay_map_browser.hpp"
 #include "sailfish/search_model.hpp"
 #include "sailfish/url_handler.hpp"
 
 #include "map/framework.hpp"
 #include "map/gps_tracker.hpp"
+#include "geometry/mercator.hpp"
 
 #include "platform/platform.hpp"
 #include "platform/distance.hpp"
@@ -39,11 +41,14 @@
 #include <QSurfaceFormat>
 #include <QThread>
 
+#include <algorithm>
 #include <clocale>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
 #include <memory>
+#include <stdexcept>
+#include <string>
 
 #include <sailfishapp.h>
 
@@ -257,6 +262,66 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
   };
   frame();
   Check(!presentation.isOpen() && framework.IsDrapeEngineCreated(), "cold car canvas opened a phone view");
+  fix.m_timestamp = QDateTime::currentMSecsSinceEpoch() / 1000.0;
+  static_cast<location::LocationObserver &>(mapCore).OnLocationUpdated(fix);
+  sailfish::SailplayMapBrowser browser(mapCore);
+  browser.Invoke({{"command", "history"}});
+  Check(browser.Snapshot().value("page") == "history", "destination history did not open");
+  browser.Invoke({{"command", "categories"}});
+  Check(!browser.Snapshot().value("rows").toList().isEmpty(), "offline categories are unavailable");
+  browser.Invoke({{"command", "search"}, {"query", "23.137, 113.632"}});
+  Check(browser.Snapshot().value("searching").toBool(), "search did not hide stale results");
+  WaitFor([&] { return !browser.Snapshot().value("searching").toBool(); });
+  auto searchRows = browser.Snapshot().value("rows").toList();
+  Check(!searchRows.isEmpty(), "coordinate search returned no places");
+  browser.Invoke({{"command", "select"}, {"id", searchRows.front().toMap().value("id")}});
+  Check(mapCore.placePage()->open() && browser.Snapshot().value("page").toString().isEmpty(),
+        "search selection did not open the authoritative place");
+  browser.Invoke({{"command", "toggle-bookmark"}});
+  Check(mapCore.placePage()->isBookmark(), "car bookmark did not use the phone bookmark manager");
+  routing->routeToPlace();
+  WaitFor([&] { return !routing->building(); }, 60000);
+  Check(routing->canStart(), "search destination did not build an offline route");
+  routing->close();
+  auto & manager = framework.GetBookmarkManager();
+  auto const category = manager.CreateBookmarkCategory("Car saved places", false);
+  for (int index = 0; index < 45; ++index)
+  {
+    kml::BookmarkData data;
+    kml::SetDefaultStr(data.m_name, "Saved place " + std::to_string(index));
+    data.m_point = mercator::FromLatLon(23.137, 113.632);
+    manager.GetEditSession().CreateBookmark(std::move(data), category);
+  }
+  browser.Invoke({{"command", "bookmark-groups"}});
+  auto const groups = browser.Snapshot().value("rows").toList();
+  auto const group = std::find_if(groups.begin(), groups.end(), [](QVariant const & value)
+  { return value.toMap().value("title") == "Car saved places"; });
+  Check(group != groups.end(), "saved bookmark category is absent");
+  browser.Invoke({{"command", "select"}, {"id", group->toMap().value("id")}});
+  Check(browser.Snapshot().value("rows").toList().size() == 40 && browser.Snapshot().value("next").toBool(),
+        "bookmark first page did not respect its bound");
+  browser.Invoke({{"command", "next"}});
+  auto const saved = browser.Snapshot().value("rows").toList();
+  Check(saved.size() == 5 && browser.Snapshot().value("previous").toBool(), "bookmark next page is incorrect");
+  browser.Invoke({{"command", "select"}, {"id", saved.front().toMap().value("id")}});
+  Check(mapCore.placePage()->isBookmark(), "bookmark selection did not open the saved place");
+  browser.Invoke({{"command", "clear-place"}});
+  Check(!mapCore.placePage()->open(), "car place close failed");
+  browser.Invoke({{"command", "settings"}});
+  browser.Invoke({{"command", "walking"}});
+  Check(routing->routerType() == sailfish::Routing::Pedestrian, "route settings did not reach the backend");
+  browser.Invoke({{"command", "vehicle"}});
+  for (auto const & parameters : {QVariantMap{{"command", "search"}, {"query", QString(257, 'x')}},
+                                 QVariantMap{{"command", "history"}, {"extra", "x"}},
+                                 QVariantMap{{"command", "select"}, {"id", searchRows.front().toMap().value("id")}}})
+  {
+    bool rejected = false;
+    try { browser.Invoke(parameters); }
+    catch (std::invalid_argument const &) { rejected = true; }
+    Check(rejected, "invalid or stale destination action was accepted");
+  }
+  browser.Invoke({{"command", "close"}});
+  std::puts("MAP_DESTINATION_BROWSER_PASS offline-search select route bookmarks pagination settings stale-id");
   canvas.Touch("press", 0.5, 0.5);
   canvas.Touch("move", 0.6, 0.5);
   canvas.Touch("release", 0.6, 0.5);

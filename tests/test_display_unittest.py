@@ -34,6 +34,22 @@ class DisplayFramesTests(unittest.TestCase):
             self.assertIn('SAILPLAY_DISPLAY_PIPELINE=' + pipeline.fifo, arguments[5])
             self.assertTrue(launch.call_args.kwargs['start_new_session'])
 
+    def test_projection_shell_uses_the_private_keyboard(self):
+        from unittest.mock import Mock
+        with patch('carplay_proto.display.os.open', return_value=1), \
+             patch('carplay_proto.display.fcntl.flock'), \
+             patch('carplay_proto.display.subprocess.run', return_value=SimpleNamespace(returncode=1)), \
+             patch('carplay_proto.display.projected_apps', return_value={}), \
+             patch('carplay_proto.display.stop_projected_apps'), \
+             patch('carplay_proto.display.os.path.exists', return_value=True), \
+             patch('carplay_proto.display.os.mkfifo'), \
+             patch('carplay_proto.display.os.chmod'), \
+             patch.object(DisplayPipeline, 'launch', return_value=Mock()) as launch:
+            DisplayPipeline().start()
+            command = next(call.args[1] for call in launch.call_args_list if call.args[0] == 'carui')
+            self.assertIn('QT_IM_MODULE=Maliit', command)
+            self.assertIn('MALIIT_SERVER_ADDRESS=unix:path=/run/user/100000/sailplay-maliit/socket', command)
+
     def test_keyframe_signals_only_owned_capture_child(self):
         pipeline = DisplayPipeline()
         pipeline.capture = SimpleNamespace(pid=100)

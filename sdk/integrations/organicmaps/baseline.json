@@ -1,9 +1,9 @@
 {
   "source_repository": "https://github.com/0312birdzhang/organicmaps-sailfish",
   "baseline_commit": "abcdd8c3d518973d74d1d967c1f6d6ba34e500bf",
-  "integrated_commit": "8056adcc1a457dd980699b8332437e19b6d45da5",
+  "integrated_commit": "74014dcf5467d4d3a5e99a4099dfd7f77e5cc16e",
   "patch": "lifecycle.patch",
-  "patch_sha256": "d5842c038afaf2437ccd6d2f7c8fb2f7636d0c890c4c5f5492c8f02c8bf3ea79",
+  "patch_sha256": "8a40e5e265ff6586bce09b93d9249e35f78fd5dc454accfadddd40307a592122",
   "files": [
     {
       "path": "libs/map/framework.cpp",
@@ -58,12 +58,12 @@
     {
       "path": "sailfish/CMakeLists.txt",
       "before": "af22dd6da2e97ba671e72cdddd38c2c4709614a0bc1fa2dc15be0378afaf6e81",
-      "after": "d7b4e7b06936fe4185e1546c608c461c422080ebce1f41e9f85f3c2622706c65"
+      "after": "2c635c3dfb22e47372a2c064bb993d644af06cbe093721cd913f1ef48b928537"
     },
     {
       "path": "sailfish/app.cpp",
       "before": "7f6064521588344bf14221e6bfbc4d632d7e1c1736d3f8da122e0e52468e34ae",
-      "after": "6ed039000c347bfa05fdc7383eb829768fd7acf67515e41671e79bdf46bb1cb4"
+      "after": "514d75dc804840718370d2d49721364990a2f0b32210b039061bf813bf58d1a2"
     },
     {
       "path": "sailfish/bookmarks_io.cpp",
@@ -156,9 +156,19 @@
       "after": "6a65d94297f7d07d3ef654112536fb85d9570ede927338a2765995d50024c83d"
     },
     {
+      "path": "sailfish/sailplay_map_browser.cpp",
+      "before": null,
+      "after": "da5faf09cb3cfa09e72edc64efbfd3c9aea262f70826054ea91051beba59b9fc"
+    },
+    {
+      "path": "sailfish/sailplay_map_browser.hpp",
+      "before": null,
+      "after": "8fddc97b0201a618029b44acf6a980ad305ffc4b96af7affa672d8046d0245c7"
+    },
+    {
       "path": "sailfish/sailplay_map_canvas.cpp",
       "before": null,
-      "after": "4ef3e0999992f0bc6d0832543b07eee7fd37352f2a5ce15ec5b55f6f33eb42ab"
+      "after": "50877bb5056f78184a9e06548e132e04e6462e4d15f1f30f96223a319c481bc2"
     },
     {
       "path": "sailfish/sailplay_map_canvas.hpp",
@@ -174,6 +184,16 @@
       "path": "sailfish/sailplay_navigation.hpp",
       "before": null,
       "after": "57e34e748c322cd9b7c136abe07f82a72e275df13dff2bfe02ca2ebe424611f4"
+    },
+    {
+      "path": "sailfish/search_model.cpp",
+      "before": "7bea30f4b638ea40c0543f823854b8e5fa1d8dcf539b375f9f95cffe21773e2f",
+      "after": "abb49fbc7e31104faf47c44f8fe8e32f2d63c6afa60308e918847a1ff93924fa"
+    },
+    {
+      "path": "sailfish/search_model.hpp",
+      "before": "12db2c3636a95c60b218a94429e0c703a3b482ff85bd5ace7252923a1700578b",
+      "after": "30958c3162940d829b6d634698b646a288444553c63f7a12ff63fc4bb9b7a27a"
     },
     {
       "path": "sailfish/url_handler.cpp",

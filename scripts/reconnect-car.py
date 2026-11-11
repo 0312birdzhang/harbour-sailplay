@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Reset Sailplay sessions and connect Bluetooth to the configured head unit."""
 import os
+import errno
 import logging
 import re
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from carplay_proto.bluezadapter import (authenticated_head_unit, select_adapter, select_head_unit,
@@ -40,6 +42,18 @@ def projection_target(objects, configured, protocol):
 def configured_device(exec_start):
     match = re.search(r'--device\s+(/org/bluez/hci\d+/dev_[0-9A-Fa-f_]+)', exec_start)
     return match.group(1) if match else None
+
+
+def wake_android_auto(local, remote):
+    from android_auto.bluetooth import find_channel
+    for attempt in range(3):
+        try:
+            return find_channel(local, remote, timeout=10)
+        except OSError as error:
+            if error.errno not in (errno.EALREADY, errno.EINPROGRESS) or attempt == 2:
+                raise
+            logging.info('Bluetooth SDP connection busy; retrying attempt=%d', attempt + 2)
+            time.sleep(.5)
 
 
 def main():
@@ -80,12 +94,11 @@ def main():
         if android_auto:
             if connected:
                 device.Disconnect(timeout=10)
-            from android_auto.bluetooth import find_channel
             local = str(props.Get('org.bluez.Adapter1', 'Address'))
             remote = str(device_properties.Get('org.bluez.Device1', 'Address'))
             # SDP establishes the authenticated ACL link even while the receiver
             # is reopening its AA listener after the Bluetooth reconnect event.
-            find_channel(local, remote, timeout=10)
+            wake_android_auto(local, remote)
         elif not connected:
             try:
                 device.Connect(timeout=20)
