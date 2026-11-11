@@ -33,7 +33,8 @@ SailplayApplication SailplayApplication::fromDesktopFile(const QString &filename
         || values.value(QStringLiteral("Type")) != QStringLiteral("Application")
         || values.value(QStringLiteral("X-Sailplay-ApiVersion")) != QStringLiteral("1"))
         return result;
-    result.applicationId = QFileInfo(filename).completeBaseName();
+    result.desktopId = QFileInfo(filename).completeBaseName();
+    result.applicationId = values.value(QStringLiteral("X-Sailplay-ApplicationId"), result.desktopId);
     result.service = values.value(QStringLiteral("X-Sailplay-Service"));
     result.path = values.value(QStringLiteral("X-Sailplay-ObjectPath"), QStringLiteral("/org/sailplay/v1/App"));
     result.presentation = values.value(QStringLiteral("X-Sailplay-Presentation"), QStringLiteral("template"));
@@ -43,6 +44,9 @@ SailplayApplication SailplayApplication::fromDesktopFile(const QString &filename
     const QRegExp pathPattern(QStringLiteral("(/[A-Za-z0-9_]+)+"));
     const QRegExp capabilityPattern(QStringLiteral("[a-z][a-z0-9.-]*"));
     if (result.applicationId.isEmpty() || result.service.size() > 255
+        || result.applicationId.contains(QChar::Null) || result.applicationId.contains(QLatin1Char('/'))
+        || result.applicationId.contains(QLatin1Char('\\')) || result.applicationId == QStringLiteral(".")
+        || result.applicationId == QStringLiteral("..")
         || !servicePattern.exactMatch(result.service) || !pathPattern.exactMatch(result.path)
         || !result.path.split(QLatin1Char('/')).contains(QStringLiteral("v1"))
         || (result.presentation != QStringLiteral("template") && result.presentation != QStringLiteral("renderer")))

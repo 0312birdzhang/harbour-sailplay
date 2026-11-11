@@ -283,6 +283,42 @@ Start music on your phone</source>
       <source>Cryptography and development tests</source>
       <translation>密码学实现与开发测试</translation>
     </message>
+    <message>
+      <source>Load more</source>
+      <translation>加载更多</translation>
+    </message>
+    <message>
+      <source>Search</source>
+      <translation>搜索</translation>
+    </message>
+    <message>
+      <source>Connecting content</source>
+      <translation>正在连接内容服务</translation>
+    </message>
+    <message>
+      <source>Loading</source>
+      <translation>正在加载</translation>
+    </message>
+    <message>
+      <source>Content provider returned an invalid page</source>
+      <translation>内容服务返回了无效页面</translation>
+    </message>
+    <message>
+      <source>Unsupported content provider</source>
+      <translation>不支持的内容服务</translation>
+    </message>
+    <message>
+      <source>Content history limit reached</source>
+      <translation>浏览历史已达到上限</translation>
+    </message>
+    <message>
+      <source>Browse</source>
+      <translation>浏览</translation>
+    </message>
+    <message>
+      <source>Content provider identity does not match its desktop declaration</source>
+      <translation>内容服务身份与应用声明不一致</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

@@ -8,20 +8,21 @@ API_VERSION = 1
 APP_INTERFACE = 'org.sailplay.App1'
 SESSION_INTERFACE = 'org.sailplay.Session1'
 NAVIGATION_INTERFACE = 'org.sailplay.Navigation1'
+CONTENT_INTERFACE = 'org.sailplay.Content1'
 APP_PATH = '/org/sailplay/v1/App'
 ERROR_PREFIX = 'org.sailplay.Error1.'
 INTERFACES = os.path.join(os.path.dirname(__file__), 'interfaces')
 
 
 def interface_xml(name):
-    if name not in (APP_INTERFACE, SESSION_INTERFACE, NAVIGATION_INTERFACE):
+    if name not in (APP_INTERFACE, SESSION_INTERFACE, NAVIGATION_INTERFACE, CONTENT_INTERFACE):
         raise ValueError('unsupported SDK interface')
     with open(os.path.join(INTERFACES, name + '.xml'), encoding='utf-8') as stream:
         return stream.read()
 
 
 _CONTRACTS = {name: ET.fromstring(interface_xml(name)).find('interface')
-              for name in (APP_INTERFACE, SESSION_INTERFACE, NAVIGATION_INTERFACE)}
+              for name in (APP_INTERFACE, SESSION_INTERFACE, NAVIGATION_INTERFACE, CONTENT_INTERFACE)}
 
 
 def signatures(interface, member, kind='method'):

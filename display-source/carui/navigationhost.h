@@ -20,7 +20,7 @@ public:
     ~SailplayNavigationHost() override;
 
     bool ready() const { return m_session.ready(); }
-    QString applicationId() const { return m_declaration.applicationId; }
+    QString applicationId() const { return m_declaration.presentationId(); }
     QString name() const { return m_name; }
     QVariantMap guidance() const { return m_guidance; }
     QString error() const { return m_error; }

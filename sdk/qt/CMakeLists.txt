@@ -9,7 +9,8 @@ if(NOT SAILPLAY_SDK_INTERFACES)
 endif()
 configure_file(sailplay_contracts.qrc.in qmake_sailplay_contracts.qrc @ONLY)
 qt5_add_resources(sailplay_provider_resources "${CMAKE_CURRENT_BINARY_DIR}/qmake_sailplay_contracts.qrc")
-add_library(sailplay_sdk_provider STATIC sailplayprovider.cpp sailplayprovider.h ${sailplay_provider_resources})
+add_library(sailplay_sdk_provider STATIC sailplayprovider.cpp sailplayprovider.h
+    sailplaycontent.cpp sailplaycontent.h ${sailplay_provider_resources})
 set_target_properties(sailplay_sdk_provider PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 target_compile_features(sailplay_sdk_provider PUBLIC cxx_std_11)
 target_compile_options(sailplay_sdk_provider PRIVATE

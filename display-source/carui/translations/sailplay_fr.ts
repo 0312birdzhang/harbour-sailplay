@@ -283,6 +283,42 @@ Lancez la musique sur votre téléphone</translation>
       <source>Cryptography and development tests</source>
       <translation>Cryptographie et tests de développement</translation>
     </message>
+    <message>
+      <source>Load more</source>
+      <translation>Charger plus</translation>
+    </message>
+    <message>
+      <source>Search</source>
+      <translation>Rechercher</translation>
+    </message>
+    <message>
+      <source>Connecting content</source>
+      <translation>Connexion au service de contenu</translation>
+    </message>
+    <message>
+      <source>Loading</source>
+      <translation>Chargement</translation>
+    </message>
+    <message>
+      <source>Content provider returned an invalid page</source>
+      <translation>Le fournisseur de contenu a renvoyé une page invalide</translation>
+    </message>
+    <message>
+      <source>Unsupported content provider</source>
+      <translation>Fournisseur de contenu non pris en charge</translation>
+    </message>
+    <message>
+      <source>Content history limit reached</source>
+      <translation>La limite de l’historique de navigation est atteinte</translation>
+    </message>
+    <message>
+      <source>Browse</source>
+      <translation>Parcourir</translation>
+    </message>
+    <message>
+      <source>Content provider identity does not match its desktop declaration</source>
+      <translation>L’identité du fournisseur de contenu ne correspond pas à sa déclaration d’application</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

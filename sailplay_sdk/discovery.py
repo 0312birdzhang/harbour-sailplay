@@ -11,8 +11,9 @@ OBJECT_PATH = re.compile(r'(?:/[A-Za-z0-9_]+)+\Z')
 
 
 class ApplicationDeclaration:
-    def __init__(self, application_id, name, service, path, capabilities, presentation):
+    def __init__(self, application_id, name, service, path, capabilities, presentation, desktop_id=None):
         self.application_id = application_id
+        self.desktop_id = application_id if desktop_id is None else desktop_id
         self.name = name
         self.service = service
         self.path = path
@@ -22,6 +23,10 @@ class ApplicationDeclaration:
     @property
     def navigation_template(self):
         return self.presentation == 'template' and 'navigation' in self.capabilities
+
+    @property
+    def content_template(self):
+        return self.presentation == 'template' and 'content' in self.capabilities
 
 
 def read_declaration(path, include_hidden=False):
@@ -48,11 +53,14 @@ def read_declaration(path, include_hidden=False):
         capabilities = tuple(value for value in entry.get('X-Sailplay-Capabilities', '').split(';') if value)
         if any(not re.fullmatch(r'[a-z][a-z0-9.-]*', value) for value in capabilities):
             return None
-        application_id = os.path.basename(os.fspath(path))[:-len('.desktop')]
-        if not application_id or not str(path).endswith('.desktop'):
+        desktop_id = os.path.basename(os.fspath(path))[:-len('.desktop')]
+        application_id = entry.get('X-Sailplay-ApplicationId', desktop_id)
+        if any(char in application_id for char in ('/', '\\', '\0')) or application_id in ('.', '..'):
+            return None
+        if not application_id or not desktop_id or not str(path).endswith('.desktop'):
             return None
         return ApplicationDeclaration(application_id, entry.get('Name', application_id),
-                                      service, object_path, capabilities, presentation)
+                                      service, object_path, capabilities, presentation, desktop_id)
     except (OSError, UnicodeError, configparser.Error, KeyError):
         return None
 

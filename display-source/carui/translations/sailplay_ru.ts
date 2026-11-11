@@ -283,6 +283,42 @@ Start music on your phone</source>
       <source>Cryptography and development tests</source>
       <translation>Криптография и тестирование при разработке</translation>
     </message>
+    <message>
+      <source>Load more</source>
+      <translation>Загрузить ещё</translation>
+    </message>
+    <message>
+      <source>Search</source>
+      <translation>Поиск</translation>
+    </message>
+    <message>
+      <source>Connecting content</source>
+      <translation>Подключение к службе содержимого</translation>
+    </message>
+    <message>
+      <source>Loading</source>
+      <translation>Загрузка</translation>
+    </message>
+    <message>
+      <source>Content provider returned an invalid page</source>
+      <translation>Поставщик содержимого вернул недопустимую страницу</translation>
+    </message>
+    <message>
+      <source>Unsupported content provider</source>
+      <translation>Неподдерживаемый поставщик содержимого</translation>
+    </message>
+    <message>
+      <source>Content history limit reached</source>
+      <translation>Достигнут предел истории просмотра</translation>
+    </message>
+    <message>
+      <source>Browse</source>
+      <translation>Обзор</translation>
+    </message>
+    <message>
+      <source>Content provider identity does not match its desktop declaration</source>
+      <translation>Идентификатор поставщика содержимого не соответствует объявлению приложения</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

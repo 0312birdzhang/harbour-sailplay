@@ -13,6 +13,9 @@ struct SailplayApplication
     QString path;
     QString presentation;
     QStringList capabilities;
+    QString desktopId;
+
+    QString presentationId() const { return desktopId.isEmpty() ? applicationId : desktopId; }
 
     bool navigationTemplate() const
     {
@@ -24,6 +27,12 @@ struct SailplayApplication
     {
         return valid && presentation == QStringLiteral("template")
             && capabilities.contains(QStringLiteral("media"));
+    }
+
+    bool contentTemplate() const
+    {
+        return valid && presentation == QStringLiteral("template")
+            && capabilities.contains(QStringLiteral("content"));
     }
 
     static SailplayApplication fromDesktopFile(const QString &filename);

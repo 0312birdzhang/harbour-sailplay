@@ -1,12 +1,12 @@
 diff --git a/apps/mconnect/docs/sailplay-background.md b/apps/mconnect/docs/sailplay-background.md
-index 47e49e8..a1c50cf 100644
+index 47e49e8..33a5818 100644
 --- a/apps/mconnect/docs/sailplay-background.md
 +++ b/apps/mconnect/docs/sailplay-background.md
 @@ -1,6 +1,6 @@
  # Sailplay native background playback
 
 -Updated on 2026-11-06 for the native release 40 source.
-+Updated on 2026-11-10 for the native release 53 source.
++Updated on 2026-11-11 for the native release 54 source.
  `harbour-mconnect --background` enters `mconnect-silica`, which initializes
  native storage, account services, the playback runtime and MPRIS. Playback
  memory restores paused. MPRIS Play and explicit UI controls use the same native
@@ -19,7 +19,7 @@ index 47e49e8..a1c50cf 100644
  throughout activation.
 
  MPRIS retains `org.mpris.MediaPlayer2.harbour_mconnect`, the existing
-@@ -28,10 +28,32 @@ MPRIS retains `org.mpris.MediaPlayer2.harbour_mconnect`, the existing
+@@ -28,10 +28,47 @@ MPRIS retains `org.mpris.MediaPlayer2.harbour_mconnect`, the existing
  the same foreground presentation path. Artwork uses the native private cache
  and loopback decoder.
 
@@ -58,24 +58,40 @@ index 47e49e8..a1c50cf 100644
 +preserves unrelated migration work. Installed verification is recorded in
 +Sailplay's `todo.md`. The earlier `sailplay-background-validation.md` records
 +historical packaged-host evidence.
++
++## Content browsing
++
++Release 54 adds Content1 to the application's existing service and car leases.
++Sailplay's music view offers Browse, which shows the current native playback
++queue. Search filters queue song and artist names, and pagination returns up
++to fifty rows per reply. Empty queues and empty search results have explicit
++status messages. Selecting a row checks its index and platform/song identity
++against the current queue before using the existing player selection operation.
++
++The host keeps its browsing history and search results in its own presentation.
++Queue changes advance the catalog version. Playback position updates retain
++that version, so the list can stay in place during playback. Standard playback
++controls continue through MPRIS. The Sailjail profile grants directed
++ContentChanged updates to the SDK clients' temporary names.
 diff --git a/apps/mconnect/elinux/harbour-mconnect-silica.desktop b/apps/mconnect/elinux/harbour-mconnect-silica.desktop
-index 91025aa..e71d821 100644
+index 91025aa..6404013 100644
 --- a/apps/mconnect/elinux/harbour-mconnect-silica.desktop
 +++ b/apps/mconnect/elinux/harbour-mconnect-silica.desktop
-@@ -4,6 +4,11 @@ Name=Mconnect
+@@ -4,6 +4,12 @@ Name=Mconnect
  Icon=harbour-mconnect
  Categories=AudioVideo;Audio;Music;Player;
  X-Sailplay-BackgroundService=org.sailfishos.Mconnect
 +X-Sailplay-ApiVersion=1
 +X-Sailplay-Service=org.sailfishos.Mconnect
++X-Sailplay-ApplicationId=harbour-mconnect
 +X-Sailplay-ObjectPath=/org/sailplay/v1/App
 +X-Sailplay-Presentation=template
-+X-Sailplay-Capabilities=media;
++X-Sailplay-Capabilities=media;content;
  Exec=/usr/bin/harbour-mconnect-silica
  X-Nemo-Application-Type=generic
  X-Nemo-Single-Instance=no
 diff --git a/apps/mconnect/elinux/harbour-mconnect.desktop.in b/apps/mconnect/elinux/harbour-mconnect.desktop.in
-index fac19ea..0e8f79a 100644
+index fac19ea..558e73b 100644
 --- a/apps/mconnect/elinux/harbour-mconnect.desktop.in
 +++ b/apps/mconnect/elinux/harbour-mconnect.desktop.in
 @@ -9,6 +9,11 @@ Exec=/usr/bin/harbour-mconnect
@@ -86,15 +102,15 @@ index fac19ea..0e8f79a 100644
 +X-Sailplay-Service=org.sailfishos.Mconnect
 +X-Sailplay-ObjectPath=/org/sailplay/v1/App
 +X-Sailplay-Presentation=template
-+X-Sailplay-Capabilities=media;
++X-Sailplay-Capabilities=media;content;
 
  [X-Sailjail]
  OrganizationName=org.sailfishos
 diff --git a/apps/mconnect/elinux/harbour-mconnect.profile b/apps/mconnect/elinux/harbour-mconnect.profile
-index 51005cb..bcc4679 100644
+index 51005cb..10b626b 100644
 --- a/apps/mconnect/elinux/harbour-mconnect.profile
 +++ b/apps/mconnect/elinux/harbour-mconnect.profile
-@@ -2,6 +2,12 @@
+@@ -2,6 +2,13 @@
  dbus-user.own org.sailfishos.Mconnect.Core
  dbus-user.own org.sailfishos.Mconnect.Silica
 
@@ -102,16 +118,25 @@ index 51005cb..bcc4679 100644
 +dbus-user.call org.sailplay.Client.*=org.sailplay.Session1.StateChanged@/org/sailplay/v1/*
 +dbus-user.call org.sailplay.Client.*=org.sailplay.Session1.RequestFinished@/org/sailplay/v1/*
 +dbus-user.call org.sailplay.Client.*=org.sailplay.Navigation1.GuidanceChanged@/org/sailplay/v1/*
++dbus-user.call org.sailplay.Client.*=org.sailplay.Content1.ContentChanged@/org/sailplay/v1/*
 +dbus-user.call org.sailplay.Client.*=org.freedesktop.DBus.Properties.PropertiesChanged@/org/sailplay/v1/*
 +
  # Silica reads the active profile and its feedback settings.
  dbus-user.call com.nokia.profiled=com.nokia.profiled.get_profile@/com/nokia/profiled
  dbus-user.call com.nokia.profiled=com.nokia.profiled.get_profiles@/com/nokia/profiled
 diff --git a/apps/mconnect/elinux/silica/CMakeLists.txt b/apps/mconnect/elinux/silica/CMakeLists.txt
-index 1b201d5..cc5ea20 100644
+index 1b201d5..db14f92 100644
 --- a/apps/mconnect/elinux/silica/CMakeLists.txt
 +++ b/apps/mconnect/elinux/silica/CMakeLists.txt
-@@ -25,6 +25,7 @@ add_library(mconnect_native_core STATIC
+@@ -5,6 +5,7 @@ add_library(mconnect_native_core STATIC
+   native_artwork.cpp
+   native_bilibili.cpp
+   native_catalog.cpp
++  native_car_content.cpp
+   native_content.cpp
+   native_core.cpp
+   native_database.cpp
+@@ -25,6 +26,7 @@ add_library(mconnect_native_core STATIC
    native_music.cpp
    native_platforms.cpp
    native_platforms.h
@@ -119,7 +144,7 @@ index 1b201d5..cc5ea20 100644
    native_player.cpp
    native_qq.cpp
    native_qq_account.cpp
-@@ -37,7 +38,11 @@ add_library(mconnect_native_core STATIC
+@@ -37,7 +39,12 @@ add_library(mconnect_native_core STATIC
  apply_standard_settings(mconnect_native_core)
  target_compile_options(mconnect_native_core PRIVATE -Wno-misleading-indentation)
  target_link_libraries(mconnect_native_core PUBLIC Qt5::Gui Qt5::DBus Qt5::Network
@@ -128,11 +153,12 @@ index 1b201d5..cc5ea20 100644
 +
 +set(MCONNECT_SAILPLAY_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sailplay-sdk/sdk/qt" CACHE PATH "Sailplay Qt SDK source")
 +add_subdirectory("${MCONNECT_SAILPLAY_SDK_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/sailplay-sdk")
++target_link_libraries(mconnect_native_core PUBLIC sailplay_sdk_provider)
 +install(FILES "${MCONNECT_SAILPLAY_SDK_DIR}/../../LICENSE" DESTINATION share/licenses/harbour-mconnect RENAME sailplay-sdk-LICENSE)
 
  add_library(mconnect_native_ui STATIC bridge.cpp bridge.h)
  apply_standard_settings(mconnect_native_ui)
-@@ -49,7 +54,7 @@ set_target_properties(mconnect-silica PROPERTIES
+@@ -49,7 +56,7 @@ set_target_properties(mconnect-silica PROPERTIES
    INSTALL_RPATH "$ORIGIN/../libexec/harbour-mconnect/lib")
  apply_standard_settings(mconnect-silica)
  target_compile_definitions(mconnect-silica PRIVATE MCONNECT_VERSION="${PROJECT_VERSION}")
@@ -141,12 +167,12 @@ index 1b201d5..cc5ea20 100644
    Qt5::Quick Qt5::Qml PkgConfig::SAILFISHAPP)
 
  if(MCONNECT_BUILD_TESTS OR MCONNECT_BUILD_COVER_TESTS)
-@@ -59,11 +64,11 @@ if(MCONNECT_BUILD_TESTS OR MCONNECT_BUILD_COVER_TESTS)
+@@ -59,11 +66,11 @@ if(MCONNECT_BUILD_TESTS OR MCONNECT_BUILD_COVER_TESTS)
    foreach(module qq_account qq kugou kugou_content kugou_account kugou_library
        bilibili account catalog content platforms storage music library core_service
        downloads login local_music lyric_document lyric_loader player runtime source_match mpris
 -      ui artwork lyrics lyrics_bridge core_transfer)
-+      ui artwork lyrics lyrics_bridge core_transfer presentation lifecycle)
++      ui artwork lyrics lyrics_bridge core_transfer presentation lifecycle car_content)
      add_executable(mconnect_native_${module}_test ../../test/native_${module}_test.cc)
      apply_standard_settings(mconnect_native_${module}_test)
      target_compile_options(mconnect_native_${module}_test PRIVATE -Wno-misleading-indentation)
@@ -259,7 +285,7 @@ index a859b67..8acc6be 100644
    int sequence_ = 0;
  };
 diff --git a/apps/mconnect/elinux/silica/main.cpp b/apps/mconnect/elinux/silica/main.cpp
-index 002277a..a70f083 100644
+index 002277a..9340e11 100644
 --- a/apps/mconnect/elinux/silica/main.cpp
 +++ b/apps/mconnect/elinux/silica/main.cpp
 @@ -4,6 +4,7 @@
@@ -270,17 +296,19 @@ index 002277a..a70f083 100644
  #include <QQmlContext>
  #include <QQmlEngine>
  #include <QQmlComponent>
-@@ -28,7 +29,9 @@
+@@ -28,7 +29,11 @@
  #include "native_activation.h"
  #include "native_mpris.h"
  #include "native_platforms.h"
 +#include "native_presentation.h"
  #include "native_runtime.h"
 +#include "sailplayprovider.h"
++#include "sailplaycontent.h"
++#include "native_car_content.h"
 
  namespace {
  volatile std::sig_atomic_t stopping = 0;
-@@ -401,27 +404,15 @@ bool ValidateDownloadRows(QObject* page) {
+@@ -401,27 +406,15 @@ bool ValidateDownloadRows(QObject* page) {
  }
  }
 
@@ -312,13 +340,14 @@ index 002277a..a70f083 100644
    std::signal(SIGTERM, stop);
    std::signal(SIGINT, stop);
    QTimer stopTimer;
-@@ -444,8 +435,12 @@ int main(int argc, char** argv) {
+@@ -444,8 +437,13 @@ int main(int argc, char** argv) {
        ? app.arguments().at(validateIndex + 1) : "/usr/share/harbour-mconnect/qml";
    auto bus = QDBusConnection::sessionBus();
    NativeActivation activation;
 -  WindowControl control;
 -  QObject::connect(&activation, &NativeActivation::showRequested, &control, &WindowControl::Show);
-+  SailplayProvider provider(bus, "harbour-mconnect", {}, {"media"});
++  SailplayProvider provider(bus, "harbour-mconnect", {{"content", SailplayContent::page("root", "Mconnect")}}, {"media", "content"});
++  NativeCarContent carContent(provider);
 +  NativePresentation control;
 +  // Export the SDK object before acquiring the activatable application name.
 +  // Cold-start clients can open their lease as soon as ownership is announced.
@@ -327,7 +356,7 @@ index 002277a..a70f083 100644
    if (!validate && !activation.start()) {
      auto call = QDBusMessage::createMethodCall("org.sailfishos.Mconnect", "/org/sailfishos/Mconnect",
          "org.sailfishos.Mconnect", background ? "EnsurePlayback" : "Show");
-@@ -506,7 +501,7 @@ QtObject {
+@@ -506,7 +504,7 @@ QtObject {
    view.setResizeMode(QQuickView::SizeRootObjectToView);
    view.rootContext()->setContextProperty("core", validate ? validationCore.get() : &bridge);
    view.rootContext()->setContextProperty("validationMode", validate);
@@ -336,7 +365,7 @@ index 002277a..a70f083 100644
    control.prepare = [&app, &view, &bridge, qmlDirectory, validate]() {
      if (!validate) bridge.start();
      if (view.source().isEmpty()) view.setSource(QUrl::fromLocalFile(qmlDirectory + "/main.qml"));
-@@ -1093,15 +1088,48 @@ QtObject {
+@@ -1093,15 +1091,50 @@ QtObject {
      fprintf(stderr,"SILICA_SEARCH_LAYOUT_PASS four-orientations mini-player empty-query empty-results both-types busy-error\n");
      fprintf(stderr,"SILICA_PLAYER_MENU_PASS page-top ownership full-width header-pointer-drag cover-lyrics\n");
      fprintf(stderr,"SILICA_VALIDATION_ISOLATED_CORE_PASS requests-use-fixture\n");
@@ -370,9 +399,11 @@ index 002277a..a70f083 100644
 +    auto media = runtime->player().snapshot();
 +    // D-Bus variants require a concrete type, including before a song is loaded.
 +    media["song"] = media.value("song").toMap();
-+    provider.publish({{"media", media}});
++    provider.publish({{"media", media}, {"content", carContent.root()}});
 +  };
++  carContent.attach(runtime->player());
 +  QObject::connect(&runtime->player(), &NativePlayer::changed, &provider, publish);
++  QObject::connect(&runtime->player(), &NativePlayer::queueChanged, &provider, publish);
 +  publish();
 +  QObject::connect(&control, &NativePresentation::idle, &app, [&]() {
 +    qInfo("MCONNECT_NATIVE_IDLE_EXIT");
@@ -386,11 +417,147 @@ index 002277a..a70f083 100644
    mpris.close();
    runtime->close();
    bus.unregisterObject("/org/sailfishos/Mconnect/Silica");
-@@ -1111,4 +1139,3 @@ QtObject {
+@@ -1111,4 +1144,3 @@ QtObject {
    activation.close();
    return result;
  }
 -#include "main.moc"
+diff --git a/apps/mconnect/elinux/silica/native_car_content.cpp b/apps/mconnect/elinux/silica/native_car_content.cpp
+new file mode 100644
+index 0000000..4f89d5b
+--- /dev/null
++++ b/apps/mconnect/elinux/silica/native_car_content.cpp
+@@ -0,0 +1,105 @@
++#include "native_car_content.h"
++#include "sailplaycontent.h"
++
++#include <QCryptographicHash>
++
++NativeCarContent::NativeCarContent(SailplayProvider& provider, QObject* parent)
++    : QObject(parent), provider_(provider) {
++  const auto browse = [this](qulonglong invocation, const QVariantMap& parameters) {
++    if (!player_) { provider_.fail(invocation, "Unavailable", "Music core is starting"); return; }
++    const auto page = this->browse(parameters);
++    if (page.isEmpty()) { provider_.fail(invocation, "NotFound", "Content folder is unavailable"); return; }
++    provider_.complete(invocation, {{"content", page}});
++  };
++  provider_.setActionHandler("content.browse", browse);
++  provider_.setActionHandler("content.search", browse);
++  provider_.setActionHandler("content.selectSong", [this](qulonglong invocation, const QVariantMap& parameters) {
++    if (!select(parameters)) { provider_.fail(invocation, "NotFound", "Queue item has changed"); return; }
++    provider_.complete(invocation, {{"selected", true}});
++  });
++}
++
++void NativeCarContent::attach(NativePlayer& player) {
++  player_ = &player;
++  connect(&player, &NativePlayer::queueChanged, this, [this]() { ++version_; });
++}
++
++QString NativeCarContent::songKey(const QVariantMap& song) const {
++  QByteArray bytes = song.value("platform").toString().toUtf8();
++  bytes.append('\0');
++  bytes.append(song.value("id").toString().toUtf8());
++  return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
++}
++
++QVariantMap NativeCarContent::root() const {
++  auto page = SailplayContent::page("root", tr("Mconnect"));
++  page["version"] = version_;
++  page["searchEnabled"] = true;
++  auto queue = SailplayContent::item("queue", tr("Playback queue"));
++  queue["subtitle"] = tr("%n song(s)", nullptr, player_ ? player_->playlist().size() : 0);
++  page["items"] = QVariantList{queue};
++  if (!player_) {
++    page["message"] = tr("Music core is starting");
++    page["messageKind"] = "info";
++  }
++  return page;
++}
++
++QVariantMap NativeCarContent::browse(const QVariantMap& parameters) const {
++  const bool search = parameters.contains("query");
++  if (!player_ || !SailplayContent::validQuery(parameters, search)) return {};
++  const auto identity = parameters.value("id").toString();
++  if (identity != "root" && identity != "queue") return {};
++  if (identity == "root" && !search) {
++    auto page = root();
++    const uint offset = parameters.value("offset").toUInt();
++    if (offset) page["items"] = QVariantList();
++    page["offset"] = offset;
++    return page;
++  }
++  const auto query = parameters.value("query").toString();
++  const auto songs = player_->playlist();
++  const quint64 offset = parameters.value("offset").toUInt();
++  const quint64 limit = parameters.value("limit").toUInt();
++  QVariantList items;
++  quint64 matched = 0;
++  for (int index = 0; index < songs.size(); ++index) {
++    const auto song = songs[index].toMap();
++    QStringList artists;
++    for (const auto& artist : song.value("artists").toList()) artists.append(artist.toMap().value("name").toString());
++    const auto title = song.value("name").toString();
++    const auto subtitle = artists.join(", ");
++    if (search && !title.contains(query, Qt::CaseInsensitive) && !subtitle.contains(query, Qt::CaseInsensitive)) continue;
++    if (matched >= offset && matched < offset + limit) {
++      const auto key = songKey(song);
++      auto item = SailplayContent::item(QString::number(index) + "-" + key,
++          title.isEmpty() ? tr("Unknown song") : title.left(1024), "action", "content.selectSong",
++          {{"index", uint(index)}, {"key", key}});
++      item["subtitle"] = subtitle.left(1024);
++      items.append(item);
++    }
++    ++matched;
++  }
++  auto page = SailplayContent::page(identity, search ? tr("Queue search") : tr("Playback queue"));
++  page["version"] = version_;
++  page["items"] = items;
++  page["searchEnabled"] = true;
++  page["offset"] = uint(offset);
++  page["hasMore"] = offset + items.size() < matched;
++  if (!matched) {
++    page["message"] = search ? tr("No matching songs") : tr("Playback queue is empty");
++    page["messageKind"] = "info";
++  }
++  return page;
++}
++
++bool NativeCarContent::select(const QVariantMap& parameters) {
++  if (!player_ || parameters.keys() != QStringList{"index", "key"}) return false;
++  const auto value = parameters.value("index");
++  if (value.type() != QVariant::UInt || parameters.value("key").type() != QVariant::String) return false;
++  const auto index = value.toUInt();
++  const auto songs = player_->playlist();
++  if (index >= uint(songs.size()) || songKey(songs[index].toMap()) != parameters.value("key").toString()) return false;
++  player_->playIndex(int(index));
++  return true;
++}
+diff --git a/apps/mconnect/elinux/silica/native_car_content.h b/apps/mconnect/elinux/silica/native_car_content.h
+new file mode 100644
+index 0000000..cd7fad7
+--- /dev/null
++++ b/apps/mconnect/elinux/silica/native_car_content.h
+@@ -0,0 +1,19 @@
++#pragma once
++
++#include "native_player.h"
++#include "sailplayprovider.h"
++
++class NativeCarContent : public QObject {
++  Q_OBJECT
++ public:
++  explicit NativeCarContent(SailplayProvider& provider, QObject* parent = nullptr);
++  void attach(NativePlayer& player);
++  QVariantMap root() const;
++  QVariantMap browse(const QVariantMap& parameters) const;
++  bool select(const QVariantMap& parameters);
++ private:
++  SailplayProvider& provider_;
++  NativePlayer* player_ = nullptr;
++  qulonglong version_ = 1;
++  QString songKey(const QVariantMap& song) const;
++};
 diff --git a/apps/mconnect/elinux/silica/native_core.cpp b/apps/mconnect/elinux/silica/native_core.cpp
 index 32a3995..c99a91e 100644
 --- a/apps/mconnect/elinux/silica/native_core.cpp
@@ -703,7 +870,7 @@ index 38b472e..c5e1cb4 100644
    QVariantMap songInfo(const QVariantMap& arguments);
    QVariantMap discoverySongs(const QVariantMap& arguments);
 diff --git a/apps/mconnect/rpm/harbour-mconnect.spec b/apps/mconnect/rpm/harbour-mconnect.spec
-index 1e658dc..a295fe6 100644
+index 1e658dc..51106ca 100644
 --- a/apps/mconnect/rpm/harbour-mconnect.spec
 +++ b/apps/mconnect/rpm/harbour-mconnect.spec
 @@ -10,9 +10,9 @@ Name:       harbour-mconnect
@@ -711,7 +878,7 @@ index 1e658dc..a295fe6 100644
  Summary:    Multi-platform music player for Sailfish OS
  Version:    1.6.0
 -Release:    51
-+Release:    53
++Release:    54
  Group:      Applications/System
 -License:    MIT
 +License:    MIT and GPLv3+
@@ -736,7 +903,7 @@ index 1e658dc..a295fe6 100644
  - Select download directories with the Sailfish folder picker.
  - Validate folder write access before saving the existing download root setting.
 diff --git a/apps/mconnect/rpm/harbour-mconnect.yaml.in b/apps/mconnect/rpm/harbour-mconnect.yaml.in
-index bf33ffa..081a0f7 100644
+index bf33ffa..356c9ea 100644
 --- a/apps/mconnect/rpm/harbour-mconnect.yaml.in
 +++ b/apps/mconnect/rpm/harbour-mconnect.yaml.in
 @@ -1,9 +1,9 @@
@@ -744,13 +911,87 @@ index bf33ffa..081a0f7 100644
  Summary: Multi-platform music player for Sailfish OS
  Version: 1.6.0
 -Release: 51
-+Release: 53
++Release: 54
  Group: Applications/System
 -License: MIT
 +License: MIT and GPLv3+
  URL: https://github.com/Hjdd14/Mconnect-Music_connect
  NoIconCache: true
  Sources:
+diff --git a/apps/mconnect/test/native_car_content_test.cc b/apps/mconnect/test/native_car_content_test.cc
+new file mode 100644
+index 0000000..cabe5c2
+--- /dev/null
++++ b/apps/mconnect/test/native_car_content_test.cc
+@@ -0,0 +1,68 @@
++#include "../elinux/silica/native_car_content.h"
++#include "sailplaycontent.h"
++
++#include <QCoreApplication>
++#include <QTemporaryDir>
++#include <cstdio>
++#include <cstdlib>
++
++#define CHECK(condition) do { if (!(condition)) { fprintf(stderr, "CAR_CONTENT_CHECK_FAILED line=%d %s\n", __LINE__, #condition); std::exit(1); } } while (false)
++
++namespace {
++QVariantMap song(const QString& id) {
++  return NativePlaybackSong({{"id", id}, {"platform", "qq"}, {"name", "歌曲 " + id}, {"durationMs", 100000},
++      {"artists", QVariantList{QVariantMap{{"id", "artist"}, {"name", "Artist"}}}}});
++}
++}
++
++int main(int argc, char** argv) {
++  QCoreApplication application(argc, argv);
++  QTemporaryDir temporary;
++  CHECK(temporary.isValid());
++  NativeStorage storage(temporary.path(), temporary.path() + "/cache");
++  QVariantList queue;
++  for (int index = 0; index < 125; ++index) queue.append(song(QString::number(index)));
++  storage.savePlaybackMemory({{"currentSong", queue.first()}, {"playlist", queue}, {"currentIndex", 0}});
++  NativeMusicServices music(storage);
++  NativeDownloads downloads(storage, music, nullptr, []() { return false; }, {}, false);
++  NativeLibrary library(storage);
++  NativePlayer player(storage, music, downloads, library);
++  SailplayProvider provider("harbour-mconnect", {{"content", SailplayContent::page()}}, {"content"});
++  NativeCarContent content(provider);
++  CHECK(provider.start());
++  CHECK(SailplayContent::validPage(content.root()));
++  CHECK(content.browse({{"id", "queue"}, {"offset", uint(0)}, {"limit", uint(50)}}).isEmpty());
++  content.attach(player);
++  CHECK(content.root().value("items").toList().first().toMap().value("id") == "queue");
++  const auto parameters = QVariantMap{{"id", "queue"}, {"offset", uint(0)}, {"limit", uint(50)}};
++  const auto first = content.browse(parameters);
++  CHECK(SailplayContent::validPage(first) && first.value("items").toList().size() == 50 && first.value("hasMore").toBool());
++  auto next = parameters;
++  next["offset"] = uint(100);
++  const auto final = content.browse(next);
++  CHECK(SailplayContent::validPage(final) && final.value("items").toList().size() == 25 && !final.value("hasMore").toBool());
++  auto search = parameters;
++  search["query"] = "歌曲 12";
++  CHECK(content.browse(search).value("items").toList().size() == 6);
++  search["query"] = "aRtIsT";
++  CHECK(content.browse(search).value("items").toList().size() == 50);
++  search["query"] = "absent";
++  CHECK(content.browse(search).value("messageKind") == "info");
++  auto invalid = parameters;
++  invalid["limit"] = uint(51);
++  CHECK(content.browse(invalid).isEmpty());
++  const auto selected = first.value("items").toList()[1].toMap().value("parameters").toMap();
++  auto wrong = selected;
++  wrong["key"] = "wrong";
++  CHECK(!content.select(wrong));
++  wrong = selected;
++  wrong["index"] = -1;
++  CHECK(!content.select(wrong));
++  CHECK(content.select(selected));
++  CHECK(player.currentSong().value("id") == "1");
++  player.playPlaylist({song("replacement")}, 0);
++  CHECK(!content.select(selected));
++  player.close();
++  provider.close();
++  fprintf(stderr, "CAR_CONTENT_PASS typed-pages pagination unicode search selected-song stale-queue\n");
++}
 diff --git a/apps/mconnect/test/native_lifecycle_test.cc b/apps/mconnect/test/native_lifecycle_test.cc
 new file mode 100644
 index 0000000..a0c3a06
@@ -1044,29 +1285,48 @@ index 840771b..39ffb0e 100644
      return QVariantMap{{"backend", "cpp-qq-catalog"}, {"songs", QVariantList{song("first"), song("second")}}};
    }, []() { return false; }, [](const QVariantMap&) { return QString(); });
 diff --git a/apps/mconnect/tools/verify-rpm.py b/apps/mconnect/tools/verify-rpm.py
-index 5d007e8..5eb102e 100644
+index 5d007e8..f082d50 100644
 --- a/apps/mconnect/tools/verify-rpm.py
 +++ b/apps/mconnect/tools/verify-rpm.py
-@@ -15,7 +15,7 @@ def rpm(*arguments):
+@@ -3,6 +3,7 @@
+ from pathlib import Path, PurePosixPath
+ import hashlib
+ import json
++import re
+ import subprocess
+ import sys
+ import tempfile
+@@ -15,7 +16,10 @@ def rpm(*arguments):
 
 
  identity = rpm('-qp', '--qf', '%{NAME} %{VERSION} %{RELEASE} %{ARCH}').split()
 -assert identity == ['harbour-mconnect', '1.6.0', '51', 'aarch64'], identity
-+assert identity == ['harbour-mconnect', '1.6.0', '53', 'aarch64'], identity
++specification = (Path(__file__).resolve().parents[1] / 'rpm/harbour-mconnect.spec').read_text()
++expected_identity = [re.search(r'^' + field + r':\s*(\S+)', specification, re.MULTILINE).group(1)
++                     for field in ('Name', 'Version', 'Release')] + ['aarch64']
++assert identity == expected_identity, identity
  files = rpm('-qlp').splitlines()
  for name in files:
      assert '..' not in PurePosixPath(name).parts, name
-@@ -149,6 +149,9 @@ with tempfile.TemporaryDirectory(prefix='mconnect-rpm-check-') as temporary:
+@@ -142,6 +146,7 @@ with tempfile.TemporaryDirectory(prefix='mconnect-rpm-check-') as temporary:
+     assert 'ExecDBus=' not in compatibility_desktop.read_text()
+     desktop = root / 'usr/share/applications/harbour-mconnect-silica.desktop'
+     assert 'ExecDBus=/usr/bin/harbour-mconnect-silica --background' in desktop.read_text()
++    assert 'X-Sailplay-ApplicationId=harbour-mconnect' in desktop.read_text()
+     for application in ('harbour-mconnect', 'harbour-mconnect-silica'):
+         desktop = root / f'usr/share/applications/{application}.desktop'
+         text = desktop.read_text()
+@@ -149,6 +154,9 @@ with tempfile.TemporaryDirectory(prefix='mconnect-rpm-check-') as temporary:
              f'Exec=/usr/bin/{application}',
              'X-Nemo-Single-Instance=no',
              'X-Sailplay-BackgroundService=org.sailfishos.Mconnect',
 +            'X-Sailplay-ApiVersion=1', 'X-Sailplay-Service=org.sailfishos.Mconnect',
 +            'X-Sailplay-ObjectPath=/org/sailplay/v1/App',
-+            'X-Sailplay-Presentation=template', 'X-Sailplay-Capabilities=media;',
++            'X-Sailplay-Presentation=template', 'X-Sailplay-Capabilities=media;content;',
              'Categories=AudioVideo;Audio;Music;Player;', 'Icon=harbour-mconnect',
              'X-Nemo-Application-Type=generic', '[X-Sailjail]',
              'OrganizationName=org.sailfishos', 'ApplicationName=Mconnect',
-@@ -161,6 +164,9 @@ with tempfile.TemporaryDirectory(prefix='mconnect-rpm-check-') as temporary:
+@@ -161,6 +169,9 @@ with tempfile.TemporaryDirectory(prefix='mconnect-rpm-check-') as temporary:
      silica_profile = root / 'etc/sailjail/permissions/harbour-mconnect-silica.profile'
      assert silica_profile.read_text() == 'include /etc/sailjail/permissions/harbour-mconnect.profile\n'
      profile_lines = profile.read_text().splitlines()
@@ -1076,3 +1336,11 @@ index 5d007e8..5eb102e 100644
      for value in (
          'dbus-user.own org.sailfishos.Mconnect.Core',
          'dbus-user.own org.sailfishos.Mconnect.Silica',
+@@ -254,6 +265,7 @@ with tempfile.TemporaryDirectory(prefix='mconnect-rpm-check-') as temporary:
+     native = native_path.read_bytes()
+     for marker in (
+         b'MCONNECT_NATIVE_CORE_STARTED', b'MCONNECT_NATIVE_BACKGROUND_READY',
++        b'org.sailplay.Content1', b'content.browse', b'content.search', b'content.selectSong',
+         b'org.mpris.MediaPlayer2.harbour_mconnect', b'/org/mpris/MediaPlayer2/track/t',
+         b'/org/sailfishos/Mconnect/Core', b'/org/sailfishos/Mconnect/Platforms',
+         b'/org/sailfishos/Mconnect/Artwork', b'loginBegin', b'localScan',

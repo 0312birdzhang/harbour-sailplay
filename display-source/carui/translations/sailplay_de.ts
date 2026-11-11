@@ -283,6 +283,42 @@ Musik auf dem Telefon starten</translation>
       <source>Cryptography and development tests</source>
       <translation>Kryptografie und Entwicklungstests</translation>
     </message>
+    <message>
+      <source>Load more</source>
+      <translation>Mehr laden</translation>
+    </message>
+    <message>
+      <source>Search</source>
+      <translation>Suchen</translation>
+    </message>
+    <message>
+      <source>Connecting content</source>
+      <translation>Verbindung zum Inhaltsdienst wird hergestellt</translation>
+    </message>
+    <message>
+      <source>Loading</source>
+      <translation>Wird geladen</translation>
+    </message>
+    <message>
+      <source>Content provider returned an invalid page</source>
+      <translation>Der Inhaltsanbieter hat eine ungültige Seite zurückgegeben</translation>
+    </message>
+    <message>
+      <source>Unsupported content provider</source>
+      <translation>Nicht unterstützter Inhaltsanbieter</translation>
+    </message>
+    <message>
+      <source>Content history limit reached</source>
+      <translation>Das Limit des Browserverlaufs wurde erreicht</translation>
+    </message>
+    <message>
+      <source>Browse</source>
+      <translation>Durchsuchen</translation>
+    </message>
+    <message>
+      <source>Content provider identity does not match its desktop declaration</source>
+      <translation>Die Identität des Inhaltsanbieters stimmt nicht mit seinem Anwendungseintrag überein</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

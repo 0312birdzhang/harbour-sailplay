@@ -333,7 +333,11 @@ Python `read_declaration` and `discover` helpers, and Qt
 accepts supported navigation templates. A tile or dock activation opens the
 backend and its car session through D-Bus. Selecting the app for the dashboard
 opens the compact guidance card. The expanded card offers an explicit stop
-control. Backend identity must match the desktop-file basename.
+control. Backend identity defaults to the desktop-file basename. An alias
+desktop entry can declare `X-Sailplay-ApplicationId` with the canonical backend
+identity while retaining its own launcher identity. Qt declarations expose
+`desktopId` and Python declarations expose `desktop_id` for the launcher.
+Identity validation uses the declared backend identity.
 
 Sailplay keeps the car session when the template is hidden and calls
 `SetActive(false)`. Projection teardown releases its D-Bus connection and session.
@@ -370,8 +374,88 @@ Mconnect uses the media session provider for its window/core separation.
 Organic Maps retains one framework, route, location source and writable state,
 while its phone window can be released and rebuilt. Its car presentation uses
 the navigation template. Dedicated map canvas rendering, Sailjail renderer
-permissions and Content1 templates remain subsequent stages.
+permissions remain subsequent stages. Content1 supplies the browsing template
+described below.
 [Organic Maps integration](https://github.com/0312birdzhang/harbour-sailplay/tree/master/sdk/integrations/organicmaps)
+
+## Content1 browsing template
+
+Declare `content;` in `X-Sailplay-Capabilities` and use the `template`
+presentation. Content-only applications open the browsing template through
+their tile and dock entries. Media applications retain the MPRIS player and
+offer a Browse control that opens the same template over their backend.
+
+The caller-owned session exports `org.sailplay.Content1`. `GetContent` and
+directed `ContentChanged` signals return a revision and a root page. The same
+root page appears under `Session1.state["content"]`. Root identity is `root`
+and its offset is zero.
+
+Every page contains these fields.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | Folder identity, up to 256 Unicode characters |
+| `title` | string | Page heading |
+| `version` | uint64 | Catalog generation, shared by the root and query results |
+| `items` | array of dictionaries | Up to 50 rows per reply |
+| `actions` | array of dictionaries | Up to four page action controls |
+| `searchEnabled` | boolean | Enables the host's search field |
+| `message` | string | Page status or explanatory message |
+| `messageKind` | string | `none`, `info`, `warning` or `error` |
+| `offset` | uint32 | Offset within this folder or search result |
+| `hasMore` | boolean | Further rows follow this reply |
+
+Rows contain `id`, `title`, `subtitle`, `kind`, `action`, `parameters` and
+`enabled`. Identity is unique within each list. Folder rows have kind `folder`
+and an empty action. Action rows have kind `action` and a named backend action
+with a typed parameter dictionary. Titles, subtitles and messages allow up to
+1024 Unicode characters. The host displays application text as plain text.
+Page controls use action rows. Python exports arrays with element signature
+`a{sv}`. Qt's QVariantList representation is also accepted.
+
+Providers implement two read-only asynchronous Session1 actions.
+
+- `content.browse` accepts `id`, `offset` and `limit`.
+- `content.search` accepts those fields plus a nonempty `query`, up to 256
+  Unicode characters.
+
+`limit` is a positive uint32 of at most 50. A successful query completes with
+`{"content": page}`. Its page identity and offset match the query. Increment
+the catalog version whenever a mutation can change query rows or their
+ordering, and publish the updated root. Query replies carry the version of
+the catalog they read. Keep media progress updates independent of that version.
+
+Sailplay holds browsing history, search and pagination in its presentation.
+Query results belong to the requesting session. It checks page bounds and
+identities, rejects duplicate rows, ignores superseded results and refreshes
+when a catalog changes. Pagination retains at most 500 rows in its current
+window, then advances to the next window. Hidden presentations retain their
+lease. Backend replacement clears cached pages and rebuilds the current folder
+from the new owner's root snapshot. A selected action uses the current
+application revision and completes through the existing request mechanism.
+
+Python `ContentBackend`, `ContentClient`, `content_page`, `content_item` and
+`wire_content` provide the service and model helpers. Qt providers add the
+`content` capability, publish a valid root and register both query handlers
+before calling `start()`. `SailplayContent` provides factories, validators and
+nested D-Bus decoding. The normal Sailjail profile grants directed
+`org.sailplay.Content1.ContentChanged` to `org.sailplay.Client.*`, alongside
+the existing Session1 state, request and property signals.
+
+The reference service demonstrates folders, pagination, search, selection
+and status messages.
+
+```sh
+PYTHONPATH=/opt/sailplay python3 /usr/share/sailplay-sdk/examples/content-service.py
+```
+
+Native Mconnect integrates its existing playback queue, queue search and song
+selection. Its normal MPRIS interface continues to handle playback controls.
+Selecting a queue row checks the index and song identity against the current
+queue before using the native player's existing selection operation.
+
+Content1 remains experimental while dedicated map rendering and physical
+phone/car acceptance continue.
 
 ## Validation
 
@@ -408,3 +492,14 @@ map CMake hook. It uses the production Sailfish bridge, full phone QML and an
 isolated copy of an installed offline map. It verifies window Close handling,
 repeated renderer destruction/recreation, route progress and recording
 statistics with the phone closed, saved recordings and explicit stop.
+
+`tests/test_content_sdk_unittest.py` validates page and query bounds and runs
+the reference service through two independent clients on a private bus.
+`tests/sdk_content_host_test.pro` exercises the production host, typed native
+provider, caller ownership, pagination, out-of-order search results, actions,
+messages, hidden leases and template geometry. Mconnect's
+`native_car_content` suite verifies real queue projection, Unicode search and
+rejection of stale song selections.
+The Qt host probe's `--python-provider` mode connects to the running reference
+content service and verifies typed dictionary arrays, pagination, search,
+selection and messages across the Python and Qt bindings.

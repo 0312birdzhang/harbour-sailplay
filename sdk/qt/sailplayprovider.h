@@ -91,9 +91,11 @@ private:
     Contract m_appContract;
     Contract m_sessionContract;
     Contract m_navigationContract;
+    Contract m_contentContract;
     qulonglong m_revision = 1;
     qulonglong m_nextInvocation = 0;
     bool m_navigation = false;
+    bool m_content = false;
     bool m_valid = false;
 };
 

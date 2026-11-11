@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Sailplay content example
+Exec=python3 /usr/share/sailplay-sdk/examples/content-service.py
+X-Sailplay-ApiVersion=1
+X-Sailplay-Service=org.example.SailplayContent
+X-Sailplay-ObjectPath=/org/sailplay/v1/App
+X-Sailplay-Capabilities=content;
+X-Sailplay-Presentation=template

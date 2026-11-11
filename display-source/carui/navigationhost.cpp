@@ -134,7 +134,7 @@ SailplayNavigationHost::~SailplayNavigationHost()
 void SailplayNavigationHost::open(const SailplayApplication &declaration, const QString &name)
 {
     if (!declaration.applicationId.isEmpty()
-        && declaration.applicationId == m_declaration.applicationId && m_error.isEmpty()) return;
+        && declaration.presentationId() == m_declaration.presentationId() && m_error.isEmpty()) return;
     close();
     m_declaration = declaration;
     m_name = name;

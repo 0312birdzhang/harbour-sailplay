@@ -49,6 +49,7 @@
 #include <cstdio>
 #include <sailfishapp.h>
 #include "navigationhost.h"
+#include "contenthost.h"
 #include "musichost.h"
 
 static const char *kSystemConfig = "/opt/sailplay/carui-apps.conf";
@@ -276,7 +277,7 @@ static void scanAvailableApps()
                 continue;
             a.name = name;
             a.sdk = SailplayApplication::fromDesktopFile(dir.filePath(fn));
-            if (a.sdk.declared && !a.sdk.navigationTemplate() && !a.sdk.mediaTemplate())
+            if (a.sdk.declared && !a.sdk.navigationTemplate() && !a.sdk.mediaTemplate() && !a.sdk.contentTemplate())
                 continue;
             a.exec = execIsRunnerStyle(exec) ? exec : extractBinary(exec);
             a.icon = resolveIcon(icon);
@@ -459,18 +460,22 @@ class CarUiController : public QObject
     Q_PROPERTY(QString lastMusicApp READ lastMusicApp NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString musicError READ musicError NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString lastMusicName READ lastMusicName NOTIFY rememberedMusicChanged)
+    Q_PROPERTY(bool musicContentAvailable READ musicContentAvailable NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString dashboardMapApp READ dashboardMapApp NOTIFY dashboardSettingsChanged)
     Q_PROPERTY(QObject *navigation READ navigation CONSTANT)
+    Q_PROPERTY(QObject *content READ content CONSTANT)
+    Q_PROPERTY(bool contentActive READ contentActive NOTIFY currentAppChanged)
     Q_PROPERTY(bool navigationActive READ navigationActive NOTIFY currentAppChanged)
     Q_PROPERTY(bool dashboardNavigationTemplate READ dashboardNavigationTemplate NOTIFY dashboardSettingsChanged)
 
 public:
     explicit CarUiController(QObject *parent = nullptr, bool projection = true)
         : QObject(parent), m_projection(projection), m_navigation(new SailplayNavigationHost(QString(), this)),
-          m_music(new SailplayMusicHost(this))
+          m_content(new SailplayContentHost(this)), m_music(new SailplayMusicHost(this))
     {
         connect(this, &CarUiController::currentAppChanged, this, [this]() {
             m_music->setActive(m_musicActive || m_dashboardActive);
+            m_content->setActive(contentActive());
         });
         connect(m_music, &SailplayMusicHost::errorOccurred, this, [this](const QString &message) {
             m_musicError = message;
@@ -574,9 +579,14 @@ public:
         return s.value(QStringLiteral("Dashboard/map")).toString();
     }
     QObject *navigation() const { return m_navigation; }
+    QObject *content() const { return m_content; }
+    bool contentActive() const {
+        return !m_currentApp.isEmpty() && m_currentApp == m_content->applicationId();
+    }
     void closeSessions() {
         m_navigation->close();
         m_music->close();
+        m_content->close();
     }
     bool navigationActive() const {
         return !m_currentApp.isEmpty() && m_currentApp == m_navigation->applicationId();
@@ -770,6 +780,14 @@ public:
         m_dashboardActive = false;
         m_musicActive = true;
         emit currentAppChanged();
+    }
+    Q_INVOKABLE void browseMusic() {
+        const AvailableApp *app = findAvailable(lastMusicApp());
+        if (app && app->sdk.contentTemplate()) openContent(*app);
+    }
+    bool musicContentAvailable() const {
+        const AvailableApp *app = findAvailable(lastMusicApp());
+        return app && app->sdk.contentTemplate();
     }
     QString musicError() const { return m_musicError; }
     Q_INVOKABLE bool ensureMusicBackend(const QString &requestedId = QString()) {
@@ -1231,6 +1249,7 @@ signals:
 private:
     bool m_projection;
     SailplayNavigationHost *m_navigation;
+    SailplayContentHost *m_content;
     SailplayMusicHost *m_music;
     QString musicApplicationId(const QString &id) const {
         if (findAvailable(id)) return id;
@@ -1473,6 +1492,21 @@ private:
         if (m_dashboardActive) m_returnToDashboard = true;
         else if (!m_musicActive && m_currentApp.isEmpty()) m_returnToDashboard = false;
     }
+    void openContent(const AvailableApp &app)
+    {
+        rememberShellOrigin();
+        if (!m_currentApp.isEmpty()) hideCurrent();
+        writeCmd(QStringLiteral("H"));
+        m_navigation->setActive(false);
+        m_dashboardActive = false;
+        m_musicActive = false;
+        m_content->setActive(true);
+        m_content->open(app.sdk, app.name);
+        m_currentApp = app.id;
+        moveToFront(app.id);
+        emit dockChanged();
+        emit currentAppChanged();
+    }
     void activate(const QString &appId, const QString &exec,
                   const QString &name)
     {
@@ -1485,6 +1519,10 @@ private:
         }
         rememberShellOrigin();
         const AvailableApp *available = findAvailable(appId);
+        if (available && available->sdk.contentTemplate() && !available->sdk.navigationTemplate() && m_projection) {
+            openContent(*available);
+            return;
+        }
         if (available && available->sdk.navigationTemplate() && m_projection) {
             if (!m_currentApp.isEmpty()) hideCurrent();
             writeCmd(QStringLiteral("H"));
@@ -1549,6 +1587,11 @@ private:
         writeCmd(QStringLiteral("H"));
         if (navigationActive()) {
             m_navigation->setActive(false);
+            m_currentApp.clear();
+            return;
+        }
+        if (contentActive()) {
+            m_content->setActive(false);
             m_currentApp.clear();
             return;
         }

@@ -218,6 +218,13 @@ Window {
                 carController.openMusic()
             }
             MouseArea { anchors.fill: parent; onClicked: musicCard.openMusic() }
+            Rectangle {
+                anchors.right: parent.right; anchors.rightMargin: 16; y: 12; z: 5
+                width: 164; height: 54; radius: 12; color: carPalette.button
+                visible: carController.musicActive && carController.musicContentAvailable
+                Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Browse"); font.pixelSize: 24; color: carPalette.text }
+                MouseArea { anchors.fill: parent; onClicked: carController.browseMusic() }
+            }
             MusicPlayer {
                 id: lockscreenMusic
                 compact: !carController.musicActive
@@ -380,6 +387,13 @@ Window {
                 MouseArea { anchors.fill: parent; onClicked: carController.ensureMusicBackend() }
             }
         }
+    }
+    ContentPage {
+        visible: carController.contentActive
+        x: dock.width + 16; y: 16
+        width: root.width - x - 16; height: root.height - 32
+        provider: carController.content
+        palette: carPalette
     }
     NavigationCard {
         visible: carController.navigationActive

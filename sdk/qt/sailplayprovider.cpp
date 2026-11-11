@@ -1,4 +1,5 @@
 #include "sailplayprovider.h"
+#include "sailplaycontent.h"
 
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
@@ -28,6 +29,7 @@ namespace {
 const QString appInterface = QStringLiteral("org.sailplay.App1");
 const QString sessionInterface = QStringLiteral("org.sailplay.Session1");
 const QString navigationInterface = QStringLiteral("org.sailplay.Navigation1");
+const QString contentInterface = QStringLiteral("org.sailplay.Content1");
 const QString propertiesInterface = QStringLiteral("org.freedesktop.DBus.Properties");
 const QString errorPrefix = QStringLiteral("org.sailplay.Error1.");
 
@@ -74,10 +76,14 @@ SailplayProvider::SailplayProvider(const QDBusConnection &bus, const QString &ap
     m_sessionContract = readContract(sessionInterface);
     m_navigation = capabilities.contains(QStringLiteral("navigation"));
     if (m_navigation) m_navigationContract = readContract(navigationInterface);
+    m_content = capabilities.contains(QStringLiteral("content"));
+    if (m_content) m_contentContract = readContract(contentInterface);
     m_valid = validString(applicationId) && validState(state)
         && !m_appContract.xml.isEmpty() && !m_sessionContract.xml.isEmpty()
         && (!m_navigation || (!m_navigationContract.xml.isEmpty()
-            && validGuidance(state.value(QStringLiteral("navigation")).toMap())));
+            && validGuidance(state.value(QStringLiteral("navigation")).toMap())))
+        && (!m_content || (!m_contentContract.xml.isEmpty()
+            && SailplayContent::validRoot(state.value(QStringLiteral("content")).toMap())));
     for (const QString &capability : capabilities) m_valid = m_valid && validString(capability);
     m_capabilities << QStringLiteral("state") << QStringLiteral("actions");
     m_capabilities.removeDuplicates();
@@ -172,6 +178,8 @@ bool SailplayProvider::start(const QString &path)
 {
     if (!m_path.isEmpty()) return path == m_path;
     if (!m_valid || (m_navigation && !m_actions.contains(QStringLiteral("navigation.stop")))
+        || (m_content && (!m_actions.contains(QStringLiteral("content.browse"))
+            || !m_actions.contains(QStringLiteral("content.search"))))
         || !m_bus.isConnected() || !path.startsWith(QLatin1Char('/'))
         || !m_bus.registerVirtualObject(path, this, QDBusConnection::SubPath)) return false;
     m_path = path;
@@ -202,7 +210,7 @@ int SailplayProvider::activeSessionCount() const
 QString SailplayProvider::introspect(const QString &path) const
 {
     if (path == m_path) return m_appContract.xml;
-    if (m_sessions.contains(path)) return m_sessionContract.xml + m_navigationContract.xml;
+    if (m_sessions.contains(path)) return m_sessionContract.xml + m_navigationContract.xml + m_contentContract.xml;
     return QString();
 }
 
@@ -251,6 +259,8 @@ bool SailplayProvider::handleMessage(const QDBusMessage &message, const QDBusCon
     }
     const QString interface = app ? appInterface : sessionInterface;
     if (message.interface() == propertiesInterface) {
+        if (!app && m_content && message.arguments().value(0).toString() == contentInterface)
+            return properties(message, connection, contentInterface, QVariantMap());
         const Session session = m_sessions.value(message.path());
         const QVariantMap values = app ? QVariantMap{
             {QStringLiteral("ApiVersion"), uint(1)}, {QStringLiteral("ApplicationId"), m_applicationId},
@@ -258,13 +268,16 @@ bool SailplayProvider::handleMessage(const QDBusMessage &message, const QDBusCon
             : QVariantMap{{QStringLiteral("Presentation"), session.presentation}, {QStringLiteral("Active"), session.active}};
         return properties(message, connection, interface, values);
     }
-    if (!app && m_navigation && message.interface() == navigationInterface) {
-        if (message.member() != QStringLiteral("GetGuidance")) return false;
-        if (message.signature() != m_navigationContract.methods.value(message.member()))
+    if (!app && ((m_navigation && message.interface() == navigationInterface)
+        || (m_content && message.interface() == contentInterface))) {
+        const bool navigation = message.interface() == navigationInterface;
+        const Contract &extension = navigation ? m_navigationContract : m_contentContract;
+        if (!extension.methods.contains(message.member())) return false;
+        if (message.signature() != extension.methods.value(message.member()))
             return errorReply(message, connection, QStringLiteral("org.freedesktop.DBus.Error.InvalidArgs"),
                               QStringLiteral("Method arguments do not match the SDK XML"));
         connection.send(message.createReply(QVariantList() << QVariant::fromValue(m_revision)
-            << m_state.value(QStringLiteral("navigation")).toMap()));
+            << m_state.value(navigation ? QStringLiteral("navigation") : QStringLiteral("content")).toMap()));
         return true;
     }
     if (message.interface() != interface) return false;
@@ -347,6 +360,7 @@ void SailplayProvider::sendSignal(const QString &path, const Session &session, c
 bool SailplayProvider::publish(const QVariantMap &state)
 {
     if (QThread::currentThread() != thread() || !validState(state) || !m_valid
+        || (m_content && !SailplayContent::validRoot(state.value(QStringLiteral("content")).toMap()))
         || (m_navigation && !validGuidance(state.value(QStringLiteral("navigation")).toMap()))) return false;
     if (state == m_state) return true;
     if (m_revision == std::numeric_limits<qulonglong>::max()) return false;
@@ -358,6 +372,9 @@ bool SailplayProvider::publish(const QVariantMap &state)
         if (m_navigation)
             sendSignal(session.key(), session.value(), navigationInterface, QStringLiteral("GuidanceChanged"),
                 QVariantList() << QVariant::fromValue(m_revision) << m_state.value(QStringLiteral("navigation")).toMap());
+        if (m_content)
+            sendSignal(session.key(), session.value(), contentInterface, QStringLiteral("ContentChanged"),
+                QVariantList() << QVariant::fromValue(m_revision) << m_state.value(QStringLiteral("content")).toMap());
     }
     return true;
 }
@@ -379,6 +396,10 @@ bool SailplayProvider::invoke(const QDBusMessage &message, const QDBusConnection
     const qulonglong requestId = arguments.first().toULongLong();
     const qulonglong expected = arguments.at(3).toULongLong();
     const QVariantMap parameters = qdbus_cast<QVariantMap>(arguments.at(2));
+    if (m_content && (action == QStringLiteral("content.browse") || action == QStringLiteral("content.search"))
+        && !SailplayContent::validQuery(parameters, action == QStringLiteral("content.search")))
+        return errorReply(message, connection, errorPrefix + QStringLiteral("InvalidArgument"),
+                          QStringLiteral("Invalid Content1 query"));
     if (requestId == 0 || !validState(parameters))
         return errorReply(message, connection, errorPrefix + QStringLiteral("InvalidArgument"),
                           QStringLiteral("A positive request ID and valid parameters are required"));

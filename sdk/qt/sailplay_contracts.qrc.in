@@ -3,5 +3,6 @@
     <file alias="org.sailplay.App1.xml">@SAILPLAY_SDK_INTERFACES@/org.sailplay.App1.xml</file>
     <file alias="org.sailplay.Session1.xml">@SAILPLAY_SDK_INTERFACES@/org.sailplay.Session1.xml</file>
     <file alias="org.sailplay.Navigation1.xml">@SAILPLAY_SDK_INTERFACES@/org.sailplay.Navigation1.xml</file>
+    <file alias="org.sailplay.Content1.xml">@SAILPLAY_SDK_INTERFACES@/org.sailplay.Content1.xml</file>
   </qresource>
 </RCC>

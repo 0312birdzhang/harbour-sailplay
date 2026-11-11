@@ -199,7 +199,7 @@ The proposed architecture establishes a clear separation of responsibilities:
 - [x] Mconnect window/core lifecycle separation using its current native runtime.
 - [x] One authoritative map backend with independent phone and car presentations through the navigation template.
 - [ ] Sandboxed dedicated renderer activation and Imira/input permission validation.
-- [ ] Content1 browsing, lists, search, actions and messages, with their host templates.
+- [x] Content1 browsing, lists, search, actions and messages, with their host templates.
 - [ ] Real Mconnect and map phone/car acceptance, followed by a second real navigation provider.
 
 ### Navigation SDK verification (2026-11-10)
@@ -239,3 +239,24 @@ The proposed architecture establishes a clear separation of responsibilities:
 ### Mconnect source publication (2026-11-11)
 
 - The complete native Mconnect application was published to `0312birdzhang/harbour-mconnect` on `main` at `0785280`, including the preceding native migration, Silica/QML presentation, release 53 lifecycle integration, bundled SDK and RPM inputs. The standalone checkout passed all 31 native host tests and verified the release 53 RPM. Its 649 source files were checked against the application snapshot and staged Git blobs. [Mconnect source commit](https://github.com/0312birdzhang/harbour-mconnect/commit/0785280)
+
+### Content SDK and Mconnect queue verification (2026-11-11)
+
+- Content1 now has canonical XML, bounded page and query models, Python provider/client helpers, Qt provider support and a car host template. Browsing history, search results and pagination belong to each presentation. Catalog versions remain independent of media progress, and caller-owned asynchronous operations handle page queries and selection. [Content SDK](sdk/README.md)
+- Mconnect release 54 exposes its existing playback queue and queue-local song/artist search through its existing service and player. Queue selection validates both the index and platform/song identity before calling the native player. Its visible `harbour-mconnect-silica` desktop entry declares the canonical `harbour-mconnect` backend identity. The guarded integration covers 29 native files and 11 SDK overlay files and passed baseline application, idempotence, mismatch rejection, rollback and concurrent-edit preservation. [Native integration](sdk/integrations/mconnect/README.md)
+- Host verification passed 350 unittest tests, 957 pytest tests and 550 subtests. The nine Content Python tests and all 32 Mconnect native suites passed. The production Qt ContentHost passed ownership, bounds, pagination, superseded-search handling, actions, messages, stable lists during media progress and hidden leases. Early AAC timeouts passed the isolated seven-test retry and subsequent complete suites.
+- Sailplay `0.1.1-65` and Mconnect `1.6.0-54` were built and installed on JollaPhone2026. Package checks verified 37 Sailplay SDK source files, four canonical XML contracts, the installed templates and AArch64 payloads. The installed native ContentHost and Mconnect queue fixtures passed. Installed Python clients and the Qt 5.6 host also passed typed dictionary-array transport, independent pages, pagination, search, selection and messages on a private bus.
+- Normal Sailjail activation exposed the real 32-song Mconnect queue. Queue search, rejection of a 51-row request, directed completions and Active notifications passed. An eleven-second hidden lease retained the same backend and preserved the song, playback state and position. The installed carui compatibility music identity, visible desktop/dock entry, Browse flow, queue search and Back passed at 1920x720, 1280x720 and 720x1280 with a hidden minimal-platform window. Hiding retained the lease for fourteen seconds, and graceful carui exit released its final leases before the same backend exited.
+- Device verification exposed an unavailable `GLib.unix_signal_add` API in the reference service and a stale source-directory `main.moc` that masked the new carui properties and methods. The service now uses the established signal handler pattern. The stale generated file was preserved privately, carui was rebuilt in a clean directory, and the installed retry passed without QML binding errors. Browse availability now has a change-notified property, and the content template handles its initial provider state.
+- Final checks matched the saved shell configuration, recent-app history and compositor command bytes. Playback memory differed only in `savedAt` and was restored under the native file lock and exact hash guards. All 28 saved Mconnect data files matched the baseline, all fixture directories were removed, and root RPM verification passed for Sailplay, Mconnect and Organic Maps. Sailplay remained active and enabled.
+- The complete release 54 Mconnect source was pushed to `0312birdzhang/harbour-mconnect` on `main` at `64b67c1`, with all 655 tracked source files. The remote branch matched the local commit. [Mconnect source commit](https://github.com/0312birdzhang/harbour-mconnect/commit/64b67c10049b6c1ffb4cc5c3ef22e768d6cc7b7e)
+
+The final AArch64 RPM SHA256 values are recorded below.
+
+- `harbour-sailplay-0.1.1-65.aarch64.rpm` has SHA256 `92afd8923368b0ff356f07e3f999dd6727e55c1f4b4358352895baa93d2f4f1e`.
+- `harbour-mconnect-1.6.0-54.aarch64.rpm` has SHA256 `b1d6fcc0effb60b22734f99de8d0780a042dea8f0165c539f9cdebe89ed4584f`.
+
+Dedicated map canvas rendering, sandboxed renderer/compositor/input validation,
+physical phone/vehicle acceptance and a second real navigation provider remain
+open. The real Mconnect browsing integration currently covers its playback queue
+and search within that queue.

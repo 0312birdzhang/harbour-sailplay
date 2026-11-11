@@ -2,7 +2,7 @@
 
 This patch targets the existing native C++/Silica 1.6.0-51 migration tree in
 `flutter-sailfishos/apps/mconnect`. `baseline.json` identifies each changed
-source file before and after integration. The integration produces release 53.
+source file before and after integration. The integration produces release 54.
 
 The native migration tree contains earlier local work beyond the upstream
 checkout at `82f09c4`. Use the native checkout matching the recorded hashes.
@@ -10,7 +10,7 @@ The patch and SDK overlay are published in Sailplay's repository so the
 lifecycle change can be reviewed independently.
 
 The complete native application includes the C++ core, Silica/QML interface,
-regression tests, RPM inputs and bundled SDK source. Release 53 is published
+regression tests, RPM inputs and bundled SDK source. Release 54 is published
 in the application's standalone repository.
 [Native Mconnect source](https://github.com/0312birdzhang/harbour-mconnect)
 
@@ -25,11 +25,12 @@ python3 sdk/integrations/mconnect/apply.py /path/to/flutter-sailfishos
 ```
 
 The script validates the source and patch hashes and copies the Qt provider,
-canonical App1/Session1/Navigation1 XML and SDK license into `elinux/sailplay-sdk`.
+canonical App1/Session1/Navigation1/Content1 XML, content helpers and SDK license
+into `elinux/sailplay-sdk`.
 Repeating the command verifies the applied state. Differing source or overlay
 files stop application. Git prepares the validated patch in an isolated tree
 with explicit LF settings. The installer checks every prepared hash, rechecks
-the source and writes the native files and eight SDK records atomically.
+the source and writes the native files and eleven SDK records atomically.
 Rollback after a failure restores this invocation's written files when their
 bytes still match the integration output. Concurrently created or modified
 files retain their contents.
@@ -43,10 +44,15 @@ licenses.
 
 The existing application identity owns App1 and caller-owned Session1 objects.
 SDK state contains a typed `media` dictionary with the native player snapshot.
+The `content` capability projects the existing playback queue, queue search,
+pagination and song selection. Catalog versions change with queue updates,
+independently of playback progress. A selected item checks its current index
+and song identity before calling the native player's selection operation.
+Each host presentation retains its own browsing history and query results.
 Playback commands use MPRIS. The SDK provider rejects unavailable actions with
 the v1 `NotSupported` error.
 
-The Sailjail profile permits directed SDK state, completion, guidance and
+The Sailjail profile permits directed SDK state, completion, guidance, content and
 Session1 property-change members to the clients' temporary
 `org.sailplay.Client.*` names. The Qt and Python clients acquire their name
 before activating the backend. Sessions

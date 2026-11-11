@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=org.example.SailplayContent
+Exec=/usr/bin/python3 /usr/share/sailplay-sdk/examples/content-service.py
