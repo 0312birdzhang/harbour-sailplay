@@ -2,7 +2,7 @@
 
 This patch targets the existing native C++/Silica 1.6.0-51 migration tree in
 `flutter-sailfishos/apps/mconnect`. `baseline.json` identifies each changed
-source file before and after integration. The integration produces release 54.
+source file before and after integration. The integration produces release 55.
 
 The native migration tree contains earlier local work beyond the upstream
 checkout at `82f09c4`. Use the native checkout matching the recorded hashes.
@@ -10,7 +10,7 @@ The patch and SDK overlay are published in Sailplay's repository so the
 lifecycle change can be reviewed independently.
 
 The complete native application includes the C++ core, Silica/QML interface,
-regression tests, RPM inputs and bundled SDK source. Release 54 is published
+regression tests, RPM inputs and bundled SDK source. Release 55 is published
 in the application's standalone repository.
 [Native Mconnect source](https://github.com/0312birdzhang/harbour-mconnect)
 
@@ -63,13 +63,16 @@ platform and input plugins.
 
 Closing the phone window releases the phone QML tree and suspends its polling.
 Show and MPRIS Raise attach a new phone presentation to the existing core.
-Playback, download queues and retries, login calls, scans, lyric loading and
-accepted core/bridge requests retain the core. Hidden car sessions keep their
-lease. Session owner loss removes those leases.
+Closing without a car session exits through normal runtime shutdown, including
+during playback and other work. Hidden car sessions keep their lease after the
+phone closes. Session owner loss removes those leases.
 
-The core exits after ten idle seconds once the phone presentation, leases and
-work have ended. The exit callback checks current activity again. Explicit
-pause retains paused playback while a car lease exists.
+After serving a car, the core exits when its last lease ends if the phone view
+is closed or has never been opened. A phone view still open at disconnect
+retains the application. Initial background startup keeps its ten-second idle
+grace and work check until its first session arrives. The exit callback checks
+current activity again. Explicit pause retains paused playback while a car
+lease exists.
 
 ## Validation
 

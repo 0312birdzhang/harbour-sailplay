@@ -181,8 +181,6 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
   fix.m_horizontalAccuracy = 5;
   fix.m_speed = 15;
   fix.m_timestamp = QDateTime::currentMSecsSinceEpoch() / 1000.0;
-  static_cast<location::LocationObserver &>(mapCore).OnLocationUpdated(fix);
-  Check(framework.GetCurrentPosition().has_value(), "headless location has no authoritative position");
   routing->planRoute(sailfish::Routing::Vehicle,
                     {QVariantMap{{"lat", fix.m_latitude}, {"lon", fix.m_longitude}, {"name", "Start"}},
                      QVariantMap{{"lat", 23.137}, {"lon", 113.632}, {"name", QString::fromUtf8("测试目的地 🌍")}}});
@@ -190,7 +188,16 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
   Check(routing->canStart(), "offline route failed to build");
   routing->acceptDisclaimer();
   routing->start();
+  WaitFor([&] { return routing->waitingForPosition(); });
+  Check(!routing->navigating() && !routing->built(), "navigation started without a current position");
+  Check(routing->errorTitle() == appInfo.localized("current_location_unknown_error_title"),
+        "missing fix was reported as disabled location");
+  // The backend has no phone or car window here. Waiting for a fix must still subscribe to GPS,
+  // and the user's start request must survive the failed rebuild.
+  static_cast<location::LocationObserver &>(mapCore).OnLocationUpdated(fix);
+  Check(framework.GetCurrentPosition().has_value(), "headless location has no authoritative position");
   WaitFor([&] { return routing->navigating(); }, 60000);
+  std::puts("MAP_POSITION_WAIT_RECOVERY_PASS headless-wait valid-fix rebuild automatic-navigation");
   mapCore.setSimulatingLocation(true);
   mapCore.startTrackRecording();
   WaitFor([&] { return !framework.IsTrackRecordingEmpty(); });
@@ -243,20 +250,29 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
   auto const frame = [&]
   {
     QVariantMap result;
-    WaitFor([&]
+    QImage image;
+    QSet<QRgb> colors;
+    auto const fetch = [&]
     {
       result = canvas.Frame(QSize(640, 360));
-      return !result.value("image").toByteArray().isEmpty();
-    });
-    auto const image = QImage::fromData(result.value("image").toByteArray(), "JPEG");
+      image = QImage::fromData(result.value("image").toByteArray(), "JPEG");
+      colors.clear();
+      if (image.isNull())
+        return;
+      for (int y = 0; y < image.height(); y += 16)
+        for (int x = 0; x < image.width(); x += 16)
+          colors.insert(image.pixel(x, y));
+    };
+    // Match the production host's 5 Hz requests, including during GeoClue's nested event loop.
+    QTimer requests;
+    QObject::connect(&requests, &QTimer::timeout, fetch);
+    requests.start(200);
+    fetch();
+    WaitFor([&] { return colors.size() > 4; }, 60000);
+    requests.stop();
     Check(!image.isNull() && image.width() == result.value("width").toInt() &&
           image.height() == result.value("height").toInt(), "canvas returned invalid pixels");
     Check(image.width() > 0 && image.height() > 0, "canvas frame has no dimensions");
-    QSet<QRgb> colors;
-    for (int y = 0; y < image.height(); y += 16)
-      for (int x = 0; x < image.width(); x += 16)
-        colors.insert(image.pixel(x, y));
-    Check(colors.size() > 4, "canvas frame is blank");
     std::fprintf(stderr, "MAP_CANVAS_FRAME width=%d height=%d colors=%d phone=%d\n",
                  image.width(), image.height(), colors.size(), presentation.isOpen());
   };

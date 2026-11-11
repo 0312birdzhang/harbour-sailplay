@@ -1,13 +1,13 @@
 {
   "baseline": "Native C++/Silica migration 1.6.0-51 with preceding local migration work",
   "upstream_commit": "82f09c4",
-  "release": "1.6.0-54",
-  "patch_sha256": "2c69ca19d8db6d8958edffe93ea7ef51b52d0dc97664c06433913165f67ef1f5",
+  "release": "1.6.0-55",
+  "patch_sha256": "8770c6187dfa51d2fd829aefd1c32516151510203b1eab1db71d7a2ac069bce6",
   "files": [
     {
       "path": "apps/mconnect/docs/sailplay-background.md",
       "before_sha256": "392a519e18246e74a19ddb5b24063aa9692e167f6100afb88b2c590837a0407f",
-      "after_sha256": "74b6d4a72de5cdd6b22763a47def69bf98d7a2c99a25e6e398e3d99d3f6a208b"
+      "after_sha256": "70161e1fcedf201224cccd82d02fe561ee9801b89d5471cc6fe24ad552660b16"
     },
     {
       "path": "apps/mconnect/elinux/harbour-mconnect-silica.desktop",
@@ -42,7 +42,7 @@
     {
       "path": "apps/mconnect/elinux/silica/main.cpp",
       "before_sha256": "3874ba276a9e8e1ad442440ebf351a44a9a6059a4eb478c90a0b21dd05ac6504",
-      "after_sha256": "730127bc2023da04d09d008c0add2bd434db05e01b528f41bd84b9397b9ef8a3"
+      "after_sha256": "e818c3e02c1d9b3969fcba89f326817b412518298d8b463cfc1c89f0961beb5d"
     },
     {
       "path": "apps/mconnect/elinux/silica/native_car_content.cpp",
@@ -97,12 +97,12 @@
     {
       "path": "apps/mconnect/elinux/silica/native_presentation.cpp",
       "before_sha256": null,
-      "after_sha256": "6f72f519b9aa61cc5d795d003a458586ba1e2e46f942f73ce2b075953dd84e31"
+      "after_sha256": "4289a80e43c36eacf777ccc3d1eb6005e4b521fae0fc575cdae59e14789c5c55"
     },
     {
       "path": "apps/mconnect/elinux/silica/native_presentation.h",
       "before_sha256": null,
-      "after_sha256": "0c6c7e8c18ee20f97332747e70d09da2137deca3dbe46a2fb76231d2734fec38"
+      "after_sha256": "d0aaedd3d732239e5aa6635a51952fb51ded86136b06b9d7b800892023c8e384"
     },
     {
       "path": "apps/mconnect/elinux/silica/native_runtime.cpp",
@@ -117,12 +117,12 @@
     {
       "path": "apps/mconnect/rpm/harbour-mconnect.spec",
       "before_sha256": "1f653fa2a22f145b079bd618dbdf2544add4b479d1a441a02b86433d1eff1bb5",
-      "after_sha256": "34943d5a2f42bfa73ac0701ac78a3ff26fc1226eaa76bd8525a7a00369861d8b"
+      "after_sha256": "276324f972f3eb914813af7d157f29873cfe62ac80e89159fa83adbb95a45a5d"
     },
     {
       "path": "apps/mconnect/rpm/harbour-mconnect.yaml.in",
       "before_sha256": "d3ceb10e0825ab257880a39fe89d0c76572dda6e3e67b2cf320b1a59dca82805",
-      "after_sha256": "83a87de04ddc16a0121da58ba1b579ad6f6cbb83d3871971685ff985e48f7c72"
+      "after_sha256": "7665eda64acc45021bc975d9af2564ab8716576712ec540a62e9a63b52a5951d"
     },
     {
       "path": "apps/mconnect/test/native_car_content_test.cc",
@@ -132,12 +132,12 @@
     {
       "path": "apps/mconnect/test/native_lifecycle_test.cc",
       "before_sha256": null,
-      "after_sha256": "806e66baaa524fcd164cadcc7db7076ab00b1e25709db5b480dbbff003f6671e"
+      "after_sha256": "754a96e9855225f1263cd17add42be375d6a7006c6c0108322ffaa68b2d32a3d"
     },
     {
       "path": "apps/mconnect/test/native_presentation_test.cc",
       "before_sha256": null,
-      "after_sha256": "8d27acede0400e126b39a30b219e633d4a47f849d3864d22c7a19489ea2a7122"
+      "after_sha256": "141aa6f1a8a8ba77885b53223389920ad4d3ea307d9c4d01a1860bd351e1cc61"
     },
     {
       "path": "apps/mconnect/test/native_ui_test.cc",

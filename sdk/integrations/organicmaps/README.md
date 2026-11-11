@@ -14,7 +14,7 @@ The patch targets the Sailfish source at
 `abcdd8c3d518973d74d1d967c1f6d6ba34e500bf`. `baseline.json` records the patch
 digest, source commit and before/after hashes of every changed file. The
 downstream repository also contains the integrated source.
-The current integrated source is `74014dcf5467d4d3a5e99a4099dfd7f77e5cc16e`.
+The current integrated source is `c3ede46460911d4431ed8616ced8e8e287c172db`.
 [Organic Maps Sailfish source](https://github.com/0312birdzhang/organicmaps-sailfish/tree/sailfish)
 
 Apply `lifecycle.patch` from a clean checkout at that baseline. Use a native Git
@@ -72,6 +72,13 @@ surfaces and waits for both before continuing, covering EGL bridges whose
 fallback-window mapping table needs serialized surface creation.
 Location fixes, routing, recording statistics, notifications and accepted
 SDK actions continue in the backend.
+
+Active car canvases and routes waiting for a current position retain location
+requests independently of the map's follow mode and phone visibility. The
+Qt 5 GeoClue subscription starts after the current GUI call returns and cancels
+a pending start on Stop. A start-navigation request survives a missing-position
+rebuild and resumes when a valid fix arrives. Missing fixes use the current
+location unknown message. Explicit route close cancels the pending request.
 
 Hidden car sessions retain their lease. Caller loss releases those sessions.
 The backend exits after ten idle seconds once its phone presentation, leases

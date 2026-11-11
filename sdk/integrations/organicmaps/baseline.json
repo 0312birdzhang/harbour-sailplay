@@ -1,9 +1,9 @@
 {
   "source_repository": "https://github.com/0312birdzhang/organicmaps-sailfish",
   "baseline_commit": "abcdd8c3d518973d74d1d967c1f6d6ba34e500bf",
-  "integrated_commit": "74014dcf5467d4d3a5e99a4099dfd7f77e5cc16e",
+  "integrated_commit": "c3ede46460911d4431ed8616ced8e8e287c172db",
   "patch": "lifecycle.patch",
-  "patch_sha256": "8a40e5e265ff6586bce09b93d9249e35f78fd5dc454accfadddd40307a592122",
+  "patch_sha256": "7a580091328b34343b17c4188d86d8b34615f95065f04a2007190f2ded77411f",
   "files": [
     {
       "path": "libs/map/framework.cpp",
@@ -34,6 +34,16 @@
       "path": "libs/map/routing_manager.hpp",
       "before": "59fb3fe39150a396c200860404b0b35bd45ae339ab0a52675d3024474ba387ca",
       "after": "deea838be0778929b14d3d4fc523a579d59901492b70cdb8a2f8728647440df0"
+    },
+    {
+      "path": "libs/platform/location_service/qt_location_service.cpp",
+      "before": "9abbc6f633c41c07d5a380d5777bfd48cfa0a80d4f8ec3d5fbbd8464bc2735a7",
+      "after": "a74e727299fee014b78e2a095d1ee628194447ab06a4db740caefee81319f3d3"
+    },
+    {
+      "path": "libs/platform/location_service/qt_location_service.hpp",
+      "before": "03f40c22e28d4a8a1715f4ec546c930b57187750f8b2c72ed7944a0941017710",
+      "after": "4695e5fe29bedc9339c4a610eefd0c0f859731f3e92ebeeea18bd1e9051e9039"
     },
     {
       "path": "qt/qt_common/qtoglcontext.cpp",
@@ -78,7 +88,7 @@
     {
       "path": "sailfish/map_item.cpp",
       "before": "441da60c388f782ebf4416015f7eb8df90fc9737e4af0f08d23e5d3da3e3c887",
-      "after": "5ba48a19817520a015c35fe0e99a13082093149b9f1edc91e924b89911ccfc38"
+      "after": "d39ee8b7682896600dbe85212b1e0e952983db0de59e454e92957e985de7e06e"
     },
     {
       "path": "sailfish/map_item.hpp",
@@ -128,7 +138,7 @@
     {
       "path": "sailfish/qml/Backend.qml",
       "before": null,
-      "after": "b0b30db8d0e603c2ef65ff1062029dbea21dc0ad8b1a22daeed94b56d364426e"
+      "after": "9d69e3e5db64ed169184423eeb68aa2a67b83e3abf181d2d95b0f4d5a45f5deb"
     },
     {
       "path": "sailfish/qml/organicmaps.qml",
@@ -143,12 +153,12 @@
     {
       "path": "sailfish/routing.cpp",
       "before": "bb556ca01704c5d3370064b3a9ea71b9adfcc6aa0359b986de764c3c427fa8b5",
-      "after": "f8123fc8ea4987053ed06931717e6eeb0f62301b61d37f6ff906c78c802c5334"
+      "after": "af03930682ca25c3829bb2cc2b8e42ad02feb5f738143d463cc25d2720d9c7d0"
     },
     {
       "path": "sailfish/routing.hpp",
       "before": "6d76c13419dba48b9de14e58994353af0e85c6567d525d74940486c4892f5393",
-      "after": "cea258e194afcca0a1ea3971563ef4e4ad42cc7abc2558125d5b6e980cc84bcc"
+      "after": "e6ba1841a02aa7a0ba7d2714acf61c0bc0d5594a81b78d70fa3f0fbdbdd7cd65"
     },
     {
       "path": "sailfish/rpm/organicmaps.spec",
@@ -168,7 +178,7 @@
     {
       "path": "sailfish/sailplay_map_canvas.cpp",
       "before": null,
-      "after": "50877bb5056f78184a9e06548e132e04e6462e4d15f1f30f96223a319c481bc2"
+      "after": "66a0bae026b2ecffb57e61bf6bee86ad54fd7bcef99f601264b2bbc45d059268"
     },
     {
       "path": "sailfish/sailplay_map_canvas.hpp",

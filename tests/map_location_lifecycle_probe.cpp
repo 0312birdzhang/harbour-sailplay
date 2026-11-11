@@ -30,12 +30,18 @@ int main(int argc, char ** argv)
   if (observer.fixes != 1 || observer.source != location::EGeoClue) return 2;
   service.Stop();
   int const errors = observer.errors;
+  QCoreApplication::processEvents();
   service.OnLocationUpdate(fix);
   service.OnErrorOccurred(QGeoPositionInfoSource::AccessError);
   if (observer.fixes != 1 || observer.errors != errors) return 3;
   service.Start();
   service.OnLocationUpdate(fix);
   service.Stop();
+  QCoreApplication::processEvents();
   if (observer.fixes != 2) return 4;
+  service.Start();
+  service.Stop();
+  QCoreApplication::processEvents();
+  if (observer.fixes != 2 || observer.errors != errors) return 5;
   std::puts("GEOCLUE_STOP_QUEUED_CALLBACK_RESTART_OK");
 }

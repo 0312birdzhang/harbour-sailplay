@@ -276,6 +276,75 @@ index 8260db8f..673180e6 100644
    /// \brief It saves route points to file.
    void SaveRoutePoints();
    /// \brief It deletes file with saved route points if it exists.
+diff --git a/libs/platform/location_service/qt_location_service.cpp b/libs/platform/location_service/qt_location_service.cpp
+index 45a529ca..68410649 100644
+--- a/libs/platform/location_service/qt_location_service.cpp
++++ b/libs/platform/location_service/qt_location_service.cpp
+@@ -122,6 +122,19 @@ QtLocationService::QtLocationService(location::LocationObserver & observer, std:
+
+   m_positionSource->setUpdateInterval(1000);
+   m_positionSource->setPreferredPositioningMethods(QGeoPositionInfoSource::AllPositioningMethods);
++#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
++  m_startTimer.setSingleShot(true);
++  connect(&m_startTimer, &QTimer::timeout, this, [this]
++  {
++    if (!m_started)
++      return;
++    m_clientIsActive = true;
++    m_positionSource->startUpdates();
++    // GeoClue 1's synchronous D-Bus calls can dispatch Stop() while subscribing.
++    if (!m_started)
++      m_positionSource->stopUpdates();
++  });
++#endif
+ }
+
+ void QtLocationService::OnLocationUpdate(QGeoPositionInfo const & info)
+@@ -177,9 +190,10 @@ void QtLocationService::Start()
+     // and can't get a lock within Qt's default `UPDATE_TIMEOUT_COLDSTART` (currently 2 minutes).
+     m_positionSource->requestUpdate(1800000);
+ #else
+-    // Qt 5's GeoClue 1 plugin emits a timeout at once from requestUpdate() without a fix, so subscribe right away.
+-    m_positionSource->startUpdates();
++    // Qt 5's GeoClue 1 plugin times out immediately from requestUpdate() without a fix. Use continuous updates.
++    // Starting can enter a nested event loop. Let the caller finish attaching its renderer first.
+     m_clientIsActive = true;
++    m_startTimer.start(0);
+ #endif
+   }
+ }
+@@ -187,6 +201,9 @@ void QtLocationService::Start()
+ void QtLocationService::Stop()
+ {
+   m_started = false;
++#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
++  m_startTimer.stop();
++#endif
+   if (m_positionSource && m_clientIsActive)
+   {
+     LOG(LDEBUG, ("Stopping Updates from:", m_positionSource->sourceName().toStdString()));
+diff --git a/libs/platform/location_service/qt_location_service.hpp b/libs/platform/location_service/qt_location_service.hpp
+index 0d541732..a83eb613 100644
+--- a/libs/platform/location_service/qt_location_service.hpp
++++ b/libs/platform/location_service/qt_location_service.hpp
+@@ -3,6 +3,7 @@
+ #include "platform/location_service/location_service.hpp"
+
+ #include <QGeoPositionInfoSource>
++#include <QTimer>
+
+ class QtLocationService
+   : public QObject
+@@ -18,6 +19,9 @@ class QtLocationService
+   bool m_clientIsActive = false;
+   // Signals queued before Stop() still arrive afterwards.
+   bool m_started = false;
++#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
++  QTimer m_startTimer;
++#endif
+
+ public:
+   explicit QtLocationService(location::LocationObserver &, std::string const &);
 diff --git a/qt/qt_common/qtoglcontext.cpp b/qt/qt_common/qtoglcontext.cpp
 index bf8056b5..7da7f901 100644
 --- a/qt/qt_common/qtoglcontext.cpp
@@ -937,10 +1006,18 @@ index 587404ec..43720d81 100644
    QTimer m_backupTimer;
  };
 diff --git a/sailfish/map_item.cpp b/sailfish/map_item.cpp
-index c3cc0025..5c39b625 100644
+index c3cc0025..47054490 100644
 --- a/sailfish/map_item.cpp
 +++ b/sailfish/map_item.cpp
-@@ -118,6 +118,9 @@ MapItem::MapItem(QQuickItem * parent)
+@@ -111,6 +111,7 @@ MapItem::MapItem(QQuickItem * parent)
+   connect(qGuiApp, &QGuiApplication::applicationStateChanged, this, &MapItem::OnApplicationStateChanged);
+   connect(this, &QQuickItem::visibleChanged, this, &MapItem::UpdateRenderingState);
+   connect(m_routing.get(), &Routing::navigatingChanged, this, [this] { UpdateLocationService(); });
++  connect(m_routing.get(), &Routing::stateChanged, this, [this] { UpdateLocationService(); });
+
+   m_storageSlot = m_framework.GetStorage().Subscribe([this](storage::CountryId const &) {
+     UpdateCurrentCountry();
+@@ -118,6 +119,9 @@ MapItem::MapItem(QQuickItem * parent)
 
    m_simulationTimer.setInterval(1000);
    connect(&m_simulationTimer, &QTimer::timeout, this, &MapItem::SimulateLocation);
@@ -950,7 +1027,7 @@ index c3cc0025..5c39b625 100644
  }
 
  MapItem::~MapItem()
-@@ -130,14 +133,21 @@ MapItem::~MapItem()
+@@ -130,14 +134,21 @@ MapItem::~MapItem()
    m_framework.SetUserPositionListener(nullptr);
    m_framework.GetStorage().Unsubscribe(m_storageSlot);
    m_locationService->Stop();
@@ -972,14 +1049,17 @@ index c3cc0025..5c39b625 100644
  }
 
  void MapItem::zoomIn()
-@@ -156,6 +166,37 @@ void MapItem::switchMyPositionMode()
+@@ -156,6 +167,40 @@ void MapItem::switchMyPositionMode()
      m_framework.SwitchMyPositionNextMode();
  }
 
 +void MapItem::SetCarViewActive(bool active)
 +{
++  if (active == m_carViewActive)
++    return;
 +  m_carViewActive = active;
 +  UpdateRenderingState();
++  UpdateLocationService();
 +}
 +
 +QImage MapItem::CaptureCarFrame(QOpenGLFunctions & functions)
@@ -1010,7 +1090,27 @@ index c3cc0025..5c39b625 100644
  int MapItem::enabledLayers() const
  {
    int mask = 0;
-@@ -564,8 +605,12 @@ void MapItem::OnWindowChanged(QQuickWindow * window)
+@@ -219,14 +264,15 @@ void MapItem::OnMyPositionModeChanged(location::EMyPositionMode mode)
+ void MapItem::UpdateLocationService(bool restart)
+ {
+   bool const active = m_framework.IsTrackRecordingEnabled() || m_routing->navigating() ||
++                      m_routing->waitingForPosition() || m_carViewActive ||
+                       (!m_inBackground && m_myPositionMode != location::NotFollowNoPosition);
+-  if (active && (restart || !m_locationActive))
++  bool const wasActive = std::exchange(m_locationActive, active);
++  if (active && (restart || !wasActive))
+     m_locationService->Start();
+-  else if (!active && m_locationActive)
++  else if (!active && wasActive)
+     m_locationService->Stop();
+-  m_locationActive = active;
+
+-  if (active && !m_inBackground)
++  if (m_locationActive && !m_inBackground)
+     m_compass->start();
+   else
+     m_compass->stop();
+@@ -564,8 +610,12 @@ void MapItem::OnWindowChanged(QQuickWindow * window)
    {
      connect(window, &QWindow::visibleChanged, this, &MapItem::UpdateRenderingState, Qt::UniqueConnection);
      CreateEngine();
@@ -1024,7 +1124,7 @@ index c3cc0025..5c39b625 100644
  }
 
  void MapItem::OnApplicationStateChanged(Qt::ApplicationState)
-@@ -580,8 +625,10 @@ void MapItem::UpdateRenderingState()
+@@ -580,8 +630,10 @@ void MapItem::UpdateRenderingState()
    // follows the app process, which Sailplay retires on session end.
    bool const projected = qgetenv("WAYLAND_DISPLAY").contains("imira-comp") &&
                           qgetenv("SAILPLAY_NAVIGATION_EXPORT") == "1";
@@ -1037,7 +1137,7 @@ index c3cc0025..5c39b625 100644
      return;
 
    m_inBackground = inBackground;
-@@ -639,7 +686,6 @@ void MapItem::CreateEngine()
+@@ -639,7 +691,6 @@ void MapItem::CreateEngine()
 
    m_framework.SetMyPositionModeListener([this](location::EMyPositionMode mode, bool /* routingActive */)
    { OnMyPositionModeChanged(mode); });
@@ -1045,7 +1145,7 @@ index c3cc0025..5c39b625 100644
    m_framework.GetIsolinesManager().SetStateListener([this](IsolinesManager::IsolinesState state)
    {
      GetPlatform().RunTask(Platform::Thread::Gui, [self = QPointer<MapItem>(this), state]
-@@ -658,6 +704,7 @@ void MapItem::CreateEngine()
+@@ -658,6 +709,7 @@ void MapItem::CreateEngine()
    // A recording goes on after a restart.
    WatchRecording();
    m_framework.EnterForeground();
@@ -1391,10 +1491,10 @@ index 00000000..3370e75f
 +}  // namespace sailfish
 diff --git a/sailfish/qml/Backend.qml b/sailfish/qml/Backend.qml
 new file mode 100644
-index 00000000..5cbcebc5
+index 00000000..4bd07ff7
 --- /dev/null
 +++ b/sailfish/qml/Backend.qml
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,77 @@
 +import QtQuick 2.6
 +import Nemo.KeepAlive 1.2
 +import Nemo.Notifications 1.0
@@ -1404,6 +1504,7 @@ index 00000000..5cbcebc5
 +    // This tree belongs to the application backend and has no window.
 +    KeepAlive {
 +        enabled: mapCore.trackRecording || mapCore.routing.navigating || mapCore.routing.building
++                 || mapCore.routing.waitingForPosition
 +                 || downloads.inProgress || bookmarksIO.busy || osmAccount.busy
 +    }
 +
@@ -1689,7 +1790,7 @@ index 05e62435..10ad0750 100644
      Column {
          anchors {
 diff --git a/sailfish/routing.cpp b/sailfish/routing.cpp
-index 1f8ea502..8501f8ed 100644
+index 1f8ea502..5a48387a 100644
 --- a/sailfish/routing.cpp
 +++ b/sailfish/routing.cpp
 @@ -41,6 +41,7 @@
@@ -1714,8 +1815,8 @@ index 1f8ea502..8501f8ed 100644
 
 +bool Routing::HasBackgroundWork() const
 +{
-+  return m_navigating || m_building || m_loadingSavedRoute || m_startWhenBuilt || m_voice->IsBusy() ||
-+         m_beep.IsPlaying();
++  return m_navigating || m_building || m_waitingForPosition || m_loadingSavedRoute || m_startWhenBuilt ||
++         m_voice->IsBusy() || m_beep.IsPlaying();
 +}
 +
  int Routing::routerType() const
@@ -1764,11 +1865,58 @@ index 1f8ea502..8501f8ed 100644
         {"currentRoad", QString::fromStdString(info.m_currentStreetName)},
         {"nextRoad", QString::fromStdString(info.m_nextStreetName)},
         {"destination", points.empty() ? QString() : QString::fromStdString(points.back().m_title)},
+@@ -1319,15 +1340,19 @@ void Routing::OnRouteBuilt(int code, QStringList const & absentCountries)
+     SetRouteError(code, absentCountries);
+   }
+   // Avoided roads explain a failed car route best.
+-  if (!m_built && result != RouterResultCode::NeedMoreMaps && m_missingMaps.isEmpty() && routerType() == Vehicle &&
+-      avoidRoads() != 0)
++  if (!m_built && !m_waitingForPosition && result != RouterResultCode::NeedMoreMaps && m_missingMaps.isEmpty() &&
++      routerType() == Vehicle && avoidRoads() != 0)
+   {
+     m_optionsError = true;
+     SetError(Localized("unable_to_calc_alert_title"), Localized("unable_to_calc_alert_subtitle"));
+   }
+   emit stateChanged();
+-  if (std::exchange(m_startWhenBuilt, false) && m_built)
+-    start();
++  if (m_startWhenBuilt && !m_waitingForPosition)
++  {
++    m_startWhenBuilt = false;
++    if (m_built)
++      start();
++  }
+ }
+
+ void Routing::SetRouteSummary()
+@@ -1367,7 +1392,7 @@ void Routing::SetRouteError(int code, QStringList const & absentCountries)
+   switch (static_cast<RouterResultCode>(code))
+   {
+   case RouterResultCode::NoCurrentPosition:
+-    SetError(Localized("dialog_routing_location_turn_on"), Localized("dialog_routing_location_unknown_turn_on"));
++    SetError(Localized("current_location_unknown_error_title"), Localized("dialog_routing_location_turn_wifi"));
+     m_waitingForPosition = true;
+     break;
+   case RouterResultCode::StartPointNotFound:
 diff --git a/sailfish/routing.hpp b/sailfish/routing.hpp
-index 83e97dea..b41b5213 100644
+index 83e97dea..0bc168e5 100644
 --- a/sailfish/routing.hpp
 +++ b/sailfish/routing.hpp
-@@ -161,12 +161,14 @@ public:
+@@ -63,6 +63,7 @@ class Routing : public QObject
+   Q_PROPERTY(int pickIndex READ pickIndex NOTIFY pickChanged)
+   // The route failed while roads are avoided, the likely cause.
+   Q_PROPERTY(bool optionsError READ optionsError NOTIFY stateChanged)
++  Q_PROPERTY(bool waitingForPosition READ waitingForPosition NOTIFY stateChanged)
+   Q_PROPERTY(bool routeSaved READ routeSaved NOTIFY stateChanged)
+   Q_PROPERTY(bool navigating READ navigating NOTIFY navigatingChanged)
+   // turnIcon, distanceToTurn, street, streetParts, nextTurnIcon, hoursLeft, minutesLeft, hourUnits, minuteUnits,
+@@ -156,17 +157,20 @@ public:
+   bool disclaimerAccepted() const;
+   bool canAddStop() const;
+   bool optionsError() const { return m_optionsError; }
++  bool waitingForPosition() const { return m_waitingForPosition; }
+   int pickType() const { return m_pickType; }
+   int pickIndex() const { return m_pickIndex; }
    bool routeSaved() const { return m_routeSaved; }
    bool navigating() const { return m_navigating; }
    QVariantMap navigation() const { return m_navigation; }
@@ -1783,7 +1931,7 @@ index 83e97dea..b41b5213 100644
 
    // Use the place shown in the place page.
    Q_INVOKABLE void routeFromPlace();
-@@ -234,6 +236,7 @@ signals:
+@@ -234,6 +238,7 @@ signals:
    void navigatingChanged();
    // With every position while navigating.
    void navigationChanged();
@@ -1791,7 +1939,7 @@ index 83e97dea..b41b5213 100644
    void voiceChanged();
    void disclaimerChanged();
    void pickChanged();
-@@ -280,6 +283,7 @@ private:
+@@ -280,6 +285,7 @@ private:
    Framework & m_framework;
    NavigationExport m_navigationExport;
    bool m_building = false;
@@ -2135,10 +2283,10 @@ index 00000000..21922d1d
 +}  // namespace sailfish
 diff --git a/sailfish/sailplay_map_canvas.cpp b/sailfish/sailplay_map_canvas.cpp
 new file mode 100644
-index 00000000..10e387b5
+index 00000000..869373fd
 --- /dev/null
 +++ b/sailfish/sailplay_map_canvas.cpp
-@@ -0,0 +1,154 @@
+@@ -0,0 +1,155 @@
 +#include "sailfish/sailplay_map_canvas.hpp"
 +
 +#include "sailfish/map_item.hpp"
@@ -2277,6 +2425,7 @@ index 00000000..10e387b5
 +                             {"canStart", routing->canStart()},
 +                             {"disclaimerAccepted", routing->disclaimerAccepted()},
 +                             {"summary", routing->summary().left(1024)},
++                             {"waitingForPosition", routing->waitingForPosition()},
 +                             {"error", routing->errorTitle().left(1024)}};
 +  return {{"image", m_image}, {"width", m_imageSize.width()}, {"height", m_imageSize.height()}, {"state", state}};
 +}
