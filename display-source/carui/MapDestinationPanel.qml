@@ -32,7 +32,7 @@ Rectangle {
         if (page === "search" && !searchInput.activeFocus) searchInput.text = browser.query || ""
     }
     onVisibleChanged: if (!visible) { searchDelay.stop(); searchInput.focus = false; Qt.inputMethod.hide() }
-    MouseArea { anchors.fill: parent }
+    MouseArea { objectName: "navigationDestinationShield"; anchors.fill: parent }
 
     Row {
         id: heading
@@ -81,7 +81,8 @@ Rectangle {
                 width: (tabs.width - 16) / 3; height: tabs.height; radius: 12
                 color: page === modelData.command || (page === "search" && index === 1)
                     || (page === "bookmarks" && index === 2) ? palette.notice : palette.button
-                Text { anchors.centerIn: parent; width: parent.width - 12; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; text: modelData.label; color: palette.text; font.pixelSize: 24 }
+                MapBookmarkIcon { x: 10; anchors.verticalCenter: parent.verticalCenter; width: 22; height: 22; ink: palette.text; filled: true; visible: index === 2 }
+                Text { anchors.centerIn: parent; anchors.horizontalCenterOffset: index === 2 ? 12 : 0; width: parent.width - (index === 2 ? 40 : 12); horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; text: modelData.label; color: palette.text; font.pixelSize: 24 }
                 MouseArea { anchors.fill: parent; enabled: !busy; onClicked: panel.openPage(modelData.command) }
             }
         }

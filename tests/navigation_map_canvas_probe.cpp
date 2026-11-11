@@ -5,6 +5,9 @@
 #include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QPainter>
+#include <QMouseEvent>
+#include <QQuickWindow>
+#include <QQuickRenderControl>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -64,7 +67,11 @@ int main(int argc, char **argv)
     buffer.open(QIODevice::WriteOnly);
     check(image.save(&buffer, "JPEG"), "JPEG encoder unavailable");
     int frames = 0;
+    QSize configuredSize(640, 360);
     bool malformed = false;
+    bool bookmarked = false;
+    bool holdBrowse = false;
+    qulonglong heldBrowse = 0;
     QVector<QVariantMap> touches;
     QVector<QVariantMap> browseActions;
     QVariantMap browser{{QStringLiteral("page"), QString()}, {QStringLiteral("query"), QString()},
@@ -73,12 +80,13 @@ int main(int argc, char **argv)
             {QStringLiteral("kind"), QStringLiteral("place")}}}}, {QStringLiteral("searching"), false}};
     provider.setActionHandler(QStringLiteral("navigation.map.frame"), [&](qulonglong request, const QVariantMap &parameters) {
         ++frames;
-        check(parameters.value(QStringLiteral("width")) == 640 && parameters.value(QStringLiteral("height")) == 360,
+        check(parameters.value(QStringLiteral("width")) == configuredSize.width()
+            && parameters.value(QStringLiteral("height")) == configuredSize.height(),
             "host did not request its configured dimensions");
         provider.complete(request, {{QStringLiteral("image"), malformed ? QByteArray("bad JPEG") : jpeg},
             {QStringLiteral("width"), 320}, {QStringLiteral("height"), 160},
             {QStringLiteral("state"), QVariantMap{{QStringLiteral("place"), QStringLiteral("Test place")},
-                {QStringLiteral("browser"), browser}}}});
+                {QStringLiteral("bookmarked"), bookmarked}, {QStringLiteral("browser"), browser}}}});
     });
     provider.setActionHandler(QStringLiteral("navigation.map.touch"), [&](qulonglong request, const QVariantMap &parameters) {
         touches.append(parameters);
@@ -89,7 +97,10 @@ int main(int argc, char **argv)
     });
     provider.setActionHandler(QStringLiteral("navigation.map.browse"), [&](qulonglong request, const QVariantMap &parameters) {
         browseActions.append(parameters);
-        browser[QStringLiteral("page")] = parameters.value(QStringLiteral("command"));
+        const QString command = parameters.value(QStringLiteral("command")).toString();
+        if (command == QStringLiteral("toggle-bookmark")) bookmarked = !bookmarked;
+        else browser[QStringLiteral("page")] = command == QStringLiteral("close") ? QString() : command;
+        if (holdBrowse) { heldBrowse = request; return; }
         provider.complete(request, browser);
     });
     check(provider.start(), "provider export failed");
@@ -165,12 +176,89 @@ int main(int argc, char **argv)
                 "destination panel exceeded its map viewport");
             auto *input = card->findChild<QQuickItem *>(QStringLiteral("navigationSearchInput"));
             check(input && input->width() > 0, "destination search input has no width");
+            card->setProperty("panelOpen", false);
+            auto *toolbar = card->findChild<QQuickItem *>(QStringLiteral("navigationMapToolbar"));
+            auto *preview = card->findChild<QQuickItem *>(QStringLiteral("navigationRoutePreview"));
+            check(toolbar && toolbar->width() <= 328 && preview && preview->width() <= 560,
+                "map controls expanded across the viewport");
+            check(preview->y() >= 0 && preview->x() + preview->width() <= item->width()
+                && preview->y() + preview->height() <= item->height(), "place preview exceeded the viewport");
         }
+
+        configuredSize = QSize(1280, 720);
+        item->setSize(configuredSize);
+        QQuickRenderControl layout;
+        QQuickWindow window(&layout);
+        window.resize(configuredSize);
+        item->setParentItem(window.contentItem());
+        window.show();
+        host.setActive(true);
+        waitFor([&] { return provider.activeSessionCount() == 1; });
+        const auto click = [&](QQuickItem *target, const QPointF &local) {
+            layout.polishItems();
+            check(target && target->isVisible(), "click target is unavailable");
+            const QPointF point = target->mapToScene(local);
+            QMouseEvent press(QEvent::MouseButtonPress, point, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(&window, &press);
+            QMouseEvent release(QEvent::MouseButtonRelease, point, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(&window, &release);
+            QElapsedTimer settling;
+            settling.start();
+            waitFor([&] { return settling.elapsed() > 120; });
+        };
+        const int beforeOverlay = touches.size();
+        auto *preview = card->findChild<QQuickItem *>(QStringLiteral("navigationRoutePreview"));
+        auto *previewText = card->findChild<QQuickItem *>(QStringLiteral("navigationPreviewText"));
+        click(previewText, QPointF(20, previewText->height() / 2));
+        click(preview, QPointF(preview->width() - 8, 20));
+        auto *toolbar = card->findChild<QQuickItem *>(QStringLiteral("navigationMapToolbar"));
+        auto *destination = card->findChild<QQuickItem *>(QStringLiteral("navigationDestinationButton"));
+        click(toolbar, QPointF(destination->width() + 4, toolbar->height() / 2));
+        check(touches.size() == beforeOverlay, "preview text, padding or toolbar gap reached the map");
+
+        auto *bookmarks = card->findChild<QQuickItem *>(QStringLiteral("navigationBookmarksButton"));
+        auto *bookmarkIcon = card->findChild<QQuickItem *>(QStringLiteral("navigationBookmarksIcon"));
+        check(bookmarkIcon && bookmarkIcon->isVisible() && bookmarkIcon->property("filled").toBool(),
+            "bookmark entry icon is missing");
+        click(bookmarks, QPointF(bookmarks->width() / 2, bookmarks->height() / 2));
+        waitFor([&] { return !host.mapBrowseBusy() && host.mapBrowser().value(QStringLiteral("page")) == QStringLiteral("bookmark-groups"); });
+        check(card->property("panelOpen").toBool(), "bookmark entry did not open the destination panel");
+        auto *panel = card->findChild<QQuickItem *>(QStringLiteral("navigationDestinationPanel"));
+        click(panel, QPointF(panel->width() - 4, panel->height() - 4));
+        check(touches.size() == beforeOverlay, "destination panel bottom reached the map");
+        check(QMetaObject::invokeMethod(panel, "closePanel"), "destination panel close is unavailable");
+        waitFor([&] { return !host.mapBrowseBusy() && !card->property("panelOpen").toBool(); });
+        auto *bookmarkPlace = card->findChild<QQuickItem *>(QStringLiteral("navigationBookmarkPlaceButton"));
+        auto *placeIcon = card->findChild<QQuickItem *>(QStringLiteral("navigationBookmarkPlaceIcon"));
+        check(placeIcon && placeIcon->isVisible() && !placeIcon->property("filled").toBool(),
+            "unbookmarked place icon is missing");
+        click(bookmarkPlace, QPointF(bookmarkPlace->width() / 2, bookmarkPlace->height() / 2));
+        waitFor([&] { return placeIcon->property("filled").toBool(); });
+        check(browseActions.last().value(QStringLiteral("command")) == QStringLiteral("toggle-bookmark")
+            && touches.size() == beforeOverlay, "bookmark action reached the map or failed to toggle");
+        holdBrowse = true;
+        host.mapBrowse(QStringLiteral("history"));
+        waitFor([&] { return heldBrowse != 0; });
+        auto *settings = card->findChild<QQuickItem *>(QStringLiteral("navigationSettingsButton"));
+        click(settings, QPointF(settings->width() / 2, settings->height() / 2));
+        click(bookmarkPlace, QPointF(bookmarkPlace->width() / 2, bookmarkPlace->height() / 2));
+        check(touches.size() == beforeOverlay, "disabled map controls reached the map");
+        holdBrowse = false;
+        provider.complete(heldBrowse, browser);
+        waitFor([&] { return !host.mapBrowseBusy(); });
+        click(item, QPointF(900, 400));
+        waitFor([&] { return touches.size() >= beforeOverlay + 2; });
+        check(touches.last().value(QStringLiteral("phase")) == QStringLiteral("release"),
+            "uncovered map input did not finish its gesture");
+        puts("NAVIGATION_MAP_OVERLAY_PASS preview-text padding toolbar-gap destination-bottom bookmark-entry bookmark-toggle disabled-controls uncovered-map");
+        window.hide();
+        host.setActive(false);
         card->setProperty("compact", true);
         check(card->property("mapMode").toBool(), "compact navigation lost the map canvas");
         check(card->findChild<QObject *>(QStringLiteral("navigationDestinationPanel"))
             && card->findChild<QObject *>(QStringLiteral("navigationSearchInput")), "destination search UI is missing");
         card.reset();
+        configuredSize = QSize(640, 360);
         host.configureMap(640, 360);
     }
     malformed = true;
