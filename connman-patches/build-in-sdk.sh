@@ -3,10 +3,15 @@
 set -euo pipefail
 WORK=$1
 REPO=$2
+SPEC="$REPO/connman-patches/sailplay-connman-fix.spec"
+FIX_RELEASE=$(rpmspec -q --srpm --qf '%{RELEASE}' "$SPEC")
+RPM_FILE=$(rpmspec -q --rpms --target aarch64 --define 'debug_package %{nil}' \
+    --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}.rpm' "$SPEC")
+rpm -q glibc libgsupplicant >> "$WORK/build-manifest.txt"
 cd "$WORK/source"
 autoreconf -fi
 ./configure --prefix=/usr --libdir=/usr/lib64 --sysconfdir=/etc --localstatedir=/var \
-    --with-version=1.40+git26.6.sailplay1 \
+    --with-version="1.40+git26.6.sailplay$FIX_RELEASE" \
     --enable-ethernet=builtin --disable-wifi --enable-bluetooth=builtin \
     --disable-openconnect --enable-openvpn --with-openvpn=/usr/sbin/openvpn --disable-vpnc --disable-l2tp \
     --disable-pptp --disable-openfortivpn --disable-wireguard \
@@ -25,7 +30,7 @@ headers=()
 for header in include/*.h; do headers+=("include/connman/${header##*/}"); done
 make -j8 "${headers[@]}" include/connman/gdbus.h src/builtin.h
 # Main connmand needs the VPN bridge even though vpnd/protocol plugins stay stock.
-grep -q "__connman_builtin_vpn" src/builtin.h
+grep -q '^[[:space:]]*&__connman_builtin_vpn,' src/builtin.h
 make -j8 CPPFLAGS="-I$WORK/headers" unit/test-service src/connmand
 nm src/connmand | grep "__connman_builtin_vpn$" > /dev/null
 mkdir -p "$WORK/package"
@@ -33,4 +38,5 @@ cp src/connmand COPYING "$WORK/package/"
 cp "$REPO/connman-patches/90-sailplay-lifecycle.conf" "$WORK/package/"
 rpmbuild -bb --target aarch64 --define 'debug_package %{nil}' \
     --define '__os_install_post %{nil}' --define "_sourcedir $WORK/package" \
-    "$REPO/connman-patches/sailplay-connman-fix.spec"
+    --define "_topdir $WORK/rpmbuild" "$SPEC"
+cp "$WORK/rpmbuild/RPMS/aarch64/$RPM_FILE" "$WORK/package/"
