@@ -595,6 +595,34 @@ Start music on your phone</source>
       <source>Authorization cancelled or failed</source>
       <translation>授權已取消或失敗</translation>
     </message>
+    <message>
+      <source>No SIM card inserted</source>
+      <translation>未插入 SIM 卡</translation>
+    </message>
+    <message>
+      <source>Unlock the SIM card on the phone</source>
+      <translation>請在手機上解鎖 SIM 卡</translation>
+    </message>
+    <message>
+      <source>Enable the SIM card on the phone</source>
+      <translation>請在手機上啟用 SIM 卡</translation>
+    </message>
+    <message>
+      <source>Messaging permission is required</source>
+      <translation>需要訊息權限</translation>
+    </message>
+    <message>
+      <source>Message status is unknown. Check the phone before retrying.</source>
+      <translation>訊息狀態未知，請在重試前查看手機。</translation>
+    </message>
+    <message>
+      <source>Could not send message</source>
+      <translation>無法傳送訊息</translation>
+    </message>
+    <message>
+      <source>Messaging account is unavailable</source>
+      <translation>訊息帳號無法使用</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

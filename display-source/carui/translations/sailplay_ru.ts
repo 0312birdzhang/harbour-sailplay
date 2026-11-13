@@ -595,6 +595,34 @@ Start music on your phone</source>
       <source>Authorization cancelled or failed</source>
       <translation>Разрешение отменено или не удалось</translation>
     </message>
+    <message>
+      <source>No SIM card inserted</source>
+      <translation>SIM-карта не вставлена</translation>
+    </message>
+    <message>
+      <source>Unlock the SIM card on the phone</source>
+      <translation>Разблокируйте SIM-карту на телефоне</translation>
+    </message>
+    <message>
+      <source>Enable the SIM card on the phone</source>
+      <translation>Включите SIM-карту на телефоне</translation>
+    </message>
+    <message>
+      <source>Messaging permission is required</source>
+      <translation>Требуется разрешение на сообщения</translation>
+    </message>
+    <message>
+      <source>Message status is unknown. Check the phone before retrying.</source>
+      <translation>Статус сообщения неизвестен. Проверьте телефон перед повторной отправкой.</translation>
+    </message>
+    <message>
+      <source>Could not send message</source>
+      <translation>Не удалось отправить сообщение</translation>
+    </message>
+    <message>
+      <source>Messaging account is unavailable</source>
+      <translation>Учётная запись сообщений недоступна</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

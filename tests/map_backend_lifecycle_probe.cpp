@@ -272,7 +272,7 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
     requests.stop();
     Check(!image.isNull() && image.width() == result.value("width").toInt() &&
           image.height() == result.value("height").toInt(), "canvas returned invalid pixels");
-    Check(image.width() > 0 && image.height() > 0, "canvas frame has no dimensions");
+    Check(image.size() == QSize(640, 360), "canvas frame does not match the car viewport");
     std::fprintf(stderr, "MAP_CANVAS_FRAME width=%d height=%d colors=%d phone=%d\n",
                  image.width(), image.height(), colors.size(), presentation.isOpen());
   };

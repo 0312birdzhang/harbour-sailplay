@@ -13,6 +13,8 @@ Window {
     property var pending: 0
     property string notice: ""
     property string replyAccount: ""
+    readonly property bool smsReply: !replyAccount || replyAccount.indexOf("/ring/tel") >= 0
+    readonly property bool canSend: phoneApp || !smsReply || communicationState.smsAvailable === true
     property bool pickingRecipient: false
     property var calls: communicationState.calls || []
     property alias colors: palette
@@ -214,10 +216,10 @@ Window {
                     }
                     Rectangle {
                         width: (parent.width - 12) / 2; height: parent.height; radius: 12; color: "#28774e"
-                        opacity: renderer.ready && !window.pending ? 1 : 0.5
+                        opacity: renderer.ready && !window.pending && window.canSend ? 1 : 0.5
                         Text { anchors.centerIn: parent; text: phoneApp ? qsTranslate("Sailplay", "Call") : qsTranslate("Sailplay", "Send"); color: palette.text; font.pixelSize: 28 }
                         MouseArea {
-                            anchors.fill: parent; enabled: renderer.ready && !window.pending
+                            anchors.fill: parent; enabled: renderer.ready && !window.pending && window.canSend
                             onClicked: window.submit(phoneApp ? "phone.dial" : "messages.send",
                                 phoneApp ? {number: recipient.text.trim()} : {number: recipient.text.trim(), message: message.text, account: window.replyAccount})
                         }
@@ -229,7 +231,9 @@ Window {
             id: footer
             x: 0; y: parent.height - height; width: parent.width; height: 40
             color: palette.secondary; font.pixelSize: 22; elide: Text.ElideRight
-            text: window.notice || browser.error || (renderer.ready ? "" : qsTranslate("Sailplay", "Connecting"))
+            text: window.notice || browser.error || (renderer.ready
+                ? (!phoneApp && window.smsReply ? communicationState.smsError || "" : "")
+                : qsTranslate("Sailplay", "Connecting"))
         }
     }
 }

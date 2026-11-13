@@ -15,6 +15,7 @@ public:
 private slots:
     void invalidate();
     void conversationReady(bool successful);
+    void messageFinished(const QString &token, const QString &error);
 
 private:
     QVariant callModels(const char *method, const QVariantList &arguments = {}) const;
@@ -43,6 +44,7 @@ private:
     QVariantMap m_parameters;
     QString m_threadTitle;
     bool m_mutationPending = false;
+    qulonglong m_messageInvocation = 0;
 };
 
 #endif

@@ -109,20 +109,38 @@ SailplayNavigationHost::SailplayNavigationHost(const QString &runtime, QObject *
         const QByteArray data = process.readAll();
         m_startTicks = QString::fromLatin1(data.mid(data.lastIndexOf(')') + 2).split(' ').value(19));
     }
+    m_reconnectTimer.setSingleShot(true);
+    m_reconnectTimer.setInterval(250);
+    connect(&m_reconnectTimer, &QTimer::timeout, this, [this]() {
+        if (m_active && m_declaration.navigationTemplate() && !m_session.ready()) {
+            ++m_reconnectAttempts;
+            m_session.open(m_declaration.service, m_declaration.path, QStringLiteral("car"), {QStringLiteral("navigation")});
+        }
+    });
     connect(&m_session, &SailplaySession::stateChanged, this, &SailplayNavigationHost::receiveState);
     connect(&m_session, &SailplaySession::readyChanged, this, [this](bool ready) {
         if (ready && m_session.applicationId() != m_declaration.applicationId) {
             m_session.close();
+            m_reconnectTimer.stop();
+            m_reconnectAttempts = 0;
             fail(translated("Navigation provider identity does not match its desktop declaration"));
             return;
         }
-        if (ready) m_session.setActive(m_active);
-        else resetMap();
+        if (ready) { m_reconnectTimer.stop(); m_reconnectAttempts = 0; m_session.setActive(m_active); }
+        else {
+            resetMap();
+            m_reconnectAttempts = 0;
+            if (m_active && m_declaration.navigationTemplate()) m_reconnectTimer.start(250);
+        }
         publish();
         emit changed();
     });
     connect(&m_session, &SailplaySession::errorOccurred, this,
-        [this](const QString &, const QString &message) { fail(message); });
+        [this](const QString &, const QString &message) {
+            fail(message);
+            if (m_active && m_reconnectAttempts > 0 && m_reconnectAttempts < 3)
+                m_reconnectTimer.start(500);
+        });
     connect(&m_session, &SailplaySession::requestFinished, this,
         [this](qulonglong request, qulonglong, const QVariantMap &result, const QString &error, const QString &message) {
             if (request == m_mapRequest) {
@@ -171,6 +189,8 @@ void SailplayNavigationHost::open(const SailplayApplication &declaration, const 
 void SailplayNavigationHost::setActive(bool active)
 {
     m_active = active;
+    if (!active) { m_reconnectTimer.stop(); m_reconnectAttempts = 0; }
+    else if (!m_session.ready() && m_declaration.navigationTemplate()) m_reconnectTimer.start(250);
     if (!active) {
         m_touches.clear();
         if (mapAvailable()) m_session.invoke(QStringLiteral("navigation.map.touch"),
@@ -181,6 +201,8 @@ void SailplayNavigationHost::setActive(bool active)
 
 void SailplayNavigationHost::close()
 {
+    m_reconnectTimer.stop();
+    m_reconnectAttempts = 0;
     const QSignalBlocker blocker(&m_session);
     m_session.close();
     resetMap();

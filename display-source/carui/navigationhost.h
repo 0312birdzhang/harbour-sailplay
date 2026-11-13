@@ -66,6 +66,8 @@ private:
     SailplayApplication m_declaration;
     QTimer m_heartbeat;
     QTimer m_mapTimer;
+    QTimer m_reconnectTimer;
+    int m_reconnectAttempts = 0;
     QSize m_mapSize;
     QImage m_mapImage;
     QVariantMap m_mapState;

@@ -595,6 +595,34 @@ Lancez la musique sur votre téléphone</translation>
       <source>Authorization cancelled or failed</source>
       <translation>Autorisation annulée ou échouée</translation>
     </message>
+    <message>
+      <source>No SIM card inserted</source>
+      <translation>Aucune carte SIM insérée</translation>
+    </message>
+    <message>
+      <source>Unlock the SIM card on the phone</source>
+      <translation>Déverrouillez la carte SIM sur le téléphone</translation>
+    </message>
+    <message>
+      <source>Enable the SIM card on the phone</source>
+      <translation>Activez la carte SIM sur le téléphone</translation>
+    </message>
+    <message>
+      <source>Messaging permission is required</source>
+      <translation>L’autorisation de messagerie est requise</translation>
+    </message>
+    <message>
+      <source>Message status is unknown. Check the phone before retrying.</source>
+      <translation>État du message inconnu. Vérifiez le téléphone avant de réessayer.</translation>
+    </message>
+    <message>
+      <source>Could not send message</source>
+      <translation>Impossible d’envoyer le message</translation>
+    </message>
+    <message>
+      <source>Messaging account is unavailable</source>
+      <translation>Le compte de messagerie est indisponible</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

@@ -70,6 +70,17 @@ bool number(const QVariant &value)
     return value.type() == QVariant::String
         && QRegExp(QStringLiteral("[+0-9*#][+0-9*#() .-]{0,63}")).exactMatch(value.toString());
 }
+
+QString sendErrorText(const QString &error)
+{
+    if (error == QStringLiteral("NoSim")) return text("No SIM card inserted");
+    if (error == QStringLiteral("LockedSim")) return text("Unlock the SIM card on the phone");
+    if (error == QStringLiteral("DisabledSim")) return text("Enable the SIM card on the phone");
+    if (error == QStringLiteral("Forbidden")) return text("Messaging permission is required");
+    if (error == QStringLiteral("TimedOut")) return text("Message status is unknown. Check the phone before retrying.");
+    if (error == QStringLiteral("Failed")) return text("Could not send message");
+    return text("Messaging account is unavailable");
+}
 }
 
 CommunicationBackend::CommunicationBackend(const QString &kind, QObject *models, QObject *parent)
@@ -109,6 +120,8 @@ CommunicationBackend::CommunicationBackend(const QString &kind, QObject *models,
         });
     }
     connect(models, SIGNAL(contentChanged()), this, SLOT(invalidate()));
+    if (kind == QStringLiteral("messages"))
+        connect(models, SIGNAL(messageFinished(QString,QString)), this, SLOT(messageFinished(QString,QString)));
     for (const char *name : {"contacts", "history", "groups"}) {
         QAbstractItemModel *model = qobject_cast<QAbstractItemModel *>(models->property(name).value<QObject *>());
         if (!model) continue;
@@ -126,7 +139,7 @@ CommunicationBackend::CommunicationBackend(const QString &kind, QObject *models,
     m_idle.setInterval(30000);
     connect(&m_idle, &QTimer::timeout, QCoreApplication::instance(), &QCoreApplication::quit);
     connect(m_provider, &SailplayProvider::sessionsChanged, this, [this]() {
-        if (m_provider->sessionCount()) m_idle.stop(); else m_idle.start();
+        if (m_provider->sessionCount() || (m_messageInvocation && m_mutationPending)) m_idle.stop(); else m_idle.start();
         if (m_provider->activeSessionCount()) { m_poll.start(); refresh(); } else m_poll.stop();
     });
     m_queryTimer.setSingleShot(true);
@@ -212,7 +225,14 @@ void CommunicationBackend::refresh()
 {
     QVariantMap state = m_state;
     state[QStringLiteral("content")] = rootPage();
-    if (m_kind == QStringLiteral("messages")) state[QStringLiteral("smsAccount")] = callModels("smsAccount").toString();
+    if (m_kind == QStringLiteral("messages")) {
+        const QString account = callModels("smsAccount").toString();
+        const QVariant error = callModels("sendError", {account});
+        const QString code = error.isValid() ? error.toString() : QStringLiteral("Unavailable");
+        state[QStringLiteral("smsAccount")] = account;
+        state[QStringLiteral("smsAvailable")] = code.isEmpty();
+        state[QStringLiteral("smsError")] = code.isEmpty() ? QString() : sendErrorText(code);
+    }
     if (m_kind == QStringLiteral("phone")) {
         QDBusMessage request = QDBusMessage::createMethodCall(QStringLiteral("org.nemomobile.voicecall"),
             QStringLiteral("/"), QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("GetAll"));
@@ -446,8 +466,32 @@ void CommunicationBackend::mutate(qulonglong invocation, const QString &action, 
             || body.toString().trimmed().isEmpty() || body.toString().size() > 4096 || body.toString().contains(QChar::Null)) {
             m_provider->fail(invocation, QStringLiteral("InvalidArgument"), text("Enter a recipient and message")); return;
         }
-        systemCall(invocation, QStringLiteral("org.sailfishos.Messages"), QStringLiteral("/"),
-            QStringLiteral("org.sailfishos.Messages"), QStringLiteral("sendMessage"),
-            {account, parameters.value(QStringLiteral("number")), body});
+        // Stored SMS threads may reference a previously selected modem.
+        if (account.contains(QStringLiteral("/ring/tel"))) account = callModels("smsAccount").toString();
+        const QVariant error = callModels("sendError", {account});
+        if (!error.isValid() || !error.toString().isEmpty()) {
+            const QString code = error.isValid() ? error.toString() : QStringLiteral("Unavailable");
+            m_provider->fail(invocation, code, sendErrorText(code)); return;
+        }
+        m_messageInvocation = invocation;
+        m_mutationPending = true;
+        m_idle.stop();
+        const QVariantMap request{{QStringLiteral("token"), QString::number(invocation)},
+            {QStringLiteral("account"), account}, {QStringLiteral("number"), parameters.value(QStringLiteral("number"))},
+            {QStringLiteral("message"), body}};
+        if (!callModels("sendMessage", {request}).toBool()) messageFinished(QString::number(invocation), QStringLiteral("Unavailable"));
     }
+}
+
+void CommunicationBackend::messageFinished(const QString &token, const QString &error)
+{
+    if (!m_messageInvocation || token != QString::number(m_messageInvocation)) return;
+    m_mutationPending = m_models->property("messagePending").toBool();
+    if (error.isEmpty()) m_provider->complete(m_messageInvocation, {{QStringLiteral("submitted"), true}});
+    else m_provider->fail(m_messageInvocation, error, sendErrorText(error));
+    if (!m_mutationPending) {
+        m_messageInvocation = 0;
+        if (!m_provider->sessionCount()) m_idle.start();
+    }
+    refresh();
 }

@@ -2283,10 +2283,10 @@ index 00000000..21922d1d
 +}  // namespace sailfish
 diff --git a/sailfish/sailplay_map_canvas.cpp b/sailfish/sailplay_map_canvas.cpp
 new file mode 100644
-index 00000000..869373fd
+index 00000000..ddb3bd1a
 --- /dev/null
 +++ b/sailfish/sailplay_map_canvas.cpp
-@@ -0,0 +1,155 @@
+@@ -0,0 +1,173 @@
 +#include "sailfish/sailplay_map_canvas.hpp"
 +
 +#include "sailfish/map_item.hpp"
@@ -2320,6 +2320,7 @@ index 00000000..869373fd
 +      m_map.CarTouch(QStringLiteral("cancel"), 0, 0);
 +    m_touching = false;
 +    m_image.clear();
++    m_sourceViewport = {};
 +    if (m_lastRequest.isValid() && m_lastRequest.elapsed() <= 2500)
 +      Attach();
 +  });
@@ -2368,6 +2369,7 @@ index 00000000..869373fd
 +  m_surface.reset();
 +  m_image.clear();
 +  m_imageSize = {};
++  m_sourceViewport = {};
 +  m_lastRequest.invalidate();
 +  m_expiry.stop();
 +}
@@ -2375,7 +2377,13 @@ index 00000000..869373fd
 +QVariantMap SailplayMapCanvas::Frame(QSize const & size)
 +{
 +  if (size != m_size)
++  {
++    if (m_touching)
++      m_map.CarTouch(QStringLiteral("cancel"), 0, 0);
++    m_touching = false;
 +    m_image.clear();
++    m_sourceViewport = {};
++  }
 +  m_size = size;
 +  m_lastRequest.restart();
 +  m_expiry.start();
@@ -2405,8 +2413,16 @@ index 00000000..869373fd
 +    m_context->doneCurrent();
 +    if (!image.isNull())
 +    {
-+      if (image.width() > 1920 || image.height() > 1920)
-+        image = image.scaled(1920, 1920, Qt::KeepAspectRatio, Qt::SmoothTransformation);
++      // The shared phone view can have a different aspect ratio. Keep the car
++      // viewport and its touch mapping together while the phone stays open.
++      qreal const scale = qMax(qreal(m_size.width()) / image.width(), qreal(m_size.height()) / image.height());
++      QSize const cropSize(qBound(1, qRound(m_size.width() / scale), image.width()),
++                           qBound(1, qRound(m_size.height() / scale), image.height()));
++      QRect const crop((image.width() - cropSize.width()) / 2, (image.height() - cropSize.height()) / 2,
++                       cropSize.width(), cropSize.height());
++      QRectF const viewport(qreal(crop.x()) / image.width(), qreal(crop.y()) / image.height(),
++                            qreal(crop.width()) / image.width(), qreal(crop.height()) / image.height());
++      image = image.copy(crop).scaled(m_size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
 +      QByteArray encoded;
 +      QBuffer buffer(&encoded);
 +      buffer.open(QIODevice::WriteOnly);
@@ -2415,6 +2431,7 @@ index 00000000..869373fd
 +      m_frame = number;
 +      m_image = encoded;
 +      m_imageSize = image.size();
++      m_sourceViewport = viewport;
 +    }
 +  }
 +  auto const * routing = m_map.routing();
@@ -2432,27 +2449,29 @@ index 00000000..869373fd
 +
 +void SailplayMapCanvas::Touch(QString const & phase, double x, double y)
 +{
-+  if (!m_lastRequest.isValid())
++  if (!m_lastRequest.isValid() || m_sourceViewport.isEmpty())
 +    return;
 +  if (phase == QStringLiteral("press"))
 +    m_touching = true;
 +  if (m_touching)
-+    m_map.CarTouch(phase, x, y);
++    m_map.CarTouch(phase, m_sourceViewport.x() + x * m_sourceViewport.width(),
++                   m_sourceViewport.y() + y * m_sourceViewport.height());
 +  if (phase == QStringLiteral("release") || phase == QStringLiteral("cancel"))
 +    m_touching = false;
 +}
 +}  // namespace sailfish
 diff --git a/sailfish/sailplay_map_canvas.hpp b/sailfish/sailplay_map_canvas.hpp
 new file mode 100644
-index 00000000..a2ba083d
+index 00000000..56b7852b
 --- /dev/null
 +++ b/sailfish/sailplay_map_canvas.hpp
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,47 @@
 +#pragma once
 +
 +#include <QByteArray>
 +#include <QElapsedTimer>
 +#include <QObject>
++#include <QRectF>
 +#include <QSize>
 +#include <QTimer>
 +#include <QVariantMap>
@@ -2490,6 +2509,7 @@ index 00000000..a2ba083d
 +  uint64_t m_frame = 0;
 +  QByteArray m_image;
 +  QSize m_imageSize;
++  QRectF m_sourceViewport;
 +  bool m_touching = false;
 +};
 +}  // namespace sailfish

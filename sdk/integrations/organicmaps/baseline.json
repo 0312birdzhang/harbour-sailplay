@@ -1,9 +1,9 @@
 {
   "source_repository": "https://github.com/0312birdzhang/organicmaps-sailfish",
   "baseline_commit": "abcdd8c3d518973d74d1d967c1f6d6ba34e500bf",
-  "integrated_commit": "c3ede46460911d4431ed8616ced8e8e287c172db",
+  "integrated_commit": "380195b0633ecfa9adc62f268f8ca4344657a7d2",
   "patch": "lifecycle.patch",
-  "patch_sha256": "7a580091328b34343b17c4188d86d8b34615f95065f04a2007190f2ded77411f",
+  "patch_sha256": "f28ccc3e20fea604ad0f0cbc223dd965831b7448aa8afceae6b0acd57f673854",
   "files": [
     {
       "path": "libs/map/framework.cpp",
@@ -178,12 +178,12 @@
     {
       "path": "sailfish/sailplay_map_canvas.cpp",
       "before": null,
-      "after": "66a0bae026b2ecffb57e61bf6bee86ad54fd7bcef99f601264b2bbc45d059268"
+      "after": "9600078fa61f819ca5975e52a2c37d977dba282d300dccecf28194324ac4395f"
     },
     {
       "path": "sailfish/sailplay_map_canvas.hpp",
       "before": null,
-      "after": "401ee112926c089255fccb7b854fb7be52b1862277e7cfccf12bfc7f54b85f0d"
+      "after": "8fc63db284a326266476c417bebf87d87b83e7086cea37f48e1e9cb12a198473"
     },
     {
       "path": "sailfish/sailplay_navigation.cpp",

@@ -1,6 +1,6 @@
 Name: harbour-sailplay
 Version: 0.1.1
-Release: 109
+Release: 111
 Summary: SailfishOS wireless CarPlay and Android Auto phone with virtual display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
@@ -20,6 +20,8 @@ Requires: nemo-qml-plugin-contacts-qt5
 Requires: libcommhistory-qt5-declarative
 Requires: voicecall-qt5
 Requires: jolla-messages
+Requires: nemo-qml-plugin-messages-internal-qt5
+Requires: sailfish-components-telephony-qt5
 Requires: voicecall-ui-jolla
 AutoReq: 0
 AutoProv: 0

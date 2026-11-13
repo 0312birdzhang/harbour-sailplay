@@ -595,6 +595,34 @@ Musik auf dem Telefon starten</translation>
       <source>Authorization cancelled or failed</source>
       <translation>Autorisierung abgebrochen oder fehlgeschlagen</translation>
     </message>
+    <message>
+      <source>No SIM card inserted</source>
+      <translation>Keine SIM-Karte eingelegt</translation>
+    </message>
+    <message>
+      <source>Unlock the SIM card on the phone</source>
+      <translation>SIM-Karte auf dem Telefon entsperren</translation>
+    </message>
+    <message>
+      <source>Enable the SIM card on the phone</source>
+      <translation>SIM-Karte auf dem Telefon aktivieren</translation>
+    </message>
+    <message>
+      <source>Messaging permission is required</source>
+      <translation>Berechtigung für Nachrichten erforderlich</translation>
+    </message>
+    <message>
+      <source>Message status is unknown. Check the phone before retrying.</source>
+      <translation>Nachrichtenstatus unbekannt. Vor erneutem Senden auf dem Telefon prüfen.</translation>
+    </message>
+    <message>
+      <source>Could not send message</source>
+      <translation>Nachricht konnte nicht gesendet werden</translation>
+    </message>
+    <message>
+      <source>Messaging account is unavailable</source>
+      <translation>Nachrichtenkonto ist nicht verfügbar</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>
