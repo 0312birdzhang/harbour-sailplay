@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=org.sailplay.System.Messages
+Exec=/usr/bin/sailplay-communication-launcher messages

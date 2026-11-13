@@ -1,6 +1,6 @@
 Name: harbour-sailplay
 Version: 0.1.1
-Release: 91
+Release: 109
 Summary: SailfishOS wireless CarPlay and Android Auto phone with virtual display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
@@ -15,6 +15,12 @@ Requires: python3-gobject
 Requires: sailfishsilica-qt5
 Requires: sailfish-components-media-qt5
 Requires: sailfish-components-weather-qt5
+Requires: sailjail
+Requires: nemo-qml-plugin-contacts-qt5
+Requires: libcommhistory-qt5-declarative
+Requires: voicecall-qt5
+Requires: jolla-messages
+Requires: voicecall-ui-jolla
 AutoReq: 0
 AutoProv: 0
 
@@ -51,6 +57,19 @@ install -D -m 0644 sailplay_sdk/interfaces/org.sailplay.Content1.xml %{buildroot
 install -m 2755 rpm/payload/imira-comp %{buildroot}/opt/sailplay/imira-comp
 install -m 2755 rpm/payload/carlife-capture %{buildroot}/opt/sailplay/carlife-capture
 install -m 0755 rpm/payload/carui %{buildroot}/opt/sailplay/carui/carui
+mkdir -p %{buildroot}/opt/sailplay/communication
+install -D -m 0755 rpm/payload/sailplay-communication %{buildroot}/usr/bin/sailplay-communication
+ln %{buildroot}/usr/bin/sailplay-communication %{buildroot}/usr/bin/sailplay-phone-backend
+ln %{buildroot}/usr/bin/sailplay-communication %{buildroot}/usr/bin/sailplay-messages-backend
+install -m 2755 rpm/payload/sailplay-communication-launcher %{buildroot}/usr/bin/
+install -m 0644 display-source/communication/*.qml %{buildroot}/opt/sailplay/communication/
+for name in sailplay-phone sailplay-messages sailplay-phone-backend sailplay-messages-backend; do
+    install -D -m 0644 rpm/$name.desktop %{buildroot}/usr/share/applications/$name.desktop
+    install -D -m 0644 rpm/$name.profile %{buildroot}/etc/sailjail/permissions/$name.profile
+done
+for name in Phone Messages; do
+    install -D -m 0644 rpm/org.sailplay.System.$name.service %{buildroot}/usr/share/dbus-1/services/org.sailplay.System.$name.service
+done
 install -m 0644 display-source/carui/main.qml %{buildroot}/opt/sailplay/carui/main.qml
 install -m 0644 display-source/carui/CarPalette.qml %{buildroot}/opt/sailplay/carui/CarPalette.qml
 install -m 0644 display-source/carui/WeatherCard.qml %{buildroot}/opt/sailplay/carui/WeatherCard.qml
@@ -61,6 +80,7 @@ install -m 0644 display-source/carui/ContentPage.qml %{buildroot}/opt/sailplay/c
 install -m 0644 display-source/carui/MusicPlayer.qml %{buildroot}/opt/sailplay/carui/MusicPlayer.qml
 install -m 0644 display-source/carui/mobile-settings.qml %{buildroot}/opt/sailplay/carui/mobile-settings.qml
 install -m 0644 display-source/carui/AboutPage.qml %{buildroot}/opt/sailplay/carui/AboutPage.qml
+install -m 0644 display-source/carui/AppSelectionPage.qml %{buildroot}/opt/sailplay/carui/AppSelectionPage.qml
 printf '%s\n' '%{version}-%{release}' > %{buildroot}/opt/sailplay/version
 mkdir -p %{buildroot}/opt/sailplay/carui/translations
 install -m 0644 rpm/payload/translations/*.qm %{buildroot}/opt/sailplay/carui/translations/
@@ -109,6 +129,11 @@ systemctl daemon-reload || :
 /opt/sailplay/scripts
 /opt/sailplay/diagnostics
 /opt/sailplay/carui
+/opt/sailplay/communication
+/usr/bin/sailplay-communication
+/usr/bin/sailplay-phone-backend
+/usr/bin/sailplay-messages-backend
+%attr(2755,root,privileged) /usr/bin/sailplay-communication-launcher
 /opt/sailplay/carui-apps.conf
 /opt/sailplay/version
 %attr(2755,root,privileged) /opt/sailplay/imira-comp
@@ -118,6 +143,11 @@ systemctl daemon-reload || :
 /etc/pulse/xpolicy.conf.d/sailplay.conf
 /etc/polkit-1/rules.d/50-sailplay.rules
 /usr/share/applications/harbour-sailplay.desktop
+/usr/share/applications/sailplay-phone*.desktop
+/usr/share/applications/sailplay-messages*.desktop
+/etc/sailjail/permissions/sailplay-phone*.profile
+/etc/sailjail/permissions/sailplay-messages*.profile
+/usr/share/dbus-1/services/org.sailplay.System.*.service
 /usr/share/icons/hicolor/172x172/apps/harbour-sailplay.png
 /usr/share/sailplay-sdk
 /usr/share/dbus-1/interfaces/org.sailplay.App1.xml

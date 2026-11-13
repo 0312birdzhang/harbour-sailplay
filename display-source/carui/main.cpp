@@ -10,6 +10,7 @@
 #include <QQuickView>
 #include <QObject>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -71,9 +72,8 @@ struct AppInfo {
 
 // An installed application: id = desktop-file basename. fullExec apps run
 // their Exec line verbatim ("flatpak-runner com.qq.QQ", "apkd-launcher …" —
-// runner-style commands whose arguments matter); everything else runs the
-// extracted plain binary (sailjail/invoker would wire the app to lipstick
-// instead of our virtual display imira-comp-0).
+// runner-style commands whose arguments matter). Legacy native apps run the
+// extracted plain binary. SDK renderers use their companion Sailjail desktop.
 struct AvailableApp {
     QString id;
     QString name;
@@ -261,7 +261,9 @@ static void scanAvailableApps()
             if (!parseDesktopFile(dir.filePath(fn), &name, &exec, &hidden,
                                   &icon))
                 continue;
-            if (hidden || name.isEmpty())
+            QSettings desktop(dir.filePath(fn), QSettings::IniFormat);
+            const bool carOnly = desktop.value(QStringLiteral("Desktop Entry/X-Sailplay-CarOnly")).toBool();
+            if ((hidden && (!carOnly || desktop.value(QStringLiteral("Desktop Entry/Hidden")).toBool())) || name.isEmpty())
                 continue;
             // Android App Support applications are rendered by the container's
             // SurfaceFlinger through Jolla's private alien_surface protocol.
@@ -278,7 +280,9 @@ static void scanAvailableApps()
                 continue;
             a.name = name;
             a.sdk = SailplayApplication::fromDesktopFile(dir.filePath(fn));
-            if (a.sdk.declared && !a.sdk.navigationTemplate() && !a.sdk.mediaTemplate() && !a.sdk.contentTemplate())
+            if (hidden && !a.sdk.valid) continue;
+            if (a.sdk.declared && !a.sdk.navigationTemplate() && !a.sdk.mediaTemplate()
+                && !a.sdk.contentTemplate() && !a.sdk.renderer())
                 continue;
             a.exec = execIsRunnerStyle(exec) ? exec : extractBinary(exec);
             a.icon = resolveIcon(icon);
@@ -313,12 +317,14 @@ static const AvailableApp *findAvailable(const QString &id)
 static QVector<AppInfo> readApps()
 {
     QVector<AppInfo> apps;
+    bool sdkSelectionSaved = false;
     QString path = userConfigPath();
     QFile f(QFile::exists(path) ? path : QString::fromLatin1(kSystemConfig));
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
-        return apps;
-    while (!f.atEnd()) {
+    const bool readable = f.open(QIODevice::ReadOnly | QIODevice::Text);
+    while (readable && !f.atEnd()) {
         QString line = QString::fromUtf8(f.readLine()).trimmed();
+        if (line == QStringLiteral("# Sailplay SDK app selection"))
+            sdkSelectionSaved = true;
         if (line.isEmpty() || line.startsWith(QLatin1Char('#')))
             continue;
         // appId = everything after the FIRST colon; a missing trailing
@@ -328,6 +334,13 @@ static QVector<AppInfo> readApps()
             continue;
         QString category = line.left(colon).trimmed();
         QString appId = line.mid(colon + 1).trimmed();
+        if (appId == QStringLiteral("jolla-messages") && findAvailable(QStringLiteral("sailplay-messages")))
+            appId = QStringLiteral("sailplay-messages");
+        if ((appId == QStringLiteral("voicecall-ui")
+             || (appId == QStringLiteral("jolla-contacts")
+                 && (category == QStringLiteral("电话") || category == QStringLiteral("電話")
+                     || category.compare(QStringLiteral("Phone"), Qt::CaseInsensitive) == 0)))
+            && findAvailable(QStringLiteral("sailplay-phone"))) appId = QStringLiteral("sailplay-phone");
         const AvailableApp *a = findAvailable(appId);
         if (!a || a->exec.isEmpty())
             continue;
@@ -339,12 +352,74 @@ static QVector<AppInfo> readApps()
         ai.icon = a->icon;
         apps.append(ai);
     }
+    bool hasSdkApp = false;
+    for (const AppInfo &app : apps) {
+        const AvailableApp *available = findAvailable(app.appId);
+        hasSdkApp = hasSdkApp || (available && available->sdk.valid);
+    }
+    if (!sdkSelectionSaved && !hasSdkApp) {
+        for (const AvailableApp &available : g_available) {
+            if (!available.sdk.valid) continue;
+            AppInfo app;
+            app.category = QStringLiteral("其他");
+            app.appId = available.id;
+            app.name = available.name;
+            app.exec = available.exec;
+            app.icon = available.icon;
+            apps.append(app);
+        }
+    }
     return apps;
 }
 
 static QString appKey(const QString &appId)
 {
     return QString::fromLatin1(appId.toUtf8().toBase64());
+}
+
+static QList<QByteArray> processFields(qint64 pid)
+{
+    QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
+    if (!stat.open(QIODevice::ReadOnly)) return QList<QByteArray>();
+    const QByteArray data = stat.readAll();
+    return data.mid(data.lastIndexOf(')') + 2).simplified().split(' ');
+}
+
+static QByteArray publishAppIdentity(qint64 pid, const QString &appId, bool renderer = false)
+{
+    const QList<QByteArray> fields = processFields(pid);
+    QFile record(QStringLiteral("/run/user/100000/sailplay-app-%1").arg(pid));
+    if (fields.size() <= 19 || !record.open(QIODevice::WriteOnly | QIODevice::Truncate)) return QByteArray();
+    record.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
+    QByteArray identity = appKey(appId).toLatin1() + '\n' + fields[19] + '\n';
+    if (renderer) identity.append("renderer\n");
+    if (record.write(identity) != identity.size()) return QByteArray();
+    return identity;
+}
+
+static qint64 rendererProcessId(qint64 supervisor, const QByteArray &started, const QString &executable)
+{
+    if (started.isEmpty()) return 0;
+    const QStringList entries = QDir(QStringLiteral("/proc")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &entry : entries) {
+        bool valid = false;
+        const qint64 pid = entry.toLongLong(&valid);
+        if (!valid || pid <= 0) continue;
+        QFile command(QStringLiteral("/proc/%1/cmdline").arg(pid));
+        if (!command.open(QIODevice::ReadOnly) || command.readAll().split('\0').value(0) != executable.toUtf8()) continue;
+        qint64 parent = pid;
+        for (int depth = 0; depth < 64 && parent > 1; ++depth) {
+            const QList<QByteArray> fields = processFields(parent);
+            if (fields.size() <= 19) break;
+            if (parent == supervisor) {
+                if (fields[19] == started) return pid;
+                break;
+            }
+            parent = fields[1].toLongLong(&valid);
+            if (!valid) break;
+        }
+    }
+    return 0;
 }
 
 static qint64 launchApp(const QString &appId, const QString &exec)
@@ -369,18 +444,7 @@ static qint64 launchApp(const QString &appId, const QString &exec)
     // /proc/PID/environ can be inaccessible to a setgid compositor. Publish
     // a per-launch key tied to the process start time, so reused PIDs cannot
     // inherit a stale application identity.
-    if (pid > 0) {
-        QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
-        if (stat.open(QIODevice::ReadOnly)) {
-            const QByteArray data = stat.readAll();
-            const QList<QByteArray> fields = data.mid(data.lastIndexOf(')') + 2).simplified().split(' ');
-            QFile record(QStringLiteral("/run/user/100000/sailplay-app-%1").arg(pid));
-            if (fields.size() > 19 && record.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-                record.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
-                record.write(appKey(appId).toLatin1() + '\n' + fields[19] + '\n');
-            }
-        }
-    }
+    if (pid > 0) publishAppIdentity(pid, appId);
     return pid;
 }
 
@@ -477,6 +541,10 @@ public:
         connect(this, &CarUiController::currentAppChanged, this, [this]() {
             m_music->setActive(m_musicActive || m_dashboardActive);
             m_content->setActive(contentActive());
+            for (auto it = m_renderers.constBegin(); it != m_renderers.constEnd(); ++it) {
+                const bool active = it.key() == m_currentApp || (m_dashboardActive && it.key() == dashboardMapApp());
+                it.value()->write(active ? "active\n" : "inactive\n");
+            }
         });
         connect(m_music, &SailplayMusicHost::errorOccurred, this, [this](const QString &message) {
             m_musicError = message;
@@ -523,7 +591,10 @@ public:
     {
         QVariantList l;
         for (const AppInfo &a : g_apps) {
+            const AvailableApp *available = findAvailable(a.appId);
+            if (!available || !available->sdk.valid) continue;
             QVariantMap m;
+            m.insert(QStringLiteral("appId"), a.appId);
             m.insert(QStringLiteral("category"), a.category);
             m.insert(QStringLiteral("name"), a.name);
             m.insert(QStringLiteral("icon"), a.icon);
@@ -538,7 +609,9 @@ public:
         QVariantList l;
         for (const QString &id : g_recent) {
             const AvailableApp *a = findAvailable(id);
-            if (!a)
+            const bool selected = std::any_of(g_apps.constBegin(), g_apps.constEnd(),
+                [&id](const AppInfo &app) { return app.appId == id; });
+            if (!a || !a->sdk.valid || !selected)
                 continue;
             QVariantMap m;
             m.insert(QStringLiteral("appId"), id);
@@ -556,7 +629,8 @@ public:
         QStringList ids;
         for (const QVariant &v : m_rows) {
             const QString id = v.toMap().value(QStringLiteral("appId")).toString();
-            if (!id.isEmpty() && !ids.contains(id))
+            const AvailableApp *available = findAvailable(id);
+            if (available && available->sdk.valid && !ids.contains(id))
                 ids.append(id);
         }
         return ids;
@@ -577,7 +651,20 @@ public:
     }
     QString dashboardMapApp() const {
         QSettings s(dashboardConfigPath(), QSettings::IniFormat);
-        return s.value(QStringLiteral("Dashboard/map")).toString();
+        const QString remembered = s.value(QStringLiteral("Dashboard/map")).toString();
+        const AvailableApp *app = findAvailable(remembered);
+        if (app && app->sdk.valid && app->sdk.capabilities.contains(QStringLiteral("navigation")))
+            return remembered;
+        for (const QString &id : g_recent) {
+            app = findAvailable(id);
+            if (app && app->sdk.valid && app->sdk.capabilities.contains(QStringLiteral("navigation")))
+                return id;
+        }
+        for (const AvailableApp &available : g_available) {
+            if (available.sdk.valid && available.sdk.capabilities.contains(QStringLiteral("navigation")))
+                return available.id;
+        }
+        return QString();
     }
     QObject *navigation() const { return m_navigation; }
     QObject *content() const { return m_content; }
@@ -611,13 +698,23 @@ public:
         QSettings s(dashboardConfigPath(), QSettings::IniFormat);
         return !id.isEmpty() && id == s.value(QStringLiteral("Dashboard/music")).toString();
     }
-    Q_INVOKABLE void setDashboardApp(const QString &role, const QString &id) {
+    Q_INVOKABLE bool setDashboardApp(const QString &role, const QString &id) {
+        const AvailableApp *app = findAvailable(id);
         if (role != QLatin1String("map")
-                || (!id.isEmpty() && !findAvailable(id))) return;
+                || (!id.isEmpty() && (!app || !app->sdk.valid
+                    || !app->sdk.capabilities.contains(QStringLiteral("navigation"))))) return false;
         QDir().mkpath(QFileInfo(dashboardConfigPath()).absolutePath());
         QSettings s(dashboardConfigPath(), QSettings::IniFormat);
+        if (s.value(QStringLiteral("Dashboard/") + role).toString() == id) return true;
         s.setValue(QStringLiteral("Dashboard/") + role, id); s.sync();
+        if (s.status() != QSettings::NoError) {
+            m_serviceError = tr("Could not save map selection");
+            emit serviceRunningChanged();
+            return false;
+        }
+        m_dashboardStamp = QFileInfo(dashboardConfigPath()).lastModified();
         emit dashboardSettingsChanged();
+        return true;
     }
     static QString themeConfigPath() {
         return QDir::homePath() + QStringLiteral("/.config/sailplay/theme.ini");
@@ -743,7 +840,8 @@ public:
     }
     Q_INVOKABLE void restoreShellView() {
         QSettings state(uiStatePath(), QSettings::IniFormat);
-        if (state.value(QStringLiteral("View")).toString() == QLatin1String("dashboard")) openDashboard();
+        if (!dashboardMapApp().isEmpty()
+                || state.value(QStringLiteral("View")).toString() == QLatin1String("dashboard")) openDashboard();
     }
     Q_INVOKABLE void openDashboard() {
         m_returnToDashboard = true;
@@ -759,6 +857,7 @@ public:
         if (templateMap && m_projection) {
             m_navigation->setActive(true);
             m_navigation->open(mapApp->sdk, mapApp->name);
+            setDashboardApp(QStringLiteral("map"), map);
         } else {
             m_navigation->setActive(false);
         }
@@ -768,8 +867,11 @@ public:
             if (a->sdk.navigationTemplate()) continue;
             if (m_hiddenApps.contains(id) && (!m_appPids.contains(id)
                     || kill(m_appPids.value(id), 0) == 0)) continue;
-            m_appPids[id] = launchApp(id, a->exec);
+            const qint64 pid = launchProjectedApp(*a);
+            if (pid <= 0) continue;
+            m_appPids[id] = pid;
             m_hiddenApps.insert(id);
+            setDashboardApp(QStringLiteral("map"), id);
         }
         emit currentAppChanged();
     }
@@ -1100,22 +1202,33 @@ public:
         }
         emit tilesChanged();
         emit rowsChanged();
+        emit dashboardSettingsChanged();
         m_configStamp = QFileInfo(userConfigPath()).lastModified();
         emit dockChanged();
         fprintf(stderr, "carui: %d apps configured\n", g_apps.size());
     }
 
-    Q_INVOKABLE QVariantList availableApps() const
+    Q_INVOKABLE QVariantList availableApps(bool showAll = false) const
     {
         QVariantList l;
         for (const AvailableApp &a : g_available) {
+            if (!showAll && !a.sdk.valid) continue;
             QVariantMap m;
             m.insert(QStringLiteral("id"), a.id);
             m.insert(QStringLiteral("name"), a.name);
             m.insert(QStringLiteral("icon"), a.icon);
+            m.insert(QStringLiteral("sdkIntegrated"), a.sdk.valid);
             l.append(m);
         }
         return l;
+    }
+
+    Q_INVOKABLE void authorizeCommunicationApps()
+    {
+        if (!m_permissionApps.isEmpty()) return;
+        m_permissionApps = QStringList{QStringLiteral("sailplay-phone-backend"), QStringLiteral("sailplay-messages-backend"),
+            QStringLiteral("sailplay-phone"), QStringLiteral("sailplay-messages")};
+        requestCommunicationPermission();
     }
 
     Q_INVOKABLE void addMapping(const QString &category, const QString &appId)
@@ -1146,6 +1259,9 @@ public:
 
     Q_INVOKABLE bool toggleApp(const QString &appId)
     {
+        const AvailableApp *a = findAvailable(appId);
+        if (!a || !a->sdk.valid) return false;
+        const QVariantList previousRows = m_rows;
         bool removed = false;
         for (int i = m_rows.size() - 1; i >= 0; --i) {
             if (m_rows.at(i).toMap().value(QStringLiteral("appId")).toString()
@@ -1155,25 +1271,25 @@ public:
             }
         }
         if (!removed) {
-            const AvailableApp *a = findAvailable(appId);
-            if (!a)
-                return false;
             QVariantMap m;
             m.insert(QStringLiteral("category"), QStringLiteral("其他"));
             m.insert(QStringLiteral("appId"), appId);
             m.insert(QStringLiteral("appName"), a->name);
             m_rows.append(m);
         }
+        const bool saved = saveConfig();
+        if (!saved) m_rows = previousRows;
         emit rowsChanged();
-        return saveConfig();
+        return saved;
     }
 
     Q_INVOKABLE bool saveConfig()
     {
-        QFile f(userConfigPath());
+        QSaveFile f(userConfigPath());
         QDir().mkpath(QDir::home().filePath(QStringLiteral(".config/carlife")));
-        if (!f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Text))
             return false;
+        f.write("# Sailplay SDK app selection\n");
         for (const QVariant &v : m_rows) {
             QVariantMap m = v.toMap();
             f.write(m.value("category").toString().toUtf8());
@@ -1181,10 +1297,12 @@ public:
             f.write(m.value("appId").toString().toUtf8());
             f.write("\n");
         }
-        f.close();
-        if (f.error() != QFile::NoError)
+        if (!f.commit())
             return false;
         g_apps = readApps();
+        for (const AppInfo &app : g_apps) {
+            if (!g_recent.contains(app.appId)) g_recent.append(app.appId);
+        }
         m_configStamp = QFileInfo(userConfigPath()).lastModified();
         emit tilesChanged();
         emit dockChanged();
@@ -1194,10 +1312,10 @@ public:
 
     Q_INVOKABLE void tileClicked(int index)
     {
-        if (index < 0 || index >= g_apps.size())
+        const QVariantList visibleApps = tiles();
+        if (index < 0 || index >= visibleApps.size())
             return;
-        const AppInfo &a = g_apps[index];
-        activate(a.appId, a.exec, a.name);
+        dockClicked(visibleApps.at(index).toMap().value(QStringLiteral("appId")).toString());
     }
 
     Q_INVOKABLE void dockClicked(const QString &appId)
@@ -1232,6 +1350,7 @@ public:
     }
 
 signals:
+    void communicationPermissionsFinished(bool successful);
     void playerLyricsAvailable(const QString &key, const QVariantList &rows, int offsetMs);
     void playerPositionAvailable(const QString &service, const QString &trackKey, double seconds);
     void themeSettingsChanged();
@@ -1248,6 +1367,29 @@ signals:
     void statusChanged();
 
 private:
+    QStringList m_permissionApps;
+    void requestCommunicationPermission()
+    {
+        if (m_permissionApps.isEmpty()) { emit communicationPermissionsFinished(true); return; }
+        const QString app = m_permissionApps.first();
+        QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.sailfishos.sailjaild1"),
+            QStringLiteral("/org/sailfishos/sailjaild1"), QStringLiteral("org.sailfishos.sailjaild1"),
+            QStringLiteral("PromptLaunchPermissions"));
+        call << app;
+        auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(call, 120000), this);
+        connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher, app]() {
+            const QDBusPendingReply<QStringList> reply = *watcher;
+            watcher->deleteLater();
+            const QStringList required = app.endsWith(QStringLiteral("backend"))
+                ? QStringList{QStringLiteral("Contacts"), QStringLiteral("CommunicationHistory"), QStringLiteral("Phone")} : QStringList();
+            bool successful = !reply.isError();
+            for (const QString &permission : required) successful = successful && reply.value().contains(permission);
+            if (app == QStringLiteral("sailplay-messages-backend")) successful = successful && reply.value().contains(QStringLiteral("Messages"));
+            if (!successful) { m_permissionApps.clear(); emit communicationPermissionsFinished(false); return; }
+            m_permissionApps.removeFirst();
+            requestCommunicationPermission();
+        });
+    }
     bool m_projection;
     SailplayNavigationHost *m_navigation;
     SailplayContentHost *m_content;
@@ -1409,6 +1551,7 @@ private:
     QNetworkAccessManager *m_artworkNetwork = nullptr;
     QSet<QString> m_artworkPending;
     QMap<QString, qint64> m_appPids;
+    QMap<QString, QProcess *> m_renderers;
     QDateTime m_dashboardStamp;
     QSet<QString> m_hiddenApps;
     QString m_lastHiddenApp;
@@ -1511,7 +1654,9 @@ private:
     void activate(const QString &appId, const QString &exec,
                   const QString &name)
     {
-        if (isMusicApp(appId)) {
+        const AvailableApp *available = findAvailable(appId);
+        if (!available || !available->sdk.valid) return;
+        if (isMusicApp(appId) && !(available && available->sdk.renderer())) {
             ensureMusicBackend(appId);
             moveToFront(appId);
             openMusic();
@@ -1519,7 +1664,6 @@ private:
             return;
         }
         rememberShellOrigin();
-        const AvailableApp *available = findAvailable(appId);
         if (available && available->sdk.contentTemplate() && !available->sdk.navigationTemplate() && m_projection) {
             openContent(*available);
             return;
@@ -1531,6 +1675,7 @@ private:
             m_musicActive = false;
             m_navigation->setActive(true);
             m_navigation->open(available->sdk, name);
+            setDashboardApp(QStringLiteral("map"), appId);
             m_currentApp = appId;
             moveToFront(appId);
             emit dockChanged();
@@ -1557,19 +1702,96 @@ private:
                                  : QStringLiteral("S ") + appKey(appId));
             m_currentApp = appId;
             m_hiddenApps.remove(appId);
+            if (available->sdk.capabilities.contains(QStringLiteral("navigation")))
+                setDashboardApp(QStringLiteral("map"), appId);
             fprintf(stderr, "carui: showing %s\n",
                     name.toUtf8().constData());
             emit currentAppChanged();
             return;
         }
         fprintf(stderr, "carui: launching %s\n", name.toUtf8().constData());
-        m_appPids[appId] = launchApp(appId, exec);
+        const qint64 pid = available ? launchProjectedApp(*available) : launchApp(appId, exec);
+        if (pid <= 0) return;
+        if (available->sdk.capabilities.contains(QStringLiteral("navigation")))
+            setDashboardApp(QStringLiteral("map"), appId);
+        m_appPids[appId] = pid;
         moveToFront(appId);
         if (!m_currentApp.isEmpty())
             hideCurrent();   // the new app replaces the one on screen
         m_currentApp = appId;
         emit dockChanged();
         emit currentAppChanged();
+    }
+
+    qint64 launchProjectedApp(const AvailableApp &app)
+    {
+        if (!app.sdk.renderer()) return launchApp(app.id, app.exec);
+        if (!m_projection || !QFileInfo(app.sdk.rendererExecutable).isExecutable()) return 0;
+        QProcess *process = new QProcess(this);
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("wayland"));
+        environment.insert(QStringLiteral("WAYLAND_DISPLAY"), QStringLiteral("imira-comp-0"));
+        environment.insert(QStringLiteral("QT_IM_MODULE"), QStringLiteral("none"));
+        environment.insert(QStringLiteral("CARLIFE_APP_KEY"), appKey(app.id));
+        environment.insert(QStringLiteral("SAILPLAY_RENDERER_SERVICE"), app.sdk.service);
+        environment.insert(QStringLiteral("SAILPLAY_RENDERER_PATH"), app.sdk.path);
+        process->setProcessEnvironment(environment);
+        process->setProcessChannelMode(QProcess::ForwardedChannels);
+        QTimer *identityTimer = new QTimer(process);
+        identityTimer->setInterval(100);
+        connect(identityTimer, &QTimer::timeout, process, [process, identityTimer, app]() {
+            // Firejail's root supervisor hides its proc children file from
+            // the launcher. Public stat parent IDs still identify this tree.
+            const int attempts = identityTimer->property("attempts").toInt() + 1;
+            identityTimer->setProperty("attempts", attempts);
+            if (attempts > 150 || process->state() == QProcess::NotRunning) { identityTimer->stop(); return; }
+            const qint64 pid = rendererProcessId(process->processId(),
+                identityTimer->property("supervisorStart").toByteArray(), app.sdk.rendererExecutable);
+            if (pid <= 0) return;
+            const QByteArray identity = publishAppIdentity(pid, app.id, true);
+            if (identity.isEmpty()) return;
+            identityTimer->setProperty("identityPid", pid);
+            identityTimer->setProperty("identityBytes", identity);
+            identityTimer->stop();
+            fprintf(stderr, "carui: renderer %s client pid=%lld\n", qPrintable(app.id), static_cast<long long>(pid));
+        });
+        m_renderers.insert(app.id, process);
+        connect(process, static_cast<void(QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished),
+                this, [this, process, identityTimer, app](int code, QProcess::ExitStatus) {
+            identityTimer->stop();
+            const qint64 pid = identityTimer->property("identityPid").toLongLong();
+            QFile record(QStringLiteral("/run/user/100000/sailplay-app-%1").arg(pid));
+            if (pid > 0 && record.open(QIODevice::ReadOnly)
+                && record.readAll() == identityTimer->property("identityBytes").toByteArray()) {
+                record.close();
+                record.remove();
+            }
+            if (m_renderers.value(app.id) != process) return;
+            m_renderers.remove(app.id);
+            m_appPids.remove(app.id);
+            m_hiddenApps.remove(app.id);
+            if (m_currentApp == app.id) { m_currentApp.clear(); emit currentAppChanged(); }
+            fprintf(stderr, "carui: renderer %s exited code=%d\n", qPrintable(app.id), code);
+            process->deleteLater();
+        });
+        connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, process, [process]() {
+            process->closeWriteChannel();
+            if (!process->waitForFinished(1500)) {
+                process->terminate();
+                if (!process->waitForFinished(1500)) { process->kill(); process->waitForFinished(1000); }
+            }
+        });
+        process->start(QStringLiteral("/usr/bin/sailjail"), QStringList() << QStringLiteral("-p")
+            << app.sdk.rendererDesktopId << QStringLiteral("--") << app.sdk.rendererExecutable);
+        if (!process->waitForStarted(1000)) {
+            m_renderers.remove(app.id);
+            fprintf(stderr, "carui: renderer %s failed: %s\n", qPrintable(app.id), qPrintable(process->errorString()));
+            process->deleteLater();
+            return 0;
+        }
+        identityTimer->setProperty("supervisorStart", processFields(process->processId()).value(19));
+        identityTimer->start();
+        return process->processId();
     }
 
     void writeCmd(const QString &cmd)

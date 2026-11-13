@@ -1,4 +1,10 @@
-# Sailplay SDK Architecture Proposal
+# Sailplay SDK Architecture and TODO
+
+Reviewed against the working tree on 2026-11-12. Section 6 describes the current
+implementation, section 9 retains dated implementation and verification
+checkpoints, and section 10 lists the remaining work. Device results below are
+retained verification records. The current device state requires a fresh read
+before the next installation or acceptance run.
 
 ## 1. Recommended Architecture
 
@@ -63,7 +69,10 @@ The map canvas is an optional extension:
 - The application provides pixels.
 - Sailplay owns common controls and layout.
 
-Google's official [[Car App Library](<https://developer.android.com/training/cars/apps/library>)](https://developer.android.com/training/cars/apps/library) documents the same broad host-template approach, while its [[release notes](<https://developer.android.com/jetpack/androidx/releases/car-app>)](https://developer.android.com/jetpack/androidx/releases/car-app) describe map canvas plus host content.
+Google's official Car App Library documents the host-template approach, and
+its release notes describe map canvas plus host content.
+[Car App Library](https://developer.android.com/training/cars/apps/library)
+[Release notes](https://developer.android.com/jetpack/androidx/releases/car-app)
 
 ## 4. D-Bus Service Ownership and Sailjail Integration
 
@@ -78,11 +87,17 @@ This is a useful fit for Sailjail:
 - `OrganizationName` and `ApplicationName` define the name the app may own.
 - `ExecDBus` supports background activation without showing a window.
 
-Reference: [[Official Sailfish Launcher Documentation](<https://docs.sailfishos.org/Reference/Core_Areas_and_APIs/Apps_and_MW/Lipstick/Launchers/>)](https://docs.sailfishos.org/Reference/Core_Areas_and_APIs/Apps_and_MW/Lipstick/Launchers/)
+The launcher contract documents these identity and activation fields.
+[Official Sailfish Launcher Documentation](https://docs.sailfishos.org/Reference/Core_Areas_and_APIs/Apps_and_MW/Lipstick/Launchers/)
 
 This avoids assuming every sandboxed app can call a newly invented central Sailplay bus name.
 
-Real permissions still need testing, especially renderer access to the private compositor.
+The dedicated counter renderer has passed installed-device Sailjail activation,
+private Wayland access, directed D-Bus calls and compositor input checks.
+Its profile grants the renderer's Wayland socket and backend access. The host's
+raw input endpoint remained inaccessible. Each adopting application's profile
+and physical phone/vehicle behavior still require integration acceptance.
+[Renderer binding and permissions](sdk/README.md#dedicated-car-renderers)
 
 ### API Versioning Principles
 
@@ -92,7 +107,8 @@ Real permissions still need testing, especially renderer access to the private c
 - Ship the XML as the source of truth.
 - Avoid opaque JSON strings as the entire API.
 
-Reference: [[D-Bus API Design Guidance](<https://dbus.freedesktop.org/doc/dbus-api-design.html>)](https://dbus.freedesktop.org/doc/dbus-api-design.html)
+The versioning rules follow the D-Bus API design guidance.
+[D-Bus API Design Guidance](https://dbus.freedesktop.org/doc/dbus-api-design.html)
 
 ## 5. Ownership and Lifecycle Contract
 
@@ -108,6 +124,12 @@ Ownership and lifecycle must be explicit before declaring SDK v1 stable.
 | Backend crashes | Clear stale UI and actions; reconnect to a new owner with a fresh snapshot |
 | User explicitly stops playback/navigation | Honor stop; leases must not secretly restart activity |
 | All views close and no active work remains | Permit backend to exit |
+
+Mconnect's explicit-close policy also exits during playback when the phone
+window closes with no car lease. A hidden car lease retains its backend.
+When the final car lease ends, a closed or never-opened phone presentation
+allows immediate shutdown. Other applications retain their own work/exit
+policy. The release-55 checkpoint below records this Mconnect behavior.
 
 ### Lifecycle Implementation Requirements
 
@@ -130,36 +152,55 @@ Slow work should be asynchronous. Both UIs submit commands to the backend instea
 
 ## 6. Current Codebase Assessment
 
-Current code supports this architectural direction but does not yet implement the complete model.
+App1, Session1, Navigation1, Content1, the host templates and the dedicated
+renderer path are implemented. Remaining integration and physical acceptance
+work is listed in section 10.
 
 ### 6.1 Mconnect Lifecycle
 
 The native C++/Silica runtime owns playback, storage and MPRIS independently
 of the phone QML tree. Closing the phone presentation releases its QML and
-polling, while car leases and ongoing work retain the core. Show rebuilds the
-phone presentation over that core. The integration and installed verification
-are recorded below. [Background music integration](MUSIC.md)
+polling. Car leases retain the core, including while hidden. Explicit phone
+close with no car lease exits the application, and the final car lease allows
+exit when the phone presentation is closed. Show rebuilds the phone
+presentation over the retained core. The integration also exposes the existing
+playback queue through Content1. Release 56 fixes playback-position binding
+after slider release and cancellation. Installed finger-drag acceptance remains
+open. [Native Mconnect integration](sdk/integrations/mconnect/README.md)
 
 ### 6.2 Navigation Provider Abstraction
 
-**Reference:** [[navigationfeed.py — Line 24](<https://chatgpt.com/home/bin4ry/hadk/hybris/mw/harbour-sailplay/carplay_proto/navigationfeed.py:24>)](/home/bin4ry/hadk/hybris/mw/harbour-sailplay/carplay_proto/navigationfeed.py:24)
+`NavigationFeed` retains the Organic Maps legacy snapshot reader.
+`ProviderNavigationFeed` selects validated SDK or legacy guidance, and
+`NavigationSender` consumes the common provider model. New applications declare
+their service and capabilities and export Navigation1 on caller-owned sessions.
+The Qt navigation host supplies compact/expanded guidance, optional map pixels,
+gestures and destination controls. A second fake provider has passed integration
+checks. Acceptance with a second real navigation application remains open.
+[Provider selection](carplay_proto/navigationproviders.py)
+[Navigation host](display-source/carui/navigationhost.cpp)
 
-The existing implementation and its file scanning are Organic Maps specific.
-
-**Required action:**
-
-- Preserve the current implementation as a legacy adapter.
-- Expose a provider-neutral navigation interface to new applications.
+Organic Maps retains one framework, route, location source and writable state.
+Phone and car presentations have separate lifetimes and host UI state. While
+the phone map is open, the car canvas receives that map viewport, so panning
+and zooming are shared. Independent phone/car map cameras remain unfinished.
+[Organic Maps integration](sdk/integrations/organicmaps/README.md)
 
 ### 6.3 Dedicated Car Renderer Activation
 
-**Reference:** [[main.cpp — Line 332](<https://chatgpt.com/home/bin4ry/hadk/hybris/mw/harbour-sailplay/display-source/carui/main.cpp:332>)](/home/bin4ry/hadk/hybris/mw/harbour-sailplay/display-source/carui/main.cpp:332)
+Python and Qt desktop readers validate `X-Sailplay-RendererDesktop`, the
+companion executable and its enabled Sailjail identity. Carui launches declared
+renderers through `sailjail -p`, supervises their processes and publishes the
+actual Wayland client's PID/start-time identity. Legacy projected native apps
+retain their existing launch path. [Carui launch implementation](display-source/carui/main.cpp)
 
-The current code launches projected binaries onto Imira.
-
-The comment near line 59 acknowledges skipping normal wrappers because they would connect applications to Lipstick.
-
-**Required action:** Treat sandboxed activation of a dedicated car renderer as an early validation task, not as an already solved problem.
+The qmake SDK includes `SailplayRenderer`, which attaches to the shared backend,
+retains hidden leases, follows backend replacement and closes its session on
+host-input EOF. Imira adopts late renderer identities and routes dashboard
+input within their viewport. The installed counter fixture passed three cold
+runs at 1280x720, 1920x720 and 720x1280. Physical touch and vehicle visual
+acceptance remain open. [Renderer binding](sdk/qt/sailplayrenderer.cpp)
+[Compositor identity and input handling](display-source/imira-patches/imira-comp.cpp)
 
 ## 7. Recommended Acceptance Milestone
 
@@ -169,7 +210,9 @@ The first meaningful SDK acceptance milestone should demonstrate that:
 2. Closing either presentation does not terminate shared work.
 3. A second navigation provider integrates without modifications to Sailplay core.
 
-This is stronger evidence of a useful SDK than implementing many API categories upfront.
+Installed reference fixtures and isolated application checks are recorded
+below. Real phone/car acceptance and the second real provider remain the
+acceptance milestone.
 
 ## 8. Summary
 
@@ -189,6 +232,9 @@ The proposed architecture establishes a clear separation of responsibilities:
 
 ## 9. Implementation Progress
 
+The checklist reflects the reviewed working tree. The dated subsections retain
+their release-specific verification scope and limitations.
+
 - [x] App1 and Session1 canonical XML, Python provider/client helpers and Qt/QML client bindings.
 - [x] Caller-owned sessions, asynchronous requests, revisioned snapshots and backend-owner reconnect handling.
 - [x] Backend lifecycle notifications including accepted work whose presentation has closed.
@@ -197,11 +243,13 @@ The proposed architecture establishes a clear separation of responsibilities:
 - [x] Provider-neutral instrument sender with the Organic Maps v1 adapter and a second fake provider integration test.
 - [x] Install and verify the navigation SDK RPM and Qt/Python calls on Sailfish.
 - [x] Mconnect window/core lifecycle separation using its current native runtime.
-- [x] One authoritative map backend with independent phone and car presentations through the navigation template.
+- [x] One authoritative map backend with separate phone/car presentation lifetimes and host navigation UI.
 - [x] Optional map canvas, map gestures and route controls inside the car navigation template.
-- [ ] Sandboxed dedicated renderer activation and Imira/input permission validation.
+- [x] Sandboxed dedicated renderer activation and Imira/input permission validation.
 - [x] Content1 browsing, lists, search, actions and messages, with their host templates.
-- [ ] Real Mconnect and map phone/car acceptance, followed by a second real navigation provider.
+- [ ] Independent phone/car map cameras and gestures over the shared map backend.
+- [ ] Real Mconnect and Organic Maps phone/car acceptance.
+- [ ] A second real navigation provider integrated through the published SDK.
 
 ### Navigation SDK verification (2026-11-10)
 
@@ -223,7 +271,7 @@ The proposed architecture establishes a clear separation of responsibilities:
 - The complete installed QML validator passed and released/rebuilt the phone tree twice over its isolated core fixture. An initial minimal-platform run exposed the platform's 240x320 screen size. The complete retry used a hidden Wayland window with the device's screen dimensions.
 - An isolated installed-core probe restored a two-item legacy Hive queue with its second item selected at twelve seconds, preserved paused state and Unicode MPRIS metadata, and exercised the production carui compatibility ID, dock entry, existing-player reuse and hidden media lease. Graceful carui exit released its final lease and allowed the same core to exit. The compositor command bytes were restored and the test directory, including isolated data and history, was removed under identity/hash guards.
 - Final checks matched the original recent-app history, carui configuration, UI/dashboard state and compositor command bytes. Normal activation had updated only the playback memory's `savedAt` field. Its original bytes were restored under the native file lock and exact hash guards, and all 28 original Mconnect data files matched their saved hashes. Sailplay remained active and enabled, with both installed packages passing root RPM verification.
-- Real phone gesture closure and vehicle visual acceptance remain open, alongside independent map presentations, dedicated renderer sandbox permissions and Content1 templates.
+- At the release-62 checkpoint, real phone gesture closure and vehicle visual acceptance, shared map integration, dedicated renderer sandbox permissions and Content1 templates remained open.
 
 ### Shared map backend verification (2026-11-11)
 
@@ -235,7 +283,7 @@ The proposed architecture establishes a clear separation of responsibilities:
 - Installed Mconnect clients passed directed media updates, Active notifications, paused-state preservation, hidden leases and idle exit. A concurrent device check observed both real application backends and their existing D-Bus identities while their lifecycle suites ran.
 - The installed carui desktop/dock entry and navigation template passed at 1920x720, 1280x720 and 720x1280 with a hidden window. Hiding the template retained its car lease. Graceful carui exit removed its guidance export and the final lease, allowing the map backend to exit. A cleanup check initially matched its own command text. Matching actual process arguments fixed the check, and the verified fixture files and directories were removed on recovery and the complete retry.
 - Guarded restoration matched all saved application data and shell-state bytes. The playback memory differed only in its save timestamp and was restored under its native lock. The exact test-created bookmark backup was removed under its saved hash. The restoration cleanup helper's allowed prefix was corrected for its dedicated temporary directory, and both verified restoration sources were removed. All installed packages passed root RPM verification and Sailplay remained active and enabled.
-- Dedicated map canvas rendering, sandboxed renderer/compositor/input validation, Content1 host templates, physical phone/vehicle acceptance and a second real navigation provider remain unchecked.
+- At the release-64 checkpoint, map canvas rendering, sandboxed renderer/compositor/input validation, Content1 host templates, physical phone/vehicle acceptance and a second real navigation provider remained unchecked.
 
 ### Mconnect source publication (2026-11-11)
 
@@ -257,10 +305,10 @@ The final AArch64 RPM SHA256 values are recorded below.
 - `harbour-sailplay-0.1.1-65.aarch64.rpm` has SHA256 `92afd8923368b0ff356f07e3f999dd6727e55c1f4b4358352895baa93d2f4f1e`.
 - `harbour-mconnect-1.6.0-54.aarch64.rpm` has SHA256 `b1d6fcc0effb60b22734f99de8d0780a042dea8f0165c539f9cdebe89ed4584f`.
 
-Dedicated map canvas rendering, sandboxed renderer/compositor/input validation,
-physical phone/vehicle acceptance and a second real navigation provider remain
-open. The real Mconnect browsing integration currently covers its playback queue
-and search within that queue.
+At the release-65 checkpoint, map canvas rendering, sandboxed
+renderer/compositor/input validation, physical phone/vehicle acceptance and a
+second real navigation provider remained open. The real Mconnect browsing
+integration covers its playback queue and search within that queue.
 
 ### Wireless receiver selection and DAuto recovery verification (2026-11-11)
 
@@ -273,7 +321,7 @@ and search within that queue.
 - [x] Clean the five installation payload/result directories under exact file hashes, stop the created validation timers/services, and remove diagnostic ADB forwards and nc listeners. The final installed RPM passed verification after the cleanup.
 - DAuto uses its restored Native Wireless mode `3` and P2P transport `0`. This run retained its existing `debug-force-p2p-band-24=true` compatibility option and granted overlay permission. A stale receiver group caused Wi-Fi association failures during diagnosis and required a DAuto application restart. The final two reconnects recovered without another application restart.
 - A complementary DAuto `v0.3.12` patch handles transport-setting changes and reopens a closed listener after wireless failure. It is supplied as source with its application instructions. Building and installing an APK with the existing application's signing key is pending. [DAuto recovery patch](receiver-patches/README.md)
-- Physical vehicle UI/audio acceptance, dedicated map rendering and sandboxed renderer permissions, and a second real navigation provider are subsequent milestones.
+- At the release-75 checkpoint, physical vehicle UI/audio acceptance, map canvas rendering, sandboxed renderer permissions and a second real navigation provider were subsequent milestones.
 
 ### Organic Maps canvas implementation (2026-11-11)
 
@@ -305,7 +353,7 @@ and search within that queue.
 - [x] Build and install Sailplay `0.1.1-86` with Organic Maps `2026.11.11-3`. Package checks covered runtime sources, QML, translations, AArch64 binaries, licenses, dependencies and exact source hashes. The 41-file integration patch passed application and reversal against its recorded baseline. Organic Maps source `74014dcf5467d4d3a5e99a4099dfd7f77e5cc16e` is pushed to `downstream/sailfish`. All three installed packages passed root RPM verification, including Mconnect `1.6.0-54`, and phone management UI PID 39901 retained its original start time.
 - Release 85 restored projection after both scheduled reconnects and passed eight consecutive Android-input-service dashboard/application-list switches. Its first reconnect command returned `EALREADY` from the Bluetooth SDP socket, then the existing projection service recovered automatically. The second command succeeded. The reconnect script now retries a busy SDP connection on a fresh socket up to three times, with ten-second timeouts and half-second pauses. Tests cover recovery, the attempt bound and immediate propagation of terminal errors.
 - [x] Repeat the installed map-entry and reconnect regressions on release 86. Both scheduled reconnect commands exited successfully and delivered new Organic Maps frames. Old projection workers exited, the phone management UI remained alive, root RPM verification passed and the final state was `android-auto/projecting`. Eight further Android-input-service taps each switched dashboard/application-list state, ending on the dashboard.
-- Physical hand-touch and visual/audio acceptance, the same-signature DAuto receiver patch installation, a sandboxed dedicated renderer and a second real navigation provider remain open. Phone and car continue to share the map viewport, and map requests retain their one-in-flight, 200-millisecond limit.
+- At the release-86 checkpoint, physical hand-touch and visual/audio acceptance, the same-signature DAuto receiver patch installation, a sandboxed dedicated renderer and a second real navigation provider remained open. Phone and car share the map viewport, and map requests retain their one-in-flight, 200-millisecond limit.
 
 ### Mconnect close policy and map location recovery (2026-11-11)
 
@@ -317,7 +365,7 @@ and search within that queue.
 - [x] Build and install Sailplay `0.1.1-87`, Organic Maps `2026.11.11-4` and Mconnect `1.6.0-55`. Package verification covered exact source hashes, integrated SDK inputs, QML, AArch64 binaries, profiles, licenses and dependencies. Root RPM verification passed for all three installed packages. Installation preserved phone management UI PID 39901 and its recorded start time. The final scheduled reconnect began after that phone management window had closed and verified all phone management processes present at scheduling time.
 - [x] Repeat the installed production destination entry, private keyboard, Chinese offline search and bookmark-group fixture. It retained the existing map backend and phone keyboard owner, restored compositor command bytes and removed its four generated files and directory. Repeat the scheduled release-87 reconnect without restarting DAuto. The command succeeded, old projection workers and the old map backend exited, a replacement map delivered new frames and the final state was `android-auto/projecting`. Eight further Android-input-service taps each switched dashboard/application-list state and returned to the dashboard. Python verification passed 397 unittest tests, 1004 pytest tests and 790 subtests.
 - [x] Remove the five manifested release-87 installation files and their device directory under exact content and directory-ownership checks. The installation unit and reconnect timer/service unloaded. Final access cleanup left no ADB forwards or task nc listeners. Live GitHub checks matched the published Mconnect and Organic Maps source commits.
-- Real-device checks confirmed that location and GPS are enabled and the normal Hybris provider is running. It remains in acquiring state with no current fix and zero satellites used. The isolated recovery fixture validates injected-position behavior. Physical GPS acquisition and real-road navigation still require acceptance. Physical hand-touch and visual/audio acceptance, the same-signature DAuto receiver patch installation, a sandboxed dedicated renderer and a second real navigation provider remain open.
+- Release-87 device checks confirmed that location and GPS were enabled and the normal Hybris provider was running. It was in acquiring state with no current fix and zero satellites used. The isolated recovery fixture validates injected-position behavior. At this checkpoint, physical GPS acquisition, real-road navigation, hand-touch and visual/audio acceptance, the same-signature DAuto receiver patch installation, a sandboxed dedicated renderer and a second real navigation provider remained open.
 
 ### Map preview input, layout and bookmark icons (2026-11-11)
 
@@ -350,3 +398,94 @@ and search within that queue.
 - [x] Preserve the inactive/dead Sailplay service and its original enable state during installation. Before/after checks matched the home Wi-Fi service, Mconnect owner/PID/start time, active music-stream output, hardware mute/volume states, default sink and media volume step. Release 91 also preserved the running audio server and removed its previous-policy digest. The three task-owned uploaded RPMs and installation directories were removed under exact hash and ownership guards. The two initial compatibility-test packages were removed after verifying their exact hashes.
 - [x] Repeat the transient-stream regression against the installed release-91 capture script. Its volume changed from 25% to the temporary 100% during capture, then returned to 25% with an empty device after the stream had ended. Capture exited successfully, hardware sink state and the default output matched their original values, and all four generated files, the directory and the unique entry were removed. Installed empty-volume recovery also passed and removed its unique entry. The release-91 RPM transaction confirmed that identical policy activation was skipped.
 - Physical speaker output and the exact pull-down feedback sound remain unconfirmed. At the last connected installation check, media was step 0 of 12 and the normal music stream retained zero volume. Finger-drag acceptance for Mconnect release 56 and the interrupted post-install automatic-track observation remain open. SSH to the home-network phone later timed out, and the Android receiver was disconnected from ADB.
+
+### Dedicated renderer SDK and sandbox verification (2026-11-12)
+
+- [x] Accept installed renderer declarations through the normal carui app and dock entry points. `X-Sailplay-RendererDesktop` selects a companion desktop with a single `/usr/bin` executable and an enabled Sailjail identity. Python and Qt readers reject missing companions, invalid identities and disabled sandboxing. Carui launches the companion through Sailjail.
+- [x] Add the Qt `SailplayRenderer` binding and counter renderer example. The binding shares state and actions through a caller-owned car session, retains an inactive lease while hidden, reconnects after backend replacement and closes on host-input EOF. The host controls presentation activity and supervises its renderer process.
+- [x] Register the actual Wayland client's PID and start time through the existing compositor identity records. The host follows `/proc/<pid>/stat` parent IDs through both Firejail processes and checks the launch supervisor's saved start time. Identity permissions and renderer ancestry passed on the device. The host removes its exact identity record when the renderer exits.
+- [x] Fix dashboard input routing that selected the shell before checking content windows. Dedicated renderers publish an optional third `renderer` line in the existing PID/start-time identity record. Imira checks the start time and agreement with any available environment key, adopts late identity and role information, and refreshes the dashboard layout. Existing two-line records remain accepted. Dashboard input inside the renderer viewport reaches its Wayland surface, while legacy preview taps follow the shell path.
+- [x] Complete three installed-device cold runs at 1280x720, 1920x720 and 720x1280. Each run created new Imira, carui, sandboxed renderer and D-Bus backend processes. The 1280x720 run deliberately deferred identity publication until after surface mapping, verified rejection of stale start ticks and acceptance of a legacy two-line record, then confirmed automatic renderer-role adoption.
+- [x] Verify the SDK counter reference renderer with a real Wayland shell and automated input through the existing private compositor path. Dashboard center and edge taps, press-move-release, one counter increment per release, input exclusion outside the renderer card, fullscreen input and dashboard restoration passed at all three sizes. The phone SDK session and renderer received the same counter updates.
+- [x] Verify the reference renderer in the device's real Sailjail sandbox and Imira. Zero effective capabilities and `NoNewPrivs` passed, and the host's raw touch-injection endpoint was inaccessible inside the sandbox. Closing the phone session retained the renderer. Hidden leases, hidden backend replacement, presentation restoration, renderer exit and backend preservation passed.
+- [x] Pass 418 unittest tests, 1025 pytest tests and 794 subtests. The extended Qt provider fixture passed on Linux and Sailfish Qt 5.6, covering renderer declarations, disabled sandbox rejection, inactive startup, activation and host-input EOF. SDK files, 86 runtime source files, five translations, AArch64 binaries, dependencies and LF line endings passed package verification.
+- [x] Build and install Sailplay `0.1.1-95`. The final 1,926,848-byte RPM has SHA256 `019016fe44ca98aebb88cc3abce8934f51d20e3030602764a3e5bbf1ece67189`. Root RPM verification passed for Sailplay, Mconnect `1.6.0-56` and Organic Maps `2026.11.11-4`. The upgrade retained the audio server, audio routing, application owners, saved shell configuration and active/running/enabled service state. The installation payload and directory were removed after content checks.
+- [x] Compare the final release-95 device snapshot with the pre-fixture snapshot. Installed packages, service PID/state, binary hashes, configuration, audio routing, application owners and endpoints matched. Sailplay MainPID was 28300 and PulseAudio PID was 3807. The complete fixture removed its exact temporary payloads, profiles, processes, identity records, sockets and framebuffer resources, and restored the original compositor command bytes.
+- An early failed fixture reached its dashboard timer after the renderer had exited and appended `D - -` to `/tmp/imira-touch`. Recovery removed those exact command bytes under a content and owner guard, retaining the empty file. The original file's existence before that early fixture remains unverified. Subsequent complete runs captured and restored the command bytes, removed their temporary payloads and profiles, and released their compositor/input resources.
+- Earlier fixture failures exposed QML logging to the system log, JSON key-order assumptions, an incorrect root-owner assumption for Firejail's `/proc` directory, hidden-shell configuration and input injection before hide processing completed. The final fixture parses JSON, uses console logging and a real Wayland shell, checks ancestry and start ticks, and waits for a stable hidden framebuffer state before testing input. The complete installed-device run passed.
+- Physical finger-touch and vehicle visual acceptance of the dedicated renderer remain open. Real Mconnect and map phone/vehicle acceptance, a second real navigation provider, physical GPS acquisition and speaker output remain open. The dedicated renderer reference uses the counter backend, and the current Organic Maps canvas still shares the phone viewport while the phone map is open.
+
+### SDK application selection (2026-11-13)
+
+- [x] Move car-display application selection to a secondary management page. Its default list contains SDK-integrated applications. The pull-down menu exposes all installed applications and marks entries that require SDK integration.
+- [x] Discover SDK navigation providers automatically and restore the last used map application. Installed-device entry tests cover the secondary page, list filtering and saved selection.
+- [ ] Accept application selection and remembered map restoration through physical touch and the vehicle display.
+
+### System phone and messages SDK adapters (2026-11-13)
+
+- [x] Verify installed system interfaces and shared models. The device exposes `org.nemomobile.voicecall`, `org.sailfishos.Messages` and the Contacts/CommHistory QML modules. A privileged read-only probe loaded contacts, call history and message conversations.
+- [x] Implement caller-owned SDK services for phone and messages using the system data models and existing call/message services. Shared Contacts, CommHistory and VoiceCall modules provide access to the installed native components. Dialing keeps the system phone service's SIM-selection flow. SMS submission uses the native message service and replies retain their conversation account.
+- [x] Add SDK renderers with contacts, recent calls, a dial pad, call controls, conversation reading and message composition. Message text wraps and paginates with Unicode code-point boundaries. The composer accounts for the private keyboard and supports scrolling.
+- [x] Package backend activation, Sailjail permissions and SDK desktop declarations. Discover the adapters automatically and migrate the old phone/messages launcher mappings. The secondary page includes a phone/messages permission prompt. The installed device granted the two backends their declared Contacts, CommunicationHistory, Phone and Messages permissions and allowed both renderer identities to launch. A fixed setgid-privileged launcher enters Sailjail for background database access.
+- [x] Verify pagination, stale selections, concurrent queries, backend replacement, hidden sessions and renderer shutdown. Linux and Sailfish ARM communication fixtures cover initial deferred loading, ordered message pages, emoji boundaries, concurrent queries and mutations, stale history/account selections, inactive callers and native rejection/failure. Installed adapters pass cold activation, hidden reads, backend replacement, restored reads and final-session idle exit. Normal renderer entries pass sandbox, hidden/restored PID reuse, host EOF and private keyboard startup.
+- [x] Build and install Sailplay `0.1.1-109` on `192.168.3.240`. Verify 27 communication, SDK, QML, translation and permission files against the RPM digests, both AArch64 executables and the launcher's root/privileged ownership and 2755 mode. The 2,026,676-byte RPM has SHA256 `9d1e6db5ce8eb8518de9a9ff14844c31dee6d02ddb9fea51a38303b235dd6897`. Pass 419 unittest tests, 1026 pytest tests and 1004 subtests, the Qt provider/content-host fixtures and the latest ARM communication fixtures. Final normal renderer and secondary-page checks pass. Root RPM verification succeeds for Sailplay, Mconnect and Organic Maps, the audio/configuration installation comparison passes and PulseAudio remains PID 3807. Remove the exact uploaded payloads, temporary directories, renderer identity records, sockets and task framebuffer resources. Remove the empty directory left by the ConnMan service harness after ownership/content checks. The final audit finds no communication backend processes, service owners, projection endpoints, task directories or Sailplay core files.
+- [ ] Accept real calls, SMS delivery, head-unit call audio, physical touch and vehicle display.
+- [ ] Render and open MMS attachments. The current reader displays an attachment placeholder when an event has no text.
+- Successful native dial/message actions report request submission. Device validation read 294 available contacts, two call-history entries and all three existing conversation bodies and reply targets. Mutating native actions were exercised against isolated mocks.
+
+### Communication adapter validation on 192.168.3.234 (2026-11-13)
+
+- [x] Connect using the previous device credentials and the user's requested host-key verification bypass. Verify SailfishOS `5.2.0.22`, AArch64, UID 100000 and privileged GID 996. Upgrade Sailplay from `0.1.1-57` to `0.1.1-109` and verify its installed ELF payload, launcher ownership/mode and all five application/networking packages with root RPM verification.
+- [x] Grant the declared permissions and launch allowance for the two communication backends and two renderers. Pass installed SDK cold activation, hidden queries, backend replacement, restored queries and final-session idle exit. Pass the latest ARM isolated communication tests for initial loading, ordered pages, emoji boundaries, stale selections, concurrent requests, inactive callers and native action rejection/failure.
+- [x] Validate the real shared models' empty state. Both the privileged model probe and the sandboxed SDK services expose zero available contacts, zero call-history entries and zero conversations. A read-only query of the real CommHistory database confirms zero Events and Groups. The native SMS account is available. The earlier nonempty conversation validation above belongs to `192.168.3.240`.
+- [x] Pass normal phone/messages renderer launches, sandbox checks, hidden/restored PID reuse, host EOF and private keyboard startup. Pass the normal mobile settings entry, secondary SDK-only list, all-app pull-down toggle and authorization menu. Installed discovery identifies Mconnect, phone and messages as three SDK applications. The installed Organic Maps `2026.10.25-2` provides no Navigation1 declaration, so this device has zero SDK navigation providers.
+- [x] Complete the final cleanup and state comparison. Remove the uploaded RPM and every task directory, renderer identity record, socket and task framebuffer resource. Both communication backends and D-Bus owners exit. PulseAudio remains PID 3533, native phone/messages owners retain `:1.10` and `:1.58`, and the audio routing comparison passes. Main ConnMan retains PID 34589 and owner `:1.149831`, and vpnd retains PID 57947 and owner `:1.156243`. Sailplay is active, running and enabled with MainPID 42873. The release-57 upgrade creates an empty `audio-route-recovery.json.lock` as the new audio recovery initializes. Existing saved configuration checks pass. Kernel core handling is `|/bin/false`. Evidence is retained under `.private/communication-234-20261113/`.
+- [ ] Accept nonempty real contact/conversation browsing, real calls and SMS delivery, physical touch, vehicle presentation and remembered navigation-provider restoration on this device. The completed nonempty action/pagination checks use isolated mocks, and its current installed map has no SDK declaration.
+
+## 10. Remaining Work and Session Recovery (2026-11-12)
+
+### Reviewed checkout and retained verification
+
+- [x] Trace the current desktop readers, carui renderer launch/supervision, Qt renderer binding, compositor identity/input routing, provider-neutral navigation and application integration code against the progress checklist.
+- [x] Confirm the local release-95 RPM matches SHA256 `019016fe44ca98aebb88cc3abce8934f51d20e3030602764a3e5bbf1ece67189`. The retained package record covers 86 runtime source files, five translations, SDK sources, AArch64 binaries and the Sailjail dependency.
+- [x] Read the successful retained renderer result in `.private/sdk-renderer-20261112/device-result.json`. It records all three cold runs, stale-start rejection, legacy identity acceptance, late renderer-role adoption, dashboard/fullscreen input, hidden reconnect, backend preservation and guarded cleanup. Earlier files named `installed-final.log` and `installation-final.json` describe preceding attempts and releases. The successful result and `cold-touch-before95.log` / `cold-touch-after95.log` identify the release-95 checkpoint.
+- [x] Rerun the current Linux suites during this review. All 418 unittest tests, 1025 pytest tests and 794 subtests passed. The current qmake Qt provider fixture passed renderer declaration, sandbox rejection, hidden/active sessions and host-input EOF checks. `git diff --check` passed.
+- [x] Review and publish the dedicated-renderer source batch with the release-109 application-management and communication-adapter work. Include renderer sources, examples, discovery/host/compositor changes, translations, packaging inputs and tests. The qdbusxml2cpp interfaces, qmake resource sources and communication executable are generated build outputs. The normal qmake projects regenerate the required interfaces and resources from the tracked SDK XML inputs.
+
+### SDK application acceptance
+
+- [ ] Give phone and car map cameras independent panning/zooming while retaining one authoritative map backend, route, location source and writable state. Verify both open presentations and phone close/reopen through the normal application entry points.
+- [ ] Accept real Mconnect and Organic Maps simultaneously on phone and car, including explicit phone close, hidden car views, final-lease closure, backend replacement and disconnect/reconnect. Use the release-55 Mconnect close policy described above.
+- [ ] Verify Mconnect release-56 playback progress with physical slider drags, release/cancellation and subsequent elapsed-time updates on the installed phone UI.
+- [ ] Verify the projected destination controls, preview input interception, bookmark state, private keyboard and map gestures with physical touch and vehicle display observation.
+- [ ] Integrate a second real navigation provider through installed metadata and Navigation1 without Sailplay core changes. Cover guidance, stop, owner replacement and phone/car lifecycle.
+- [ ] Accept the dedicated renderer's physical touch and vehicle presentation. Application-specific renderer adoption must verify its own Sailjail profile and shared backend.
+
+### Device and receiver acceptance
+
+- [ ] Verify physical GPS acquisition and real-road route start/recovery. The completed no-fix/recovery regression uses injected coordinates.
+- [ ] Verify speaker output, pull-down feedback sound and playback routing after projection teardown. The release-91 short-stream and empty-volume recovery regressions passed, while audible output remains open.
+- [ ] Complete the interrupted longer post-install automatic-track/routing observation with live music. The later release-95 fixture snapshot contains no active music stream.
+- [ ] Build/install the complementary DAuto recovery patch with the existing application's signing key and verify transport-setting changes and failed-listener recovery. The retained wireless runs use the original installed DAuto `0.3.12`. [Receiver patch](receiver-patches/README.md)
+
+### ConnMan VPN regression reported on 2026-11-13
+
+- [x] Refresh the public source to ConnMan `1.40+git39`, commit `9339f68fac76155d68b9671120cea1bacd3df505`, dated 2026-11-12. The new commits cover route-monitor cleanup and retry, RTNL synchronization, DNS handling and WireGuard resolver error accounting. Service removal still retains its old public interface until final destruction. Apply the existing lifecycle fix to the refreshed base, cross-build the real service harness and pass all 14 tests as the device session user. Publish commit `d705143d93ca0b576c603787236e6f4cbf6fdb5d` to `my/fix-service-registry-lifetime-git39` and verify the remote ref. The installed release-3 daemon below retains its tested `1.40+git26.6` package baseline.
+- The lifecycle fix follows the shared ConnMan service registry. New VPN protocols use the existing generic vpnd bridge. ConnMan releases require compatibility checks of the patch and build configuration, including preservation of that bridge in the replacement main daemon.
+- [x] Trace the retained release-1 VPN discovery regression against the report of SailfishOS `5.2.0.22` and ConnMan `1.40+git26.6`. Disabling every VPN protocol removes the main daemon's built-in `plugins/vpn.c` bridge. Release 2 already enables that bridge through the OpenVPN build option. The affected user's installed fix-package release is still unknown.
+- [x] Add release-3 RPM payload checks for the AArch64 executable and built-in VPN symbol. Keep build outputs in each build's own RPM directory, derive the executable version from the spec release and use a temporary protected Git configuration for the older WSL Git.
+- [x] Build and inspect `sailplay-connman-fix-1.0.0-3.aarch64.rpm` (557,789 bytes, SHA256 `7bebcf6bf824ddc45476b46f8edadbe9662251bfa817f58f3629edcbd8691e48`). Both the bridge-free AArch64 daemon and an x86-64 executable were rejected by the RPM checks. All 14 service tests passed. The extracted daemon passed private-bus/network-namespace checks for nine VPN types, listed/direct properties, missing-transport disconnect propagation, failure/idle states, removal, same-path recreation and replacement of vpnd while retaining the main ConnMan owner. The earlier daemon reproduced zero VPN services against the same fixture.
+- [x] Compare release-3 runtime dependencies with release 2. All 755 external dynamic symbols and GLIBC symbol version requirements match. The available SDK target has `5.1.0.11` OS metadata, glibc `2.41+git5` and libgsupplicant `1.0.30`; the source build uses pinned `1.0.31` headers.
+- [x] Install and verify release 3 on the authorized `192.168.3.234` device running SailfishOS `5.2.0.22` and ConnMan `1.40+git26.6-1.43.1.jolla`. The stock daemon matched its hash gate. An independent rollback timer was tested after `daemon-reload` before installation and cancelled after installed-binary, Wi-Fi and VPN discovery checks passed. The running replacement reports `1.40+git26.6.sailplay3`, both daemons list 31 VPN configurations, and all 14 service tests passed as the session user.
+- [x] Verify real release-3 VPN traffic on that device. Three successful Xray VMess/WebSocket runs returned HTTP 200 both normally and with `curl --interface utun50`, with matching tunnel route lookups and increasing RX/TX counters. They returned to idle on disconnect and preserved configuration keys. Main ConnMan kept PID `34589` and the same D-Bus owner throughout the resumed tests. The second and third successes kept the same vpnd process and owner. The original test configuration had been replaced between sessions, so the resumed runs selected a current existing configuration with reachable server ports. The earlier stock-daemon run also passed real tunnel traffic.
+- [ ] Resolve and accept consecutive VPN reconnects. The successful runs were interspersed with `NoReply` and `OperationAborted` failures. Early retained logs reported an unreachable proxy server. Resumed failure logs also locate a failure at the VPN plugin's `utun50` startup wait with error `-110`. Current Xray plugin source uses a 5000 ms wait, and one failed startup reached Xray's started log after about 5.6 seconds. The cause of startup-duration variation and its production fix remain open. A subsequent main-service connect cleared failure through `OperationAborted`, and a further retry succeeded without daemon restarts. The successful traffic checks establish release-3 VPN bridge functionality while this reconnect acceptance remains incomplete.
+- [x] Complete guarded cleanup and final live verification. All 15 test VPN guard units, temporary logging overrides and both remaining task directories were removed, including the uploaded RPM, service-test binary, rollback/install scripts and result files. Restoring logging restarted vpnd and returned all 31 connections to idle. Main ConnMan retained PID `34589` and owner `:1.149831`. Wi-Fi was online and ordinary HTTPS returned 200. Root RPM verification passed, installed/running replacement hashes matched, and the stock daemon and Xray plugin retained their original hashes. Routes, rules, interfaces and reverse-path filter values matched the resumed pre-test snapshot. The release-3 local RPM hash and shell syntax checks passed, as did `git diff --check`. Evidence is retained in `.private/connman-vpn-20261113/device-234-resume-final.json`, `device-234-resume-final-checks.json` and the three successful `release3-resume-1`, `release3-resume-logged-1` and `release3-resume-retry-1` result files.
+
+### ConnMan upstream review on 2026-11-13
+
+- [x] Read the complete discussion of closed PR #166 and refresh origin to `1.40+git40`, commit `dde68eca`. The maintainer identifies service retention as intentional Wi-Fi architecture. Saved-network disappearance retains the service in `service_hash` and reuses it on reappearance. Forgetting a still-visible network retains its public service and marks it unsaved. The current patch preserves both paths. [Review](https://github.com/sailfishos/connman/pull/166#issuecomment-6849323905)
+- [x] Extend the source review with normal network-entry regression fixtures. Both stock retention cases pass. An unsaved network removed with an outstanding service reference and recreated with the same identifier produces an available fresh service in the identifier table, while the duplicate-rejecting interface registry still resolves to the detached old service. Its actual D-Bus Connect handler returns `net.connman.Error.NoCarrier`. The stock fixture fails at the old/new interface identity check. The patched source passes all 17 tests, including the two retention cases.
+- [x] Cross-build the stock and patched git40 service fixtures and repeat the comparison on `192.168.3.234` as the session user. Stock saved-network and visible-network-forget tests pass. Stock unsaved-network replacement fails with the expected SIGABRT. The patched fixture passes all 17 tests. Remove the uploaded executables and all fixture temporary files after ownership, path and content checks. Evidence is retained under `.private/connman-review-20261113/`.
+- [x] Publish the refreshed lifecycle patch and the three normal-network-entry regressions in the formal ConnMan service test suite. The git40-based branch is `my/fix-service-registry-lifetime-git40`, commit `b8b10a6b3efacaf4a6cc67a0c5f5af5d95213988`. Verify the live remote ref after pushing. [Published source](https://github.com/0312birdzhang/connman/tree/fix-service-registry-lifetime-git40)
+- [x] Refresh the installed-device read-only evidence. The first read finds 11 Wi-Fi services and 31 VPN services. The final read finds 23 Wi-Fi services and the same 31 VPN services, with matching listed/direct properties and an unavailable saved Wi-Fi service. Main ConnMan retains PID `34589` and owner `:1.149831`, and vpnd retains PID `57947`. The installed package is `sailplay-connman-fix-1.0.0-3` with the existing `1.40+git26.6` package baseline. The final read finds zero review fixture task directories. Document the upstream rejection, intentional retention paths, fixture limits and local-workaround status in `connman-patches/README.md`.
+- [ ] Capture the real-daemon Wi-Fi collision through the normal projection handover and identify the outstanding reference owner. Agree with upstream on interface ownership when an unsaved service has actually left the identifier table and its identifier reappears. The review fixtures deliberately retain a reference and substitute the D-Bus registry, so real-daemon acceptance remains open.

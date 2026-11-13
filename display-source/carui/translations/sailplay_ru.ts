@@ -415,6 +415,186 @@ Start music on your phone</source>
       <source>Enable guidance voice</source>
       <translation>Включить голосовые подсказки</translation>
     </message>
+    <message>
+      <source>SDK maps are detected automatically. The last map used on the car display opens next time.</source>
+      <translation>Карты с SDK определяются автоматически. При следующем подключении откроется последняя карта, использованная в автомобиле.</translation>
+    </message>
+    <message>
+      <source>Manage displayed apps</source>
+      <translation>Управление отображаемыми приложениями</translation>
+    </message>
+    <message>
+      <source>Car display</source>
+      <translation>Экран автомобиля</translation>
+    </message>
+    <message>
+      <source>Show SDK apps</source>
+      <translation>Показать приложения с SDK</translation>
+    </message>
+    <message>
+      <source>Show all apps</source>
+      <translation>Показать все приложения</translation>
+    </message>
+    <message>
+      <source>Select the SDK apps to show on the car display. Changes are saved and applied immediately.</source>
+      <translation>Выберите приложения с SDK для экрана автомобиля. Изменения сохраняются и применяются сразу.</translation>
+    </message>
+    <message>
+      <source>Sailplay SDK integration required</source>
+      <translation>Требуется интеграция Sailplay SDK</translation>
+    </message>
+    <message>
+      <source>No SDK apps installed</source>
+      <translation>Приложения с SDK не установлены</translation>
+    </message>
+    <message>
+      <source>Install a map app with Sailplay SDK support</source>
+      <translation>Установите приложение карт с поддержкой Sailplay SDK</translation>
+    </message>
+    <message>
+      <source>A conversation is loading</source>
+      <translation>Разговор загружается</translation>
+    </message>
+    <message>
+      <source>A request is already in progress</source>
+      <translation>Запрос уже выполняется</translation>
+    </message>
+    <message>
+      <source>Answer</source>
+      <translation>Ответить</translation>
+    </message>
+    <message>
+      <source>Attachment</source>
+      <translation>Вложение</translation>
+    </message>
+    <message>
+      <source>Call</source>
+      <translation>Позвонить</translation>
+    </message>
+    <message>
+      <source>Choose one SMS recipient</source>
+      <translation>Выберите одного получателя SMS</translation>
+    </message>
+    <message>
+      <source>Clear</source>
+      <translation>Очистить</translation>
+    </message>
+    <message>
+      <source>Contacts</source>
+      <translation>Контакты</translation>
+    </message>
+    <message>
+      <source>Contacts are loading</source>
+      <translation>Контакты загружаются</translation>
+    </message>
+    <message>
+      <source>Content changed. Refresh and try again.</source>
+      <translation>Содержимое изменилось. Обновите и повторите попытку.</translation>
+    </message>
+    <message>
+      <source>Could not load conversation</source>
+      <translation>Не удалось загрузить разговор</translation>
+    </message>
+    <message>
+      <source>Dial pad</source>
+      <translation>Клавиатура набора</translation>
+    </message>
+    <message>
+      <source>Enter a recipient and message</source>
+      <translation>Введите получателя и сообщение</translation>
+    </message>
+    <message>
+      <source>Enter a valid phone number</source>
+      <translation>Введите действительный номер телефона</translation>
+    </message>
+    <message>
+      <source>Hang up</source>
+      <translation>Завершить</translation>
+    </message>
+    <message>
+      <source>Invalid call control</source>
+      <translation>Недопустимая команда вызова</translation>
+    </message>
+    <message>
+      <source>Invalid content request</source>
+      <translation>Недопустимый запрос содержимого</translation>
+    </message>
+    <message>
+      <source>Message</source>
+      <translation>Сообщение</translation>
+    </message>
+    <message>
+      <source>Messages</source>
+      <translation>Сообщения</translation>
+    </message>
+    <message>
+      <source>Mute microphone</source>
+      <translation>Отключить микрофон</translation>
+    </message>
+    <message>
+      <source>New message</source>
+      <translation>Новое сообщение</translation>
+    </message>
+    <message>
+      <source>Phone</source>
+      <translation>Телефон</translation>
+    </message>
+    <message>
+      <source>Phone number</source>
+      <translation>Номер телефона</translation>
+    </message>
+    <message>
+      <source>Recent calls</source>
+      <translation>Последние вызовы</translation>
+    </message>
+    <message>
+      <source>Reply</source>
+      <translation>Ответить</translation>
+    </message>
+    <message>
+      <source>Request submitted</source>
+      <translation>Запрос отправлен</translation>
+    </message>
+    <message>
+      <source>Selection is no longer available</source>
+      <translation>Выбранный элемент больше недоступен</translation>
+    </message>
+    <message>
+      <source>Send</source>
+      <translation>Отправить</translation>
+    </message>
+    <message>
+      <source>The call is no longer available</source>
+      <translation>Вызов больше недоступен</translation>
+    </message>
+    <message>
+      <source>The car app is inactive</source>
+      <translation>Приложение автомобиля неактивно</translation>
+    </message>
+    <message>
+      <source>The system service rejected the request</source>
+      <translation>Системная служба отклонила запрос</translation>
+    </message>
+    <message>
+      <source>Unknown</source>
+      <translation>Неизвестно</translation>
+    </message>
+    <message>
+      <source>Unmute microphone</source>
+      <translation>Включить микрофон</translation>
+    </message>
+    <message>
+      <source>Authorize phone and messages</source>
+      <translation>Разрешить телефон и сообщения</translation>
+    </message>
+    <message>
+      <source>Phone and messages authorized</source>
+      <translation>Телефон и сообщения разрешены</translation>
+    </message>
+    <message>
+      <source>Authorization cancelled or failed</source>
+      <translation>Разрешение отменено или не удалось</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>
@@ -441,6 +621,10 @@ Start music on your phone</source>
     <message>
       <source>Could not start the background player</source>
       <translation>Не удалось запустить фоновый плеер</translation>
+    </message>
+    <message>
+      <source>Could not save map selection</source>
+      <translation>Не удалось сохранить выбор карты</translation>
     </message>
   </context>
 </TS>

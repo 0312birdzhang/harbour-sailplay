@@ -3,6 +3,8 @@ CONFIG += c++11
 INCLUDEPATH += $$PWD $$OUT_PWD
 HEADERS += $$PWD/sailplaysession.h $$PWD/sailplayapplication.h $$PWD/sailplayprovider.h
 SOURCES += $$PWD/sailplaysession.cpp $$PWD/sailplayapplication.cpp $$PWD/sailplayprovider.cpp
+HEADERS += $$PWD/sailplayrenderer.h
+SOURCES += $$PWD/sailplayrenderer.cpp
 HEADERS += $$PWD/sailplaycontent.h
 SOURCES += $$PWD/sailplaycontent.cpp
 

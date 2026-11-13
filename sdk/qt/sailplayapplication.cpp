@@ -4,6 +4,8 @@
 #include <QFileInfo>
 #include <QMap>
 #include <QRegExp>
+#include <QDir>
+#include <QSettings>
 
 SailplayApplication SailplayApplication::fromDesktopFile(const QString &filename)
 {
@@ -53,6 +55,21 @@ SailplayApplication SailplayApplication::fromDesktopFile(const QString &filename
         return result;
     for (const QString &capability : result.capabilities) {
         if (!capabilityPattern.exactMatch(capability)) return result;
+    }
+    if (result.presentation == QStringLiteral("renderer")) {
+        result.rendererDesktopId = values.value(QStringLiteral("X-Sailplay-RendererDesktop"));
+        const QRegExp desktopPattern(QStringLiteral("[A-Za-z0-9_-][A-Za-z0-9_.-]*"));
+        if (!desktopPattern.exactMatch(result.rendererDesktopId)) return result;
+        const QString rendererFile = QFileInfo(filename).dir().filePath(result.rendererDesktopId + QStringLiteral(".desktop"));
+        QSettings renderer(rendererFile, QSettings::IniFormat);
+        const QString organization = renderer.value(QStringLiteral("X-Sailjail/OrganizationName")).toString();
+        const QString application = renderer.value(QStringLiteral("X-Sailjail/ApplicationName")).toString();
+        result.rendererExecutable = renderer.value(QStringLiteral("Desktop Entry/Exec")).toString();
+        const QRegExp executablePattern(QStringLiteral("/usr/bin/[A-Za-z0-9_.-]+"));
+        if (renderer.value(QStringLiteral("Desktop Entry/Type")).toString() != QStringLiteral("Application")
+            || !servicePattern.exactMatch(organization + QLatin1Char('.') + application)
+            || renderer.value(QStringLiteral("X-Sailjail/Sandboxing")).toString() == QStringLiteral("Disabled")
+            || !executablePattern.exactMatch(result.rendererExecutable)) return result;
     }
     result.valid = true;
     return result;

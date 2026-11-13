@@ -1,5 +1,6 @@
 #include "sailplayprovider.h"
 #include "sailplaysession.h"
+#include "sailplayrenderer.h"
 #include "musichost.h"
 
 #include <QCoreApplication>
@@ -14,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <unistd.h>
 
 #define CHECK(condition) do { if (!(condition)) { fprintf(stderr, "SDK_PROVIDER_CHECK_FAILED line=%d %s\n", __LINE__, #condition); std::exit(1); } } while (false)
 
@@ -257,6 +259,44 @@ int main(int argc, char **argv)
     music.close();
     CHECK(waitFor([&]() { return provider.sessionCount() == 0; }));
     CHECK(errors == 0);
+    CHECK(clientNames(bus) == originalNames);
+    QFile rendererDesktop(temporary.path() + QStringLiteral("/renderer.desktop"));
+    CHECK(rendererDesktop.open(QIODevice::WriteOnly));
+    rendererDesktop.write("[Desktop Entry]\nType=Application\nExec=/usr/bin/example-renderer\n"
+        "[X-Sailjail]\nOrganizationName=org.example\nApplicationName=Renderer\n");
+    rendererDesktop.close();
+    CHECK(desktop.open(QIODevice::WriteOnly | QIODevice::Append));
+    desktop.write("X-Sailplay-Presentation=renderer\nX-Sailplay-RendererDesktop=renderer\n");
+    desktop.close();
+    const SailplayApplication rendererDeclaration = SailplayApplication::fromDesktopFile(desktop.fileName());
+    CHECK(rendererDeclaration.renderer() && rendererDeclaration.rendererDesktopId == QStringLiteral("renderer"));
+    CHECK(rendererDesktop.open(QIODevice::WriteOnly | QIODevice::Append));
+    rendererDesktop.write("Sandboxing=Disabled\n");
+    rendererDesktop.close();
+    CHECK(!SailplayApplication::fromDesktopFile(desktop.fileName()).valid);
+    const int originalInput = dup(STDIN_FILENO);
+    int input[2];
+    CHECK(originalInput >= 0 && pipe(input) == 0 && dup2(input[0], STDIN_FILENO) >= 0);
+    close(input[0]);
+    qputenv("WAYLAND_DISPLAY", "imira-comp-0");
+    qputenv("CARLIFE_APP_KEY", "fixture");
+    qputenv("SAILPLAY_RENDERER_SERVICE", service.toUtf8());
+    qputenv("SAILPLAY_RENDERER_PATH", appPath.toUtf8());
+    {
+        SailplayRenderer renderer;
+        int closed = 0;
+        QObject::connect(&renderer, &SailplayRenderer::closed, [&]() { ++closed; });
+        CHECK(renderer.start() && !renderer.start());
+        CHECK(write(input[1], "inactive\n", 9) == 9);
+        CHECK(waitFor([&]() { return renderer.ready() && provider.sessionCount() == 1
+            && provider.activeSessionCount() == 0 && !renderer.active(); }));
+        CHECK(write(input[1], "active\n", 7) == 7);
+        CHECK(waitFor([&]() { return renderer.active() && provider.activeSessionCount() == 1; }));
+        close(input[1]);
+        CHECK(waitFor([&]() { return closed == 1 && provider.sessionCount() == 0; }));
+    }
+    CHECK(dup2(originalInput, STDIN_FILENO) >= 0);
+    close(originalInput);
     CHECK(clientNames(bus) == originalNames);
     puts("QT_SDK_PROVIDER_PASS canonical-signatures caller-ownership directed-signals hidden-leases owner-loss limits media-host activity backend-replacement teardown");
     return 0;

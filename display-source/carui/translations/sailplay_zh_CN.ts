@@ -415,6 +415,186 @@ Start music on your phone</source>
       <source>Enable guidance voice</source>
       <translation>开启导航语音</translation>
     </message>
+    <message>
+      <source>SDK maps are detected automatically. The last map used on the car display opens next time.</source>
+      <translation>自动识别已集成 SDK 的地图，下次连接时打开上次在车机使用的地图。</translation>
+    </message>
+    <message>
+      <source>Manage displayed apps</source>
+      <translation>管理显示的应用</translation>
+    </message>
+    <message>
+      <source>Car display</source>
+      <translation>车机显示</translation>
+    </message>
+    <message>
+      <source>Show SDK apps</source>
+      <translation>只显示 SDK 应用</translation>
+    </message>
+    <message>
+      <source>Show all apps</source>
+      <translation>显示所有应用</translation>
+    </message>
+    <message>
+      <source>Select the SDK apps to show on the car display. Changes are saved and applied immediately.</source>
+      <translation>选择要在车机显示的 SDK 应用，修改会自动保存并立即生效。</translation>
+    </message>
+    <message>
+      <source>Sailplay SDK integration required</source>
+      <translation>需要集成 Sailplay SDK</translation>
+    </message>
+    <message>
+      <source>No SDK apps installed</source>
+      <translation>尚未安装 SDK 应用</translation>
+    </message>
+    <message>
+      <source>Install a map app with Sailplay SDK support</source>
+      <translation>请安装支持 Sailplay SDK 的地图应用</translation>
+    </message>
+    <message>
+      <source>A conversation is loading</source>
+      <translation>会话正在加载</translation>
+    </message>
+    <message>
+      <source>A request is already in progress</source>
+      <translation>请求正在处理中</translation>
+    </message>
+    <message>
+      <source>Answer</source>
+      <translation>接听</translation>
+    </message>
+    <message>
+      <source>Attachment</source>
+      <translation>附件</translation>
+    </message>
+    <message>
+      <source>Call</source>
+      <translation>拨打</translation>
+    </message>
+    <message>
+      <source>Choose one SMS recipient</source>
+      <translation>请选择一个短信接收人</translation>
+    </message>
+    <message>
+      <source>Clear</source>
+      <translation>清空</translation>
+    </message>
+    <message>
+      <source>Contacts</source>
+      <translation>联系人</translation>
+    </message>
+    <message>
+      <source>Contacts are loading</source>
+      <translation>联系人正在加载</translation>
+    </message>
+    <message>
+      <source>Content changed. Refresh and try again.</source>
+      <translation>内容已更新，请刷新后重试。</translation>
+    </message>
+    <message>
+      <source>Could not load conversation</source>
+      <translation>无法加载会话</translation>
+    </message>
+    <message>
+      <source>Dial pad</source>
+      <translation>拨号盘</translation>
+    </message>
+    <message>
+      <source>Enter a recipient and message</source>
+      <translation>请输入接收人和消息内容</translation>
+    </message>
+    <message>
+      <source>Enter a valid phone number</source>
+      <translation>请输入有效的电话号码</translation>
+    </message>
+    <message>
+      <source>Hang up</source>
+      <translation>挂断</translation>
+    </message>
+    <message>
+      <source>Invalid call control</source>
+      <translation>无效的通话操作</translation>
+    </message>
+    <message>
+      <source>Invalid content request</source>
+      <translation>无效的内容请求</translation>
+    </message>
+    <message>
+      <source>Message</source>
+      <translation>消息内容</translation>
+    </message>
+    <message>
+      <source>Messages</source>
+      <translation>信息</translation>
+    </message>
+    <message>
+      <source>Mute microphone</source>
+      <translation>麦克风静音</translation>
+    </message>
+    <message>
+      <source>New message</source>
+      <translation>新消息</translation>
+    </message>
+    <message>
+      <source>Phone</source>
+      <translation>电话</translation>
+    </message>
+    <message>
+      <source>Phone number</source>
+      <translation>电话号码</translation>
+    </message>
+    <message>
+      <source>Recent calls</source>
+      <translation>最近通话</translation>
+    </message>
+    <message>
+      <source>Reply</source>
+      <translation>回复</translation>
+    </message>
+    <message>
+      <source>Request submitted</source>
+      <translation>已提交请求</translation>
+    </message>
+    <message>
+      <source>Selection is no longer available</source>
+      <translation>所选项目已不可用</translation>
+    </message>
+    <message>
+      <source>Send</source>
+      <translation>发送</translation>
+    </message>
+    <message>
+      <source>The call is no longer available</source>
+      <translation>该通话已结束</translation>
+    </message>
+    <message>
+      <source>The car app is inactive</source>
+      <translation>车机应用当前未激活</translation>
+    </message>
+    <message>
+      <source>The system service rejected the request</source>
+      <translation>系统服务拒绝了请求</translation>
+    </message>
+    <message>
+      <source>Unknown</source>
+      <translation>未知</translation>
+    </message>
+    <message>
+      <source>Unmute microphone</source>
+      <translation>取消麦克风静音</translation>
+    </message>
+    <message>
+      <source>Authorize phone and messages</source>
+      <translation>授权电话和信息</translation>
+    </message>
+    <message>
+      <source>Phone and messages authorized</source>
+      <translation>电话和信息已授权</translation>
+    </message>
+    <message>
+      <source>Authorization cancelled or failed</source>
+      <translation>授权已取消或失败</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>
@@ -441,6 +621,10 @@ Start music on your phone</source>
     <message>
       <source>Could not start the background player</source>
       <translation>无法启动后台播放器</translation>
+    </message>
+    <message>
+      <source>Could not save map selection</source>
+      <translation>无法保存地图选择</translation>
     </message>
   </context>
 </TS>

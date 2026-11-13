@@ -135,6 +135,31 @@ class DeclarationTests(unittest.TestCase):
             self.path.write_text(self.text + extra, encoding='utf-8')
             self.assertIsNone(read_declaration(self.path))
 
+    def test_renderer_requires_an_installed_desktop_identity(self):
+        renderer = self.text.replace('X-Sailplay-Presentation=template', 'X-Sailplay-Presentation=renderer')
+        self.path.write_text(renderer, encoding='utf-8')
+        self.assertIsNone(read_declaration(self.path))
+
+        for identity in ('../renderer', '/usr/bin/renderer', 'renderer desktop', ''):
+            self.path.write_text(renderer + 'X-Sailplay-RendererDesktop=' + identity + '\n', encoding='utf-8')
+            with self.subTest(identity=identity):
+                self.assertIsNone(read_declaration(self.path))
+        self.path.write_text(renderer + 'X-Sailplay-RendererDesktop=example-renderer\n', encoding='utf-8')
+        self.assertIsNone(read_declaration(self.path))
+        companion = self.directory / 'example-renderer.desktop'
+        companion.write_text('[Desktop Entry]\nType=Application\nExec=/usr/bin/example-renderer\nNoDisplay=true\n'
+            '[X-Sailjail]\nOrganizationName=org.example\nApplicationName=Renderer\n', encoding='utf-8')
+        self.assertEqual(read_declaration(self.path).renderer_desktop, 'example-renderer')
+        self.assertEqual(read_declaration(self.path).renderer_executable, '/usr/bin/example-renderer')
+        companion.write_text(companion.read_text(encoding='utf-8') + 'Sandboxing=Disabled\n', encoding='utf-8')
+        self.assertIsNone(read_declaration(self.path))
+
+    def test_car_only_sdk_declaration_is_discovered_with_no_phone_launcher(self):
+        self.path.write_text(self.text + 'NoDisplay=true\nX-Sailplay-CarOnly=true\n', encoding='utf-8')
+        self.assertIsNotNone(read_declaration(self.path))
+        self.path.write_text(self.text + 'NoDisplay=true\nX-Sailplay-CarOnly=true\nHidden=true\n', encoding='utf-8')
+        self.assertIsNone(read_declaration(self.path))
+
 
 class NavigationAdapterTests(unittest.TestCase):
     def setUp(self):

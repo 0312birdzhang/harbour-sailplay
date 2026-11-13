@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Name=Messages
+Name[zh_CN]=信息
+Name[zh_TW]=訊息
+Name[de]=Nachrichten
+Name[fr]=Messages
+Name[ru]=Сообщения
+Icon=icon-launcher-messaging
+NoDisplay=true
+Exec=/usr/bin/sailplay-communication
+X-Sailplay-CarOnly=true
+X-Sailplay-ApiVersion=1
+X-Sailplay-Service=org.sailplay.System.Messages
+X-Sailplay-Capabilities=state;actions;content;messages;
+X-Sailplay-Presentation=renderer
+X-Sailplay-RendererDesktop=sailplay-messages
+
+[X-Sailjail]
+OrganizationName=org.sailplay
+ApplicationName=MessagesRenderer
+Permissions=

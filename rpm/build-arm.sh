@@ -48,6 +48,13 @@ for catalog in translations/*.ts; do
 done
 echo "carui built"
 
+# --- system communication SDK adapters ------------------------------------
+cd "$REPO/communication"
+qmake communication.pro
+make -j"$(nproc)"
+cp sailplay-communication "$PAYLOAD/sailplay-communication"
+gcc -O2 -Wall -Wextra launcher.c -o "$PAYLOAD/sailplay-communication-launcher"
+
 # --- carlife-capture (shm capture + x264 Annex-B encode) --------------------
 # The wayland-scanner protocol .c must stay C: compiled by g++ its interface
 # symbols get C++-mangled and recorder.cpp (which includes the extern "C"

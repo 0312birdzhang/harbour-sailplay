@@ -120,6 +120,45 @@ accepted request enters or leaves the backend. `session_count`,
 An application may exit when it has zero sessions, zero pending requests and
 zero business work. Explicit stop commands remain application decisions.
 
+## Dedicated car renderers
+
+An application can declare `X-Sailplay-Presentation=renderer` and
+`X-Sailplay-RendererDesktop=<desktop basename>`. The companion desktop lives in
+`/usr/share/applications`, uses `Type=Application` and has an `Exec` containing
+one absolute `/usr/bin` executable. Its `X-Sailjail` organization and application
+names identify the renderer's sandbox. Carui starts that executable through
+`sailjail -p`, using the companion's permissions. The companion may be hidden
+from the phone launcher. The application's visible desktop declares the shared
+backend service, object path and capabilities.
+
+Qt renderers include `sailplay-sdk.pri` and use `SailplayRenderer`. Calling
+`start()` attaches a caller-owned car session to the backend supplied by the
+host. Its inherited state, action and reconnect APIs follow `SailplaySession`.
+The renderer receives `active` and `inactive` lines on stdin when the host
+changes the presentation. EOF closes its session and emits `closed`. Connect
+that signal to application exit. The renderer keeps its lease while hidden,
+and backend replacement retains the presentation's active state.
+
+The companion profile grants access to `${RUNUSER}/imira-comp-0` and
+`dbus-user.talk` for its backend service, including name resolution and cold
+activation through the installed D-Bus proxy. It also grants
+`dbus-user.own org.sailplay.Client.*` for directed replies. Pointer and keyboard
+events arrive over Wayland. Dashboard pointer input reaches the dedicated
+renderer inside its displayed viewport. Carui publishes its role with the
+process identity, and Imira refreshes identities that arrive after mapping.
+Renderers receive the host's Wayland output and
+application marker. The host owns the raw touch-injection socket. Applications
+using a private input method need its additional socket permissions.
+
+The counter example provides a renderer, qmake project, desktop and permission
+profile. Install the executable as `/usr/bin/sailplay-sdk-renderer`, its desktop
+in `/usr/share/applications`, and its profile in `/etc/sailjail/permissions`.
+Set `NoDisplay=false` on the example desktop to expose its car entry. Start the
+counter backend example or install its background activation service. Both
+presentations then use that single counter backend. A renderer should obtain
+map frames or application state through IPC and retain backend ownership of
+routes and writable data. [Renderer example](examples/renderer.cpp)
+
 ## Python backend
 
 Initialize a GLib D-Bus main loop before creating the backend. An action handler

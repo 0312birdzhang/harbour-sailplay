@@ -12,11 +12,6 @@ ApplicationWindow {
                 notice.text = qsTranslate("Sailplay", "Choose different day and night times")
         })
     }
-    function dashboardIndex(id) {
-        var apps = carController.availableApps()
-        for (var i = 0; i < apps.length; ++i) if (apps[i].id === id) return i + 1
-        return 0
-    }
     function serviceStateText(state) {
         var labels = { active: qsTranslate("Sailplay", "Running"),
                        inactive: qsTranslate("Sailplay", "Stopped"),
@@ -55,12 +50,6 @@ ApplicationWindow {
         Page {
             id: page
             allowedOrientations: Orientation.All
-            function toggle(appId) {
-                if (!carController.toggleApp(appId))
-                    saveNotice.text = qsTranslate("Sailplay", "Save failed")
-                else
-                    saveNotice.text = qsTranslate("Sailplay", "Saved automatically")
-            }
 
             SilicaFlickable {
                 anchors.fill: parent
@@ -160,16 +149,13 @@ ApplicationWindow {
                         visible: !carController.followAmbience
                     }
                     SectionHeader { text: qsTranslate("Sailplay", "Dashboard") }
-                    ComboBox {
-                        label: qsTranslate("Sailplay", "Map app")
-                        currentIndex: app.dashboardIndex(carController.dashboardMapApp)
-                        menu: ContextMenu {
-                            MenuItem { text: qsTranslate("Sailplay", "Not selected"); onClicked: carController.setDashboardApp("map", "") }
-                            Repeater {
-                                model: carController.availableApps()
-                                delegate: MenuItem { text: modelData.name; onClicked: carController.setDashboardApp("map", modelData.id) }
-                            }
-                        }
+                    Label {
+                        x: Theme.horizontalPageMargin
+                        width: parent.width - 2 * Theme.horizontalPageMargin
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: Theme.fontSizeSmall
+                        color: Theme.secondaryColor
+                        text: qsTranslate("Sailplay", "SDK maps are detected automatically. The last map used on the car display opens next time.")
                     }
                     Label {
                         x: Theme.horizontalPageMargin; width: parent.width - 2 * Theme.horizontalPageMargin
@@ -177,6 +163,13 @@ ApplicationWindow {
                         text: qsTranslate("Sailplay", "The music app stays on the phone; both screens control the same playback.")
                     }
                     SectionHeader { text: qsTranslate("Sailplay", "Car display home apps") }
+                    ValueButton {
+                        objectName: "appSelectionButton"
+                        label: qsTranslate("Sailplay", "Manage displayed apps")
+                        value: carController.selectedApps.length.toString()
+                        onClicked: pageStack.push(Qt.resolvedUrl("AppSelectionPage.qml"))
+                    }
+                    SectionHeader { text: qsTranslate("Sailplay", "Car display") }
                     ComboBox {
                         label: qsTranslate("Sailplay", "Resolution")
                         visible: carController.projectionResolutions.length > 0
@@ -212,51 +205,6 @@ ApplicationWindow {
                         width: parent.width - 2 * Theme.horizontalPageMargin
                         horizontalAlignment: Text.AlignHCenter
                         color: Theme.highlightColor
-                    }
-                    Label {
-                        x: Theme.horizontalPageMargin
-                        width: parent.width - 2 * Theme.horizontalPageMargin
-                        wrapMode: Text.WordWrap
-                        color: Theme.secondaryColor
-                        font.pixelSize: Theme.fontSizeSmall
-                        text: qsTranslate("Sailplay", "Select the apps to show on the car display home screen. Changes are saved and applied immediately.")
-                    }
-                    Repeater {
-                        model: carController.availableApps()
-                        delegate: ListItem {
-                            width: page.width
-                            contentHeight: Theme.itemSizeSmall
-                            onClicked: page.toggle(modelData.id)
-                            Image {
-                                id: appIcon
-                                x: Theme.horizontalPageMargin
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: Theme.iconSizeMedium
-                                height: width
-                                fillMode: Image.PreserveAspectFit
-                                source: modelData.icon !== ""
-                                      ? "file://" + modelData.icon : ""
-                            }
-                            Label {
-                                anchors.left: appIcon.right
-                                anchors.leftMargin: Theme.paddingLarge
-                                anchors.right: appSwitch.left
-                                anchors.rightMargin: Theme.paddingMedium
-                                anchors.verticalCenter: parent.verticalCenter
-                                truncationMode: TruncationMode.Fade
-                                text: modelData.name
-                            }
-                            Switch {
-                                id: appSwitch
-                                anchors.right: parent.right
-                                anchors.rightMargin: Theme.horizontalPageMargin
-                                anchors.verticalCenter: parent.verticalCenter
-                                automaticCheck: false
-                                checked: carController.selectedApps.indexOf(
-                                             modelData.id) >= 0
-                                onClicked: page.toggle(modelData.id)
-                            }
-                        }
                     }
                     Item { width: 1; height: Theme.paddingLarge }
                 }

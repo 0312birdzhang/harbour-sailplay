@@ -385,6 +385,14 @@ void SailplayProvider::setActionHandler(const QString &action,
     if (QThread::currentThread() == thread() && validString(action) && handler) m_actions.insert(action, handler);
 }
 
+bool SailplayProvider::invocationActive(qulonglong invocation) const
+{
+    const auto pending = m_pending.constFind(invocation);
+    if (pending == m_pending.cend()) return false;
+    const auto session = m_sessions.constFind(pending->path);
+    return session != m_sessions.cend() && session->active;
+}
+
 bool SailplayProvider::invoke(const QDBusMessage &message, const QDBusConnection &connection)
 {
     const QVariantList arguments = message.arguments();

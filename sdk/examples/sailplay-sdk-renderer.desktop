@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Sailplay SDK renderer
+NoDisplay=true
+Exec=/usr/bin/sailplay-sdk-renderer
+X-Sailplay-ApiVersion=1
+X-Sailplay-Service=org.example.SailplayCounter
+X-Sailplay-Capabilities=state;actions;
+X-Sailplay-Presentation=renderer
+X-Sailplay-RendererDesktop=sailplay-sdk-renderer
+
+[X-Sailjail]
+OrganizationName=org.example
+ApplicationName=SailplayRenderer
+Permissions=

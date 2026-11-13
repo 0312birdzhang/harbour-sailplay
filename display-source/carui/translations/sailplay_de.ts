@@ -415,6 +415,186 @@ Musik auf dem Telefon starten</translation>
       <source>Enable guidance voice</source>
       <translation>Sprachführung aktivieren</translation>
     </message>
+    <message>
+      <source>SDK maps are detected automatically. The last map used on the car display opens next time.</source>
+      <translation>SDK-Karten werden automatisch erkannt. Die zuletzt im Auto verwendete Karte öffnet sich beim nächsten Mal.</translation>
+    </message>
+    <message>
+      <source>Manage displayed apps</source>
+      <translation>Angezeigte Apps verwalten</translation>
+    </message>
+    <message>
+      <source>Car display</source>
+      <translation>Fahrzeuganzeige</translation>
+    </message>
+    <message>
+      <source>Show SDK apps</source>
+      <translation>SDK-Apps anzeigen</translation>
+    </message>
+    <message>
+      <source>Show all apps</source>
+      <translation>Alle Apps anzeigen</translation>
+    </message>
+    <message>
+      <source>Select the SDK apps to show on the car display. Changes are saved and applied immediately.</source>
+      <translation>Wählen Sie die SDK-Apps für die Fahrzeuganzeige. Änderungen werden sofort gespeichert und angewendet.</translation>
+    </message>
+    <message>
+      <source>Sailplay SDK integration required</source>
+      <translation>Sailplay-SDK-Integration erforderlich</translation>
+    </message>
+    <message>
+      <source>No SDK apps installed</source>
+      <translation>Keine SDK-Apps installiert</translation>
+    </message>
+    <message>
+      <source>Install a map app with Sailplay SDK support</source>
+      <translation>Installieren Sie eine Karten-App mit Sailplay-SDK-Unterstützung</translation>
+    </message>
+    <message>
+      <source>A conversation is loading</source>
+      <translation>Ein Gespräch wird geladen</translation>
+    </message>
+    <message>
+      <source>A request is already in progress</source>
+      <translation>Eine Anfrage wird bereits bearbeitet</translation>
+    </message>
+    <message>
+      <source>Answer</source>
+      <translation>Annehmen</translation>
+    </message>
+    <message>
+      <source>Attachment</source>
+      <translation>Anhang</translation>
+    </message>
+    <message>
+      <source>Call</source>
+      <translation>Anrufen</translation>
+    </message>
+    <message>
+      <source>Choose one SMS recipient</source>
+      <translation>Wählen Sie einen SMS-Empfänger</translation>
+    </message>
+    <message>
+      <source>Clear</source>
+      <translation>Leeren</translation>
+    </message>
+    <message>
+      <source>Contacts</source>
+      <translation>Kontakte</translation>
+    </message>
+    <message>
+      <source>Contacts are loading</source>
+      <translation>Kontakte werden geladen</translation>
+    </message>
+    <message>
+      <source>Content changed. Refresh and try again.</source>
+      <translation>Inhalt geändert. Aktualisieren und erneut versuchen.</translation>
+    </message>
+    <message>
+      <source>Could not load conversation</source>
+      <translation>Gespräch konnte nicht geladen werden</translation>
+    </message>
+    <message>
+      <source>Dial pad</source>
+      <translation>Wähltastatur</translation>
+    </message>
+    <message>
+      <source>Enter a recipient and message</source>
+      <translation>Empfänger und Nachricht eingeben</translation>
+    </message>
+    <message>
+      <source>Enter a valid phone number</source>
+      <translation>Gültige Telefonnummer eingeben</translation>
+    </message>
+    <message>
+      <source>Hang up</source>
+      <translation>Auflegen</translation>
+    </message>
+    <message>
+      <source>Invalid call control</source>
+      <translation>Ungültige Anrufsteuerung</translation>
+    </message>
+    <message>
+      <source>Invalid content request</source>
+      <translation>Ungültige Inhaltsanfrage</translation>
+    </message>
+    <message>
+      <source>Message</source>
+      <translation>Nachricht</translation>
+    </message>
+    <message>
+      <source>Messages</source>
+      <translation>Nachrichten</translation>
+    </message>
+    <message>
+      <source>Mute microphone</source>
+      <translation>Mikrofon stummschalten</translation>
+    </message>
+    <message>
+      <source>New message</source>
+      <translation>Neue Nachricht</translation>
+    </message>
+    <message>
+      <source>Phone</source>
+      <translation>Telefon</translation>
+    </message>
+    <message>
+      <source>Phone number</source>
+      <translation>Telefonnummer</translation>
+    </message>
+    <message>
+      <source>Recent calls</source>
+      <translation>Letzte Anrufe</translation>
+    </message>
+    <message>
+      <source>Reply</source>
+      <translation>Antworten</translation>
+    </message>
+    <message>
+      <source>Request submitted</source>
+      <translation>Anfrage übermittelt</translation>
+    </message>
+    <message>
+      <source>Selection is no longer available</source>
+      <translation>Auswahl ist nicht mehr verfügbar</translation>
+    </message>
+    <message>
+      <source>Send</source>
+      <translation>Senden</translation>
+    </message>
+    <message>
+      <source>The call is no longer available</source>
+      <translation>Der Anruf ist nicht mehr verfügbar</translation>
+    </message>
+    <message>
+      <source>The car app is inactive</source>
+      <translation>Die Fahrzeug-App ist inaktiv</translation>
+    </message>
+    <message>
+      <source>The system service rejected the request</source>
+      <translation>Der Systemdienst hat die Anfrage abgelehnt</translation>
+    </message>
+    <message>
+      <source>Unknown</source>
+      <translation>Unbekannt</translation>
+    </message>
+    <message>
+      <source>Unmute microphone</source>
+      <translation>Mikrofon aktivieren</translation>
+    </message>
+    <message>
+      <source>Authorize phone and messages</source>
+      <translation>Telefon und Nachrichten autorisieren</translation>
+    </message>
+    <message>
+      <source>Phone and messages authorized</source>
+      <translation>Telefon und Nachrichten autorisiert</translation>
+    </message>
+    <message>
+      <source>Authorization cancelled or failed</source>
+      <translation>Autorisierung abgebrochen oder fehlgeschlagen</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>
@@ -441,6 +621,10 @@ Musik auf dem Telefon starten</translation>
     <message>
       <source>Could not start the background player</source>
       <translation>Hintergrundplayer konnte nicht gestartet werden</translation>
+    </message>
+    <message>
+      <source>Could not save map selection</source>
+      <translation>Kartenauswahl konnte nicht gespeichert werden</translation>
     </message>
   </context>
 </TS>

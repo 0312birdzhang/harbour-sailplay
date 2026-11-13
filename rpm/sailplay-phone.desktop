@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Name=Phone
+Name[zh_CN]=电话
+Name[zh_TW]=電話
+Name[de]=Telefon
+Name[fr]=Téléphone
+Name[ru]=Телефон
+Icon=icon-launcher-phone
+NoDisplay=true
+Exec=/usr/bin/sailplay-communication
+X-Sailplay-CarOnly=true
+X-Sailplay-ApiVersion=1
+X-Sailplay-Service=org.sailplay.System.Phone
+X-Sailplay-Capabilities=state;actions;content;phone;
+X-Sailplay-Presentation=renderer
+X-Sailplay-RendererDesktop=sailplay-phone
+
+[X-Sailjail]
+OrganizationName=org.sailplay
+ApplicationName=PhoneRenderer
+Permissions=

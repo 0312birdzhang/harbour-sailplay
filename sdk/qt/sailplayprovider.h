@@ -34,6 +34,7 @@ public:
     int sessionCount() const { return m_sessions.size(); }
     int activeSessionCount() const;
     int pendingCount() const { return m_pending.size(); }
+    bool invocationActive(qulonglong invocation) const;
     void setActionHandler(const QString &action,
                           const std::function<void(qulonglong, const QVariantMap &)> &handler);
     bool complete(qulonglong invocation, const QVariantMap &result = QVariantMap());

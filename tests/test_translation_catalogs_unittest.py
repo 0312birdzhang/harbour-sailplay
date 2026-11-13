@@ -14,7 +14,7 @@ class TranslationCatalogTests(unittest.TestCase):
     def test_current_ui_strings_are_translated_in_their_context(self):
         required = set()
         literal = r'"(?:\\.|[^"\\])*"'
-        for path in UI.glob("*.qml"):
+        for path in list(UI.glob("*.qml")) + list((UI.parent / "communication").glob("*.qml")):
             for context, source in re.findall(
                 rf"qsTranslate\(\s*({literal})\s*,\s*({literal})\s*\)",
                 path.read_text(encoding="utf-8"),
@@ -25,6 +25,9 @@ class TranslationCatalogTests(unittest.TestCase):
             (UI / "main.cpp").read_text(encoding="utf-8"),
         ):
             required.add(("CarUiController", json.loads(source)))
+        for source in re.findall(rf'\btext\(\s*({literal})\s*\)',
+            (UI.parent / "communication" / "backend.cpp").read_text(encoding="utf-8")):
+            required.add(("Sailplay", json.loads(source)))
         self.assertTrue(required)
         catalogs = list((UI / "translations").glob("*.ts"))
         self.assertEqual(len(catalogs), 5)

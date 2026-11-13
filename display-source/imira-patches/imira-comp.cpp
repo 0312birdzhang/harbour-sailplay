@@ -735,7 +735,8 @@ public:
             // Cover windows are the little home-screen cards — they belong
             // to the phone's launcher, not onto the TV desktop.
             const QString title = surface->title();
-            const QString appKey = clientAppKey(surface);
+            bool renderer = false;
+            const QString appKey = clientAppKey(surface, &renderer);
             const QString category = surface->windowProperties()
                                          .value(QStringLiteral("CATEGORY"))
                                          .toString();
@@ -860,7 +861,7 @@ public:
                     m_content.removeAt(i);
                 }
             }
-            m_content.append(ContentWin{item, title, appKey, true, 0});
+            m_content.append(ContentWin{item, title, appKey, renderer, true, 0});
             if (m_dashboard) layoutDashboard();
             // Never change a client's output while it is constructing its
             // first scene/GL engine. The first mapped buffer establishes the
@@ -928,19 +929,24 @@ public:
         QWaylandSurfaceItem *item;
         QString title;
         QString appKey;
+        bool renderer;
         bool visible;
         quint64 hiddenOrder;
     };
 
-    static QString clientAppKey(QWaylandSurface *surface)
+    static QString clientAppKey(QWaylandSurface *surface, bool *renderer = nullptr)
     {
+        if (renderer) *renderer = false;
         const qint64 pid = surface->client()->processId();
+        QString key;
         QFile f(QStringLiteral("/proc/%1/environ").arg(pid));
         const QByteArray prefix("CARLIFE_APP_KEY=");
         const QList<QByteArray> vars = f.open(QIODevice::ReadOnly) ? f.readAll().split(char(0)) : QList<QByteArray>();
         for (const QByteArray &v : vars) {
-            if (v.startsWith(prefix))
-                return QString::fromLatin1(v.mid(prefix.size()));
+            if (v.startsWith(prefix)) {
+                key = QString::fromLatin1(v.mid(prefix.size()));
+                break;
+            }
         }
         QFile record(QStringLiteral("/run/user/100000/sailplay-app-%1").arg(pid));
         QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
@@ -948,10 +954,13 @@ public:
             const QList<QByteArray> identity = record.readAll().split('\n');
             const QByteArray data = stat.readAll();
             const QList<QByteArray> fields = data.mid(data.lastIndexOf(')') + 2).simplified().split(' ');
-            if (identity.size() >= 2 && fields.size() > 19 && identity[1] == fields[19])
+            if (identity.size() >= 2 && fields.size() > 19 && identity[1] == fields[19]
+                    && (key.isEmpty() || key == QString::fromLatin1(identity[0]))) {
+                if (renderer) *renderer = identity.value(2) == "renderer";
                 return QString::fromLatin1(identity[0]);
+            }
         }
-        return QString();
+        return key;
     }
 
     QWaylandSurfaceItem *contentItemAt(const QPointF &pos) const
@@ -967,13 +976,13 @@ public:
             if (panel->contains(local) && accepts)
                 return panel.data();
         }
-        // Dashboard apps are previews; the shell opens them on a tap.
-        if (m_dashboard && m_shellItem
-                && m_shellItem->contains(m_shellItem->mapFromScene(pos)))
-            return m_shellItem;
         for (int i = m_content.count() - 1; i >= 0; --i) {
             const ContentWin &c = m_content.at(i);
             if (!c.visible)
+                continue;
+            // The shell opens legacy previews. SDK renderers handle their
+            // dashboard gestures through the same Wayland input as fullscreen.
+            if (m_dashboard && m_shellItem && !c.renderer)
                 continue;
             if (c.item->parentItem()->contains(c.item->parentItem()->mapFromScene(pos))
                     && c.item->contains(c.item->mapFromScene(pos)))
@@ -1108,6 +1117,25 @@ public:
 
     void pollCarlifeCmd()
     {
+        // A sandboxed client can map before its supervisor publishes the
+        // PID/start-time marker. Resolve that identity before app switching.
+        bool identityChanged = false;
+        for (ContentWin &content : m_content) {
+            if (!content.appKey.isEmpty() && content.renderer) continue;
+            bool renderer = false;
+            const QString key = clientAppKey(content.item->surface(), &renderer);
+            if (content.appKey.isEmpty() && !key.isEmpty()) {
+                content.appKey = key;
+                identityChanged = true;
+            }
+            if (renderer && key == content.appKey && !content.renderer) {
+                content.renderer = true;
+                identityChanged = true;
+                fprintf(stderr, "imira-comp: renderer identity pid=%lld key='%s'\n",
+                    (long long)content.item->surface()->client()->processId(), qPrintable(content.appKey));
+            }
+        }
+        if (identityChanged && m_dashboard) layoutDashboard();
         QFile f(QStringLiteral("/tmp/imira-touch"));
         if (!f.open(QIODevice::ReadOnly))
             return;

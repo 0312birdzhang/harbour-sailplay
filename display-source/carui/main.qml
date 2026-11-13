@@ -181,7 +181,7 @@ Window {
             Text { anchors.centerIn: parent; width: parent.width - 40; wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter; color: carPalette.secondary; font.pixelSize: 26
                 visible: !carController.dashboardMapApp
-                text: qsTranslate("Sailplay", "Choose a map app in Sailplay") }
+                text: qsTranslate("Sailplay", "Install a map app with Sailplay SDK support") }
             NavigationCard {
                 anchors.fill: parent
                 visible: carController.dashboardNavigationTemplate

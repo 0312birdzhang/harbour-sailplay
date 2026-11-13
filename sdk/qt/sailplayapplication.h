@@ -14,8 +14,15 @@ struct SailplayApplication
     QString presentation;
     QStringList capabilities;
     QString desktopId;
+    QString rendererDesktopId;
+    QString rendererExecutable;
 
     QString presentationId() const { return desktopId.isEmpty() ? applicationId : desktopId; }
+
+    bool renderer() const
+    {
+        return valid && presentation == QStringLiteral("renderer") && !rendererExecutable.isEmpty();
+    }
 
     bool navigationTemplate() const
     {

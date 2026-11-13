@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Sailplay phone backend
+NoDisplay=true
+Exec=/usr/bin/sailplay-phone-backend --backend phone
+[X-Sailjail]
+OrganizationName=org.sailplay
+ApplicationName=Systemphone
+Permissions=Contacts;CommunicationHistory;Phone

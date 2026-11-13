@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Sailplay messages backend
+NoDisplay=true
+Exec=/usr/bin/sailplay-messages-backend --backend messages
+[X-Sailjail]
+OrganizationName=org.sailplay
+ApplicationName=Systemmessages
+Permissions=Contacts;CommunicationHistory;Messages;Phone

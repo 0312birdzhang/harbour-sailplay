@@ -415,6 +415,186 @@ Lancez la musique sur votre téléphone</translation>
       <source>Enable guidance voice</source>
       <translation>Activer le guidage vocal</translation>
     </message>
+    <message>
+      <source>SDK maps are detected automatically. The last map used on the car display opens next time.</source>
+      <translation>Les cartes intégrant le SDK sont détectées automatiquement. La dernière carte utilisée dans la voiture s’ouvre à la prochaine connexion.</translation>
+    </message>
+    <message>
+      <source>Manage displayed apps</source>
+      <translation>Gérer les applications affichées</translation>
+    </message>
+    <message>
+      <source>Car display</source>
+      <translation>Écran de la voiture</translation>
+    </message>
+    <message>
+      <source>Show SDK apps</source>
+      <translation>Afficher les applications SDK</translation>
+    </message>
+    <message>
+      <source>Show all apps</source>
+      <translation>Afficher toutes les applications</translation>
+    </message>
+    <message>
+      <source>Select the SDK apps to show on the car display. Changes are saved and applied immediately.</source>
+      <translation>Choisissez les applications SDK à afficher dans la voiture. Les modifications sont enregistrées et appliquées immédiatement.</translation>
+    </message>
+    <message>
+      <source>Sailplay SDK integration required</source>
+      <translation>Intégration du SDK Sailplay requise</translation>
+    </message>
+    <message>
+      <source>No SDK apps installed</source>
+      <translation>Aucune application SDK installée</translation>
+    </message>
+    <message>
+      <source>Install a map app with Sailplay SDK support</source>
+      <translation>Installez une application de carte compatible avec le SDK Sailplay</translation>
+    </message>
+    <message>
+      <source>A conversation is loading</source>
+      <translation>Une conversation est en cours de chargement</translation>
+    </message>
+    <message>
+      <source>A request is already in progress</source>
+      <translation>Une demande est déjà en cours</translation>
+    </message>
+    <message>
+      <source>Answer</source>
+      <translation>Répondre</translation>
+    </message>
+    <message>
+      <source>Attachment</source>
+      <translation>Pièce jointe</translation>
+    </message>
+    <message>
+      <source>Call</source>
+      <translation>Appeler</translation>
+    </message>
+    <message>
+      <source>Choose one SMS recipient</source>
+      <translation>Choisissez un destinataire SMS</translation>
+    </message>
+    <message>
+      <source>Clear</source>
+      <translation>Effacer</translation>
+    </message>
+    <message>
+      <source>Contacts</source>
+      <translation>Contacts</translation>
+    </message>
+    <message>
+      <source>Contacts are loading</source>
+      <translation>Chargement des contacts</translation>
+    </message>
+    <message>
+      <source>Content changed. Refresh and try again.</source>
+      <translation>Le contenu a changé. Actualisez et réessayez.</translation>
+    </message>
+    <message>
+      <source>Could not load conversation</source>
+      <translation>Impossible de charger la conversation</translation>
+    </message>
+    <message>
+      <source>Dial pad</source>
+      <translation>Clavier numérique</translation>
+    </message>
+    <message>
+      <source>Enter a recipient and message</source>
+      <translation>Saisissez un destinataire et un message</translation>
+    </message>
+    <message>
+      <source>Enter a valid phone number</source>
+      <translation>Saisissez un numéro de téléphone valide</translation>
+    </message>
+    <message>
+      <source>Hang up</source>
+      <translation>Raccrocher</translation>
+    </message>
+    <message>
+      <source>Invalid call control</source>
+      <translation>Commande d’appel incorrecte</translation>
+    </message>
+    <message>
+      <source>Invalid content request</source>
+      <translation>Demande de contenu incorrecte</translation>
+    </message>
+    <message>
+      <source>Message</source>
+      <translation>Message</translation>
+    </message>
+    <message>
+      <source>Messages</source>
+      <translation>Messages</translation>
+    </message>
+    <message>
+      <source>Mute microphone</source>
+      <translation>Couper le microphone</translation>
+    </message>
+    <message>
+      <source>New message</source>
+      <translation>Nouveau message</translation>
+    </message>
+    <message>
+      <source>Phone</source>
+      <translation>Téléphone</translation>
+    </message>
+    <message>
+      <source>Phone number</source>
+      <translation>Numéro de téléphone</translation>
+    </message>
+    <message>
+      <source>Recent calls</source>
+      <translation>Appels récents</translation>
+    </message>
+    <message>
+      <source>Reply</source>
+      <translation>Répondre</translation>
+    </message>
+    <message>
+      <source>Request submitted</source>
+      <translation>Demande transmise</translation>
+    </message>
+    <message>
+      <source>Selection is no longer available</source>
+      <translation>La sélection n’est plus disponible</translation>
+    </message>
+    <message>
+      <source>Send</source>
+      <translation>Envoyer</translation>
+    </message>
+    <message>
+      <source>The call is no longer available</source>
+      <translation>L’appel n’est plus disponible</translation>
+    </message>
+    <message>
+      <source>The car app is inactive</source>
+      <translation>L’application de la voiture est inactive</translation>
+    </message>
+    <message>
+      <source>The system service rejected the request</source>
+      <translation>Le service système a refusé la demande</translation>
+    </message>
+    <message>
+      <source>Unknown</source>
+      <translation>Inconnu</translation>
+    </message>
+    <message>
+      <source>Unmute microphone</source>
+      <translation>Activer le microphone</translation>
+    </message>
+    <message>
+      <source>Authorize phone and messages</source>
+      <translation>Autoriser le téléphone et les messages</translation>
+    </message>
+    <message>
+      <source>Phone and messages authorized</source>
+      <translation>Téléphone et messages autorisés</translation>
+    </message>
+    <message>
+      <source>Authorization cancelled or failed</source>
+      <translation>Autorisation annulée ou échouée</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>
@@ -441,6 +621,10 @@ Lancez la musique sur votre téléphone</translation>
     <message>
       <source>Could not start the background player</source>
       <translation>Impossible de démarrer le lecteur en arrière-plan</translation>
+    </message>
+    <message>
+      <source>Could not save map selection</source>
+      <translation>Impossible d’enregistrer le choix de carte</translation>
     </message>
   </context>
 </TS>
