@@ -42,12 +42,6 @@ IAP_V2_UUID = '02030302-1d19-415f-86f2-22a2106a0a77'
 PROFILE_PATH = '/org/sailplay/wireless_phone'
 
 
-def register_client_profile(manager):
-    manager.RegisterProfile(PROFILE_PATH + '_client', ACCESSORY_UUID, {
-        'Role': 'client', 'RequireAuthentication': True,
-    }, timeout=3)
-
-
 def text_value(payload):
     return payload.split(b'\x00', 1)[0].decode('utf-8', 'replace')
 
@@ -534,6 +528,12 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
         logging.info('iAP2 connection ended transport=%s role=%s phase=%s reason=%s elapsedMs=%.1f receivedBytes=%d negotiated=%s authenticated=%s',
                      transport, connection_role, phase, 'stopped' if stop.is_set() else exit_reason,
                      (time.monotonic() - started) * 1000, received_bytes, negotiated, authenticated)
+        if transport == 'bluetooth':
+            # BlueZ retains a duplicate of the handed-over RFCOMM descriptor.
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
         sock.close()
 
 
@@ -715,7 +715,9 @@ def main():
         'RequireAuthorization': False, 'ServiceRecord': service_record(args.channel),
     })
     try:
-        register_client_profile(manager)
+        manager.RegisterProfile(PROFILE_PATH + '_client', ACCESSORY_UUID, {
+            'Role': 'client', 'RequireAuthentication': True,
+        })
     except Exception:
         manager.UnregisterProfile(PROFILE_PATH)
         raise
@@ -755,24 +757,6 @@ def main():
                 if not connected:
                     connecting[0] = False
                     return False
-                if worker:
-                    client = worker[1].name == 'RFCOMM-client'
-                    if client and any(other[1].is_alive() for path, other in workers.items()
-                                      if path != args.device):
-                        connecting[0] = False
-                        return False
-                    workers.pop(args.device, None)
-                    retire_worker(worker)
-                    if client:
-                        try:
-                            manager.UnregisterProfile(PROFILE_PATH + '_client', timeout=3)
-                            register_client_profile(manager)
-                        except dbus.DBusException as error:
-                            done(error)
-                            logging.error('CarPlay client profile rebuild failed; rebuilding the Bluetooth backend')
-                            loop.quit()
-                            return False
-                        logging.info('Retired failed RFCOMM client profile; requesting a fresh CarPlay channel target=%s', args.device)
                 profile_power.open()
                 logging.info('requesting CarPlay RFCOMM profile target=%s', args.device)
                 device.ConnectProfile(ACCESSORY_UUID, reply_handler=done, error_handler=done, timeout=12)
