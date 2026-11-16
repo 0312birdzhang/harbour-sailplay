@@ -38,14 +38,28 @@ class ReassociationWindow:
         self.clock=clock
         self.deadline=0.0
         self.started=False
+        self.idle_since=None
 
     def arm(self):
         # Repeated NetworkAdded signals cannot extend the grace period forever.
         if not self.deadline:
             self.deadline=self.clock()+15
+        self.idle_since=None
 
     def waiting(self):
         return not self.started and self.clock()<self.deadline
+
+    def abandoned(self, connman_state, supplicant):
+        idle = (connman_state in ('idle', 'failure')
+                and supplicant.get('State') in ('inactive', 'disconnected', 'scanning')
+                and str(supplicant.get('CurrentNetwork')) == '/')
+        if self.started or not self.deadline or not idle:
+            self.idle_since = None
+            return False
+        now = self.clock()
+        if self.idle_since is None:
+            self.idle_since = now
+        return now - self.idle_since >= 2
 
 
 def mixed_wpa_security(configuration):

@@ -81,6 +81,8 @@ def main():
     loop = GLib.MainLoop()
     from carplay_proto.wifiretry import ReassociationWindow
     wpa2_retry = ReassociationWindow()
+    wpa2_retries = 0
+    wpa2_interface_path = None
     def service(path):
         return network_interface(network_object(bus, 'net.connman', path), 'net.connman.Service')
     if args.restore:
@@ -150,6 +152,7 @@ def main():
         adapter, _ = select_adapter(objects)
         phone_name = adapter_name(objects[adapter]['org.bluez.Adapter1'])
     def network_added(path, properties):
+        nonlocal wpa2_interface_path
         network = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', path), 'org.freedesktop.DBus.Properties')
         configuration = network.Get('fi.w1.wpa_supplicant1.Network', 'Properties')
         if str(configuration.get('ssid', '')).strip('"') == session['ssid']:
@@ -167,6 +170,7 @@ def main():
             # interpreted as SAE authentication failure and removed this
             # network before the WPA2 attempt could complete.
             interface_path = str(path).split('/Networks/')[0]
+            wpa2_interface_path = interface_path
             interface = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', interface_path),
                                        'fi.w1.wpa_supplicant1.Interface')
             properties = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', interface_path),
@@ -360,7 +364,7 @@ def main():
             try:
                 print('AirPlay attempt started address={} port={} interface={}'.format(
                     address,port,interface),flush=True)
-                client = connect(address, port, interface, bind_device=True)
+                client = connect(address, port, interface, bind_device=True, source_address_wait=5)
                 print('AirPlay control connected local={} peer={} elapsedMs={:.1f}'.format(
                     socket_endpoint(client.sock,'getsockname'),socket_endpoint(client.sock,'getpeername'),
                     (time.monotonic()-attempt_started)*1000),flush=True)
@@ -554,6 +558,7 @@ def main():
         daemon_evidence()
         loop.quit()
     def check_wpa2_retry():
+        nonlocal wpa2_retry, wpa2_retries
         if wpa2_retry.started:
             return False
         if wpa2_retry.deadline:
@@ -566,6 +571,29 @@ def main():
             if props.get('State') in ('ready','online'):
                 connected()
                 return False
+            if wpa2_interface_path:
+                try:
+                    properties = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', wpa2_interface_path),
+                                                   'org.freedesktop.DBus.Properties')
+                    supplicant = properties.GetAll('fi.w1.wpa_supplicant1.Interface')
+                    abandoned = wpa2_retry.abandoned(props.get('State'), supplicant)
+                except dbus.DBusException:
+                    wpa2_retry.idle_since = None
+                    abandoned = False
+                if abandoned:
+                    if wpa2_retries >= 2:
+                        print('WPA2 reassociation retry limit reached; retiring the handover', flush=True)
+                        loop.quit()
+                        return False
+                    wpa2_retries += 1
+                    wpa2_retry = ReassociationWindow()
+                    print('WPA2 association ended state={} error={}; retrying within the current handover {}/2'.format(
+                        props.get('State'), props.get('Error'), wpa2_retries), flush=True)
+                    try:
+                        service(target).Connect(reply_handler=connected, error_handler=failed, timeout=12)
+                    except dbus.DBusException as error:
+                        failed(error)
+                    return True
             if not wpa2_retry.waiting():
                 print('WPA2 reassociation did not reach ready: state={} error={}'.format(
                     props.get('State'),props.get('Error')),flush=True)

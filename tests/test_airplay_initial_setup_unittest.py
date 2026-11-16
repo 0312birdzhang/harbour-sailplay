@@ -97,7 +97,7 @@ class InitialSetupTests(unittest.TestCase):
         media, output, connections = self.run_attempts([200], peer_addresses=[],
             network_props={'IPv4': {'Address': '192.168.50.102', 'Netmask': '255.255.255.0'}},
             discovered_endpoints=[('192.168.50.2', 12345)])
-        connections.assert_called_once_with('192.168.50.2', 12345, 'wlan0', bind_device=True)
+        connections.assert_called_once_with('192.168.50.2', 12345, 'wlan0', bind_device=True, source_address_wait=5)
         media.assert_called_once()
         self.assertIn('AirPlay peer address absent from iAP2 and DHCP', output)
         self.assertIn('AirPlay attempt started address=192.168.50.2 port=12345', output)

@@ -222,6 +222,69 @@ class DiscoveryTransportTests(unittest.TestCase):
 
 
 class BoundControlTests(unittest.TestCase):
+    def connection_fixture(self, error_numbers, address='fe80::abcd', wait=5):
+        now = [100.0]
+        sockets = []
+        errors = iter(error_numbers)
+        def new_socket(*arguments):
+            sock = Mock()
+            number = next(errors)
+            if number is not None:
+                sock.connect.side_effect = OSError(number, 'fixture connection error')
+            sockets.append(sock)
+            return sock
+        def sleep(seconds):
+            now[0] += seconds
+        with patch.object(rtspclient.socket, 'socket', side_effect=new_socket), \
+                patch.object(rtspclient.socket, 'if_nametoindex', return_value=7), \
+                patch.object(rtspclient.time, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(rtspclient.time, 'sleep', side_effect=sleep) as sleeps:
+            try:
+                client = rtspclient.connect(address, 7000, 'wlan0', bind_device=True, source_address_wait=wait)
+                error = None
+            except OSError as failure:
+                client, error = None, failure
+        return client, error, sockets, sleeps, now[0] - 100
+
+    def test_ipv6_source_address_readiness_retries_inside_the_same_handover(self):
+        client, error, sockets, sleeps, elapsed = self.connection_fixture([errno.EADDRNOTAVAIL] * 2 + [None])
+        self.assertIsNone(error)
+        self.assertIs(client.sock, sockets[-1])
+        self.assertAlmostEqual(elapsed, .4)
+        self.assertEqual(sleeps.call_count, 2)
+        for sock in sockets[:-1]:
+            sock.close.assert_called_once_with()
+        sockets[-1].close.assert_not_called()
+        for sock in sockets:
+            sock.setsockopt.assert_called_once_with(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, b'wlan0\0')
+            sock.connect.assert_called_once_with(('fe80::abcd', 7000, 0, 7))
+
+    def test_ipv6_address_wait_has_a_deadline_and_closes_all_failed_sockets(self):
+        client, error, sockets, _, elapsed = self.connection_fixture([errno.EADDRNOTAVAIL] * 30)
+        self.assertIsNone(client)
+        self.assertEqual(error.errno, errno.EADDRNOTAVAIL)
+        self.assertAlmostEqual(elapsed, 5)
+        self.assertLessEqual(len(sockets), 27)
+        for sock in sockets:
+            sock.close.assert_called_once_with()
+
+    def test_other_errors_and_ipv4_addresses_are_not_delayed(self):
+        for address, number in (('fe80::abcd', errno.ECONNREFUSED), ('192.0.2.2', errno.EADDRNOTAVAIL)):
+            with self.subTest(address=address, number=number):
+                _, error, sockets, sleeps, elapsed = self.connection_fixture([number], address=address)
+                self.assertEqual(error.errno, number)
+                self.assertEqual(len(sockets), 1)
+                self.assertEqual(elapsed, 0)
+                sleeps.assert_not_called()
+                sockets[0].close.assert_called_once_with()
+
+    def test_zero_address_wait_preserves_immediate_failure(self):
+        _, error, sockets, sleeps, elapsed = self.connection_fixture([errno.EADDRNOTAVAIL], wait=0)
+        self.assertEqual(error.errno, errno.EADDRNOTAVAIL)
+        self.assertEqual(elapsed, 0)
+        self.assertEqual(len(sockets), 1)
+        sleeps.assert_not_called()
+
     def test_handover_control_socket_binds_the_target_wifi_before_connecting(self):
         sock = Mock()
         with patch.object(rtspclient.socket, 'socket', return_value=sock):

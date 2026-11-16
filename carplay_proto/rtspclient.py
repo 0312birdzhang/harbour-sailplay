@@ -1,4 +1,6 @@
 """Bounded plain RTSP transport for initial AirPlay discovery."""
+import errno
+import logging
 import socket
 import threading
 import time
@@ -97,16 +99,34 @@ class EncryptedSocket:
         self.sock.close()
 
 
-def connect(address, port, interface, timeout=5, bind_device=False):
+def connect(address, port, interface, timeout=5, bind_device=False, source_address_wait=0):
     # A link-local IPv6 destination requires the Wi-Fi interface scope ID.
-    sock = socket.socket(socket.AF_INET6 if ':' in address else socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    try:
-        if bind_device:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, interface.encode() + b'\0')
-        destination = (address.split('%')[0], port, 0, socket.if_nametoindex(interface)) if ':' in address else (address, port)
-        sock.connect(destination)
-        return RTSPClient(sock)
-    except Exception:
-        sock.close()
-        raise
+    family = socket.AF_INET6 if ':' in address else socket.AF_INET
+    started = time.monotonic()
+    deadline = started + source_address_wait
+    attempts = 0
+    while True:
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        attempts += 1
+        try:
+            sock.settimeout(timeout)
+            if bind_device:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, interface.encode() + b'\0')
+            destination = (address.split('%')[0], port, 0, socket.if_nametoindex(interface)) if family == socket.AF_INET6 else (address, port)
+            sock.connect(destination)
+            if attempts > 1:
+                logging.info('AirPlay IPv6 source address ready interface=%s attempts=%d elapsedMs=%.1f',
+                             interface, attempts, (time.monotonic() - started) * 1000)
+            return RTSPClient(sock)
+        except OSError as error:
+            sock.close()
+            remaining = deadline - time.monotonic()
+            if family != socket.AF_INET6 or error.errno != errno.EADDRNOTAVAIL or remaining <= 0:
+                raise
+            if attempts == 1:
+                logging.info('AirPlay IPv6 source address pending interface=%s waitSeconds=%s',
+                             interface, source_address_wait)
+            time.sleep(min(.2, remaining))
+        except BaseException:
+            sock.close()
+            raise
