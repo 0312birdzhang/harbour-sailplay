@@ -117,6 +117,28 @@ class RetryTests(unittest.TestCase):
         retry.started = True
         self.assertFalse(retry.abandoned('idle', idle))
 
+    def test_returned_home_connection_confirms_the_hu_attempt_has_ended(self):
+        now = [100]
+        retry = ReassociationWindow(clock=lambda: now[0])
+        retry.arm()
+        properties = {'State': 'completed', 'CurrentNetwork': '/home-network'}
+        self.assertFalse(retry.abandoned('idle', properties, 'Home', 'HU'))
+        now[0] += 2
+        self.assertTrue(retry.abandoned('idle', properties, 'Home', 'HU'))
+
+    def test_completed_target_and_unknown_home_identity_are_preserved(self):
+        retry = ReassociationWindow(clock=lambda: 100)
+        retry.arm()
+        for properties, associated, target in (
+            ({'State': 'completed', 'CurrentNetwork': '/hu-network'}, 'HU', 'HU'),
+            ({'State': 'completed', 'CurrentNetwork': '/home-network'}, None, 'HU'),
+            ({'State': 'completed'}, 'Home', 'HU'),
+            ({'State': 'associating', 'CurrentNetwork': '/home-network'}, 'Home', 'HU'),
+        ):
+            with self.subTest(properties=properties, associated=associated):
+                self.assertFalse(retry.abandoned('idle', properties, associated, target))
+                self.assertIsNone(retry.idle_since)
+
 
 source_path = Path(__file__).resolve().parents[1] / 'scripts' / 'wifi-session-probe.py'
 source_tree = ast.parse(source_path.read_text())
@@ -146,7 +168,9 @@ class WifiCallbackTests(unittest.TestCase):
             wpa2_interface_path='/fi/w1/wpa_supplicant1/Interfaces/5', bus=Mock(),
             network_object=Mock(), network_interface=Mock(return_value=self.interface),
             ReassociationWindow=lambda: ReassociationWindow(clock=lambda: self.now),
-            dbus=SimpleNamespace(DBusException=RuntimeError), print=Mock(),
+            session={'ssid': 'HU', 'passphrase': 'fixture'}, refresh_session=Mock(),
+            args=SimpleNamespace(session='/fixture-session', direct_passphrase=True),
+            dbus=SimpleNamespace(DBusException=RuntimeError, String=lambda value, **kwargs: value), print=Mock(),
         )
         exec(callback_code, self.namespace)
         window = self.namespace['ReassociationWindow']()
@@ -189,3 +213,70 @@ class WifiCallbackTests(unittest.TestCase):
         self.assertTrue(self.check())
         self.assertIsNone(self.window().idle_since)
         self.service.Connect.assert_not_called()
+
+    def test_home_connection_retries_in_the_same_worker(self):
+        self.interface.GetAll.return_value = {'State': 'completed', 'CurrentNetwork': '/home', 'CurrentBSS': '/home-bss'}
+        self.interface.Get.return_value = b'Home'
+        self.assertTrue(self.check())
+        self.now += 2
+        self.assertTrue(self.check())
+        self.service.Connect.assert_called_once()
+        self.service.SetProperty.assert_called_once_with('Passphrase', 'fixture')
+        self.namespace['refresh_session'].assert_called_once_with('/fixture-session', self.namespace['session'])
+        self.lease.close.assert_not_called()
+
+    def test_associated_hu_and_bss_read_failures_do_not_trigger_reconnect(self):
+        self.interface.GetAll.return_value = {'State': 'completed', 'CurrentNetwork': '/hu', 'CurrentBSS': '/hu-bss'}
+        self.interface.Get.return_value = b'HU'
+        self.assertTrue(self.check())
+        self.now += 2
+        self.assertTrue(self.check())
+        self.interface.Get.side_effect = RuntimeError('retired BSS')
+        self.assertTrue(self.check())
+        self.service.Connect.assert_not_called()
+        self.assertIsNone(self.window().idle_since)
+
+
+failure_callback = next(node for node in main.body if isinstance(node, ast.FunctionDef) and node.name == 'failed')
+failure_factory = ast.parse('''
+def callbacks(window):
+    wpa2_retry = window
+    wpa2_retries = 0
+    wpa2_interface_path = None
+    return failed, check_wpa2_retry
+''')
+failure_factory.body[0].body[-1:-1] = [failure_callback, check_callback]
+failure_code = compile(failure_factory, str(source_path), 'exec')
+
+
+class InitialFailureTests(unittest.TestCase):
+    def test_ordinary_failure_arms_bounded_retry_without_retiring_the_worker(self):
+        now = [100]
+        window = ReassociationWindow(clock=lambda: now[0])
+        interface = Mock()
+        interface.GetAll.return_value = {'Ifname': 'wlan0', 'State': 'completed', 'CurrentNetwork': '/home', 'CurrentBSS': '/home-bss'}
+        interface.Get.return_value = b'Home'
+        root = Mock()
+        root.Get.return_value = ['/wifi-interface']
+        service = Mock()
+        service.GetProperties.return_value = {'Type': 'wifi', 'Name': 'HU', 'Ethernet': {'Interface': 'wlan0'}, 'State': 'idle'}
+        loop, connected = Mock(), Mock()
+        namespace = dict(
+            service=Mock(return_value=service), target='/hu', loop=loop, connected=connected,
+            bus=Mock(), network_object=lambda bus, name, path: path,
+            network_interface=lambda path, name: root if path == '/fi/w1/wpa_supplicant1' else interface,
+            session={'ssid': 'HU', 'addresses': [], 'port': 7000, 'passphrase': 'fixture'},
+            args=SimpleNamespace(session='/fixture', direct_passphrase=False), refresh_session=Mock(),
+            dbus=SimpleNamespace(DBusException=RuntimeError), print=Mock(),
+            ReassociationWindow=lambda: ReassociationWindow(clock=lambda: now[0]),
+        )
+        exec(failure_code, namespace)
+        failed, check = namespace['callbacks'](window)
+        failed(SimpleNamespace(get_dbus_name=lambda: 'net.connman.Error.Failed'))
+        self.assertEqual(window.deadline, 115)
+        loop.quit.assert_not_called()
+        self.assertTrue(check())
+        now[0] += 2
+        self.assertTrue(check())
+        service.Connect.assert_called_once_with(reply_handler=connected, error_handler=failed, timeout=12)
+        service.SetProperty.assert_not_called()

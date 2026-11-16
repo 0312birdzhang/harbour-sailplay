@@ -27,6 +27,24 @@ class DiscoveryTests(unittest.TestCase):
         scan.assert_called_once_with('/wifi')
         power.assert_not_called()
 
+    def test_hotspot_appearing_between_scans_is_detected_within_a_quarter_second(self):
+        now = [0.0]
+        manager = Mock()
+        def services(**kwargs):
+            if now[0] >= .6:
+                return [('/hu', {'Type': 'wifi', 'Name': 'HU', 'Strength': 70})]
+            return []
+        manager.GetServices.side_effect = services
+        scan = Mock()
+        def sleep(seconds):
+            now[0] += seconds
+        target, _ = discover(manager, '/wifi', 'HU', scan, Mock(), Mock(),
+                             clock=lambda: now[0], sleep=sleep,
+                             log=Mock(), require_available=True)
+        self.assertEqual(target, '/hu')
+        self.assertLessEqual(now[0], .85)
+        scan.assert_called_once_with('/wifi')
+
     def run_discovery(self, manager, visible):
         now = [0]
         power = Mock()

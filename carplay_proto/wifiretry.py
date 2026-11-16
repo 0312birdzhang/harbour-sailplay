@@ -49,11 +49,15 @@ class ReassociationWindow:
     def waiting(self):
         return not self.started and self.clock()<self.deadline
 
-    def abandoned(self, connman_state, supplicant):
-        idle = (connman_state in ('idle', 'failure')
-                and supplicant.get('State') in ('inactive', 'disconnected', 'scanning')
-                and str(supplicant.get('CurrentNetwork')) == '/')
-        if self.started or not self.deadline or not idle:
+    def abandoned(self, connman_state, supplicant, associated_ssid=None, target_ssid=None):
+        current = str(supplicant.get('CurrentNetwork') or '')
+        idle = (supplicant.get('State') in ('inactive', 'disconnected', 'scanning')
+                and current == '/')
+        returned = (supplicant.get('State') == 'completed'
+                    and current.startswith('/') and current != '/'
+                    and associated_ssid and target_ssid and associated_ssid != target_ssid)
+        if (self.started or not self.deadline or connman_state not in ('idle', 'failure')
+                or not (idle or returned)):
             self.idle_since = None
             return False
         now = self.clock()

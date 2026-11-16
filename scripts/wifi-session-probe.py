@@ -32,6 +32,17 @@ def airplay_iap_link(local_name, local_address=None):
     return lambda sock, stop: module.airplay_link(sock, stop, local_name, local_address)
 
 
+def refresh_session(path, session):
+    # StartSession can replace the initial Wi-Fi configuration during discovery.
+    try:
+        with open(path) as stream:
+            updated = json.load(stream)
+    except (OSError, ValueError):
+        return
+    if isinstance(updated, dict) and updated.get('ssid') == session['ssid']:
+        session.update(updated)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--session', default='/tmp/sailplay-session.json')
@@ -271,6 +282,7 @@ def main():
         raise RuntimeError('HU Wi-Fi service unavailable after discovery and recovery')
     if not old:
         raise RuntimeError('no previous Wi-Fi service available for restoration')
+    refresh_session(args.session, session)
     already_connected = target == old
     target_props = service(target).GetProperties()
     print('HU pre-connect configuration: {}'.format({k:str(target_props.get(k)) for k in
@@ -508,9 +520,11 @@ def main():
         def get_dbus_name(self):
             return 'net.connman.Error.NoCarrier'
     def failed(error):
+        nonlocal wpa2_interface_path
         print('ConnMan Connect failed: {}'.format(error.get_dbus_name()), flush=True)
         # Connect errors can coexist with a usable local link. Never infer this
         # merely from cached IPs or lack of Internet; verify association and TCP.
+        props = {}
         try:
             props=service(target).GetProperties()
             iface=str(props.get('Ethernet',{}).get('Interface',''))
@@ -520,9 +534,11 @@ def main():
             for path in root.Get('fi.w1.wpa_supplicant1','Interfaces'):
                 iprops=network_interface(network_object(bus, 'fi.w1.wpa_supplicant1',path),
                                       'org.freedesktop.DBus.Properties')
-                if str(iprops.Get('fi.w1.wpa_supplicant1.Interface','Ifname'))!=iface:continue
-                if str(iprops.Get('fi.w1.wpa_supplicant1.Interface','State'))!='completed':continue
-                bss=iprops.Get('fi.w1.wpa_supplicant1.Interface','CurrentBSS')
+                state = iprops.GetAll('fi.w1.wpa_supplicant1.Interface')
+                if str(state.get('Ifname'))!=iface:continue
+                wpa2_interface_path = str(path)
+                if str(state.get('State'))!='completed':continue
+                bss=state.get('CurrentBSS')
                 bprops=network_interface(network_object(bus, 'fi.w1.wpa_supplicant1',bss),
                                       'org.freedesktop.DBus.Properties')
                 associated=bytes(bprops.Get('fi.w1.wpa_supplicant1.BSS','SSID')).decode('utf-8')
@@ -534,8 +550,11 @@ def main():
                 return
         except (dbus.DBusException,OSError,ValueError,KeyError) as check_error:
             print('HU local bypass check failed: '+type(check_error).__name__,flush=True)
+        if (error.get_dbus_name() == 'net.connman.Error.Failed'
+                and props.get('State') in ('idle', 'failure') and wpa2_interface_path):
+            wpa2_retry.arm()
         if wpa2_retry.waiting():
-            print('Waiting for WPA2 reassociation after the retired connection failed', flush=True)
+            print('Waiting for HU association status after the connection failed', flush=True)
             return
         if error.get_dbus_name() == 'net.connman.Error.NoCarrier':
             try:
@@ -576,20 +595,28 @@ def main():
                     properties = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', wpa2_interface_path),
                                                    'org.freedesktop.DBus.Properties')
                     supplicant = properties.GetAll('fi.w1.wpa_supplicant1.Interface')
-                    abandoned = wpa2_retry.abandoned(props.get('State'), supplicant)
-                except dbus.DBusException:
+                    associated = None
+                    if supplicant.get('State') == 'completed' and supplicant.get('CurrentBSS') not in (None, '/'):
+                        bss = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', supplicant['CurrentBSS']),
+                                                'org.freedesktop.DBus.Properties')
+                        associated = bytes(bss.Get('fi.w1.wpa_supplicant1.BSS', 'SSID')).decode('utf-8')
+                    abandoned = wpa2_retry.abandoned(props.get('State'), supplicant, associated, session['ssid'])
+                except (dbus.DBusException, ValueError, TypeError):
                     wpa2_retry.idle_since = None
                     abandoned = False
                 if abandoned:
                     if wpa2_retries >= 2:
-                        print('WPA2 reassociation retry limit reached; retiring the handover', flush=True)
+                        print('HU association retry limit reached; retiring the handover', flush=True)
                         loop.quit()
                         return False
                     wpa2_retries += 1
                     wpa2_retry = ReassociationWindow()
-                    print('WPA2 association ended state={} error={}; retrying within the current handover {}/2'.format(
+                    print('HU association ended state={} error={}; retrying within the current handover {}/2'.format(
                         props.get('State'), props.get('Error'), wpa2_retries), flush=True)
                     try:
+                        refresh_session(args.session, session)
+                        if args.direct_passphrase:
+                            service(target).SetProperty('Passphrase', dbus.String(session['passphrase'], variant_level=1))
                         service(target).Connect(reply_handler=connected, error_handler=failed, timeout=12)
                     except dbus.DBusException as error:
                         failed(error)

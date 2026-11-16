@@ -14,6 +14,7 @@ def discover(manager, technology, ssid, scan, cached_bss_visible,
              timeout=30, require_available=False):
     from .networkdbus import transient_error
     deadline = clock() + timeout
+    next_scan = clock()
     services = []
     def services_now():
         try:
@@ -27,6 +28,9 @@ def discover(manager, technology, ssid, scan, cached_bss_visible,
         target = find_service(services, ssid, require_available)
         if target:
             return target, services
+        if clock() < next_scan:
+            sleep(min(.25, max(0, deadline-clock())))
+            continue
         started = clock()
         try:
             scan(technology)
@@ -41,7 +45,8 @@ def discover(manager, technology, ssid, scan, cached_bss_visible,
             return target, services
         log('HU discovery targetUnavailable remainingSeconds={:.1f}'.format(max(0,deadline-clock())))
         # Never turn Wi-Fi off to repair a missing service list.
-        sleep(min(2,max(0,deadline-clock())))
+        next_scan = clock() + 2
+        sleep(min(.25,max(0,deadline-clock())))
     return None, services
 
 

@@ -21,6 +21,21 @@ callback_code = compile(ast.Module(body=[connected], type_ignores=[]), str(sourc
 
 
 class InitialSetupTests(unittest.TestCase):
+    def test_start_session_updates_the_initial_configuration_for_the_same_hu(self):
+        session = {'ssid': 'HU', 'passphrase': 'initial', 'addresses': []}
+        update = json.dumps({'ssid': 'HU', 'passphrase': 'latest', 'addresses': ['fe80::1'], 'port': 7000})
+        with patch('builtins.open', mock_open(read_data=update)):
+            module.refresh_session('/fixture', session)
+        self.assertEqual(session['passphrase'], 'latest')
+        self.assertEqual(session['addresses'], ['fe80::1'])
+
+    def test_unrelated_and_partially_written_sessions_preserve_the_current_hu(self):
+        for raw in ('{"ssid":"Other","passphrase":"other"}', '{', '[]'):
+            with self.subTest(raw=raw), patch('builtins.open', mock_open(read_data=raw)):
+                session = {'ssid': 'HU', 'passphrase': 'initial'}
+                module.refresh_session('/fixture', session)
+                self.assertEqual(session, {'ssid': 'HU', 'passphrase': 'initial'})
+
     def run_attempts(self, setup_statuses, public_status=455, media_error=None,
                      peer_addresses=None, network_props=None, discovered_endpoints=None):
         info = plistlib.dumps({'model': 'Fiat CARLINE_13'}, fmt=plistlib.FMT_BINARY)
