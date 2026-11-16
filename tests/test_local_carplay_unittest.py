@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from carplay_proto.wifidiscovery import verify_local_carplay
 
 class LocalCarplayTests(unittest.TestCase):
@@ -25,3 +25,19 @@ class LocalCarplayTests(unittest.TestCase):
         self.assertFalse(self.check(addresses=['localhost','127.0.0.1','::','ff02::1']));self.probe.assert_not_called()
     def test_unspecified_source_is_not_proof(self):
         self.probe.return_value='0.0.0.0';self.assertFalse(self.check())
+
+    def test_missing_gateway_uses_discovered_endpoint_on_the_confirmed_hu_wifi(self):
+        self.props['State'] = 'configuration'
+        self.props['IPv4'] = {'Address': '192.168.50.102', 'Netmask': '255.255.255.0'}
+        self.probe.return_value = '192.168.50.102'
+        with patch('carplay_proto.airplaydiscovery.discover', return_value=[('192.168.50.2', 12345)]):
+            self.assertTrue(verify_local_carplay(self.props, 'HU', 'HU', [], 7000, self.probe,
+                                               log=Mock()))
+        self.probe.assert_called_once_with('192.168.50.2', 12345, 'wlan0')
+
+    def test_discovery_cannot_bypass_unconfirmed_association(self):
+        with patch('carplay_proto.airplaydiscovery.discover') as discover:
+            self.assertFalse(verify_local_carplay(self.props, 'HU', 'Home', [], 7000, self.probe,
+                                                log=Mock()))
+        discover.assert_not_called()
+        self.probe.assert_not_called()

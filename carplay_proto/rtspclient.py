@@ -97,12 +97,14 @@ class EncryptedSocket:
         self.sock.close()
 
 
-def connect(address, port, interface, timeout=5):
+def connect(address, port, interface, timeout=5, bind_device=False):
     # A link-local IPv6 destination requires the Wi-Fi interface scope ID.
     sock = socket.socket(socket.AF_INET6 if ':' in address else socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(timeout)
     try:
-        destination = (address, port, 0, socket.if_nametoindex(interface)) if ':' in address else (address, port)
+        if bind_device:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, interface.encode() + b'\0')
+        destination = (address.split('%')[0], port, 0, socket.if_nametoindex(interface)) if ':' in address else (address, port)
         sock.connect(destination)
         return RTSPClient(sock)
     except Exception:

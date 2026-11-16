@@ -63,11 +63,9 @@ def verify_local_carplay(props, ssid, associated_ssid, addresses, port, probe, l
     if props.get('Type')!='wifi' or props.get('Name')!=ssid or not interface or associated_ssid!=ssid:
         log('HU local bypass rejected: target association not confirmed')
         return False
-    candidates=list(addresses)
-    gateway=str(props.get('IPv4',{}).get('Gateway',''))
-    if gateway:candidates.append(gateway)
+    from .airplaydiscovery import endpoints
     seen=set()
-    for address in candidates:
+    for address, endpoint_port in endpoints(addresses, port, props, log=log):
         address=str(address)
         try:ip=ipaddress.ip_address(address.split('%')[0])
         except ValueError:continue
@@ -75,11 +73,11 @@ def verify_local_carplay(props, ssid, associated_ssid, addresses, port, probe, l
         seen.add(address)
         if len(seen)>3:break
         try:
-            local=ipaddress.ip_address(probe(address,int(port),interface).split('%')[0])
+            local=ipaddress.ip_address(probe(address,endpoint_port,interface).split('%')[0])
             if local.is_unspecified or local.is_loopback:continue
         except (OSError,ValueError):continue
         log('HU local bypass verified: interface={} state={} localAddress={} peer={} port={}; Internet/DNS not required'.format(
-            interface,props.get('State'),local,address,port))
+            interface,props.get('State'),local,address,endpoint_port))
         return True
     log('HU local bypass rejected: CarPlay endpoint not reachable on target Wi-Fi')
     return False

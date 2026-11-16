@@ -348,11 +348,9 @@ def main():
         print('HU Wi-Fi connected; probing AirPlay elapsedMs={:.1f}'.format(
             (time.monotonic()-session_started)*1000), flush=True)
         print('HU IP state: {}'.format({key:str(props.get(key)) for key in ('IPv4','IPv6','IPv6.Configuration')}), flush=True)
-        addresses = list(session['addresses'])
-        gateway = str(props.get('IPv4', {}).get('Gateway', ''))
-        if gateway and gateway not in addresses:
-            addresses.append(gateway)
-        for address in addresses:
+        from carplay_proto.airplaydiscovery import endpoints
+        for address, port in endpoints(session['addresses'], session['port'], props,
+                                       log=lambda line: print(line, flush=True)):
             client = None
             timing = None
             setup_status = None
@@ -361,8 +359,8 @@ def main():
             stage = 'control-connect'
             try:
                 print('AirPlay attempt started address={} port={} interface={}'.format(
-                    address,session['port'],interface),flush=True)
-                client = connect(address, session['port'], interface)
+                    address,port,interface),flush=True)
+                client = connect(address, port, interface, bind_device=True)
                 print('AirPlay control connected local={} peer={} elapsedMs={:.1f}'.format(
                     socket_endpoint(client.sock,'getsockname'),socket_endpoint(client.sock,'getpeername'),
                     (time.monotonic()-attempt_started)*1000),flush=True)
