@@ -11,7 +11,7 @@ def find_service(services, ssid, require_available=False):
 
 def discover(manager, technology, ssid, scan, cached_bss_visible,
              set_powered, log=print, clock=time.monotonic, sleep=time.sleep,
-             timeout=30, require_available=False):
+             timeout=30, require_available=False, prepare=None):
     from .networkdbus import transient_error
     deadline = clock() + timeout
     next_scan = clock()
@@ -23,11 +23,21 @@ def discover(manager, technology, ssid, scan, cached_bss_visible,
             if not transient_error(error): raise
             log('HU discovery waiting for ConnMan: {}'.format(error.get_dbus_name()))
             return []
+    def prepared(target):
+        try:
+            return prepare is None or prepare(target)
+        except Exception as error:
+            if not transient_error(error): raise
+            log('HU discovery waiting for ConnMan: {}'.format(error.get_dbus_name()))
+            return False
     while clock() < deadline:
         services = services_now()
         target = find_service(services, ssid, require_available)
         if target:
-            return target, services
+            if prepared(target):
+                return target, services
+            sleep(min(.25, max(0, deadline-clock())))
+            continue
         if clock() < next_scan:
             sleep(min(.25, max(0, deadline-clock())))
             continue
@@ -42,7 +52,11 @@ def discover(manager, technology, ssid, scan, cached_bss_visible,
         services = services_now()
         target = find_service(services, ssid, require_available)
         if target:
-            return target, services
+            if prepared(target):
+                return target, services
+            sleep(min(.25, max(0, deadline-clock())))
+            continue
+        log('HU discovery supplicantBssVisible={}'.format(bool(cached_bss_visible(ssid))))
         log('HU discovery targetUnavailable remainingSeconds={:.1f}'.format(max(0,deadline-clock())))
         # Never turn Wi-Fi off to repair a missing service list.
         next_scan = clock() + 2

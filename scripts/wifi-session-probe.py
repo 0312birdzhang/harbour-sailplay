@@ -244,10 +244,31 @@ def main():
             log=lambda message: print(message, flush=True))
     services = manager.GetServices()
     target = find_service(services, session['ssid'], require_available=True)
-    if args.connect and not target:
+    if args.connect:
         # StartSession can precede ConnMan discovering the newly enabled HU AP.
-        wifi_path = next((path for path,props in manager.GetTechnologies() if props.get('Type')=='wifi'),None)
         from carplay_proto.wifidiscovery import discover
+        from carplay_proto.networkrecovery import recover_split_registry
+        owner_api = network_interface(network_object(bus, 'org.freedesktop.DBus',
+            '/org/freedesktop/DBus'), 'org.freedesktop.DBus')
+        recovering_owner = None
+        def prepare_service(path):
+            nonlocal recovering_owner
+            owner = str(owner_api.GetNameOwner('net.connman'))
+            if owner == recovering_owner:
+                return False
+            if recovering_owner is not None:
+                print('HU ConnMan owner replaced; continuing discovery within the current handover', flush=True)
+                recovering_owner = None
+            try:
+                recovered = recover_split_registry(manager, service, path, session['ssid'], owner,
+                    log=lambda line: print(line, flush=True))
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                print('HU registry recovery unavailable: '+type(error).__name__, flush=True)
+                return True
+            if recovered:
+                recovering_owner = owner
+                return False
+            return True
         def cached_bss_visible(ssid):
             try:
                 props = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', '/fi/w1/wpa_supplicant1'),
@@ -270,7 +291,8 @@ def main():
                 cached_bss_visible=cached_bss_visible,
                 set_powered=lambda path, powered: network_interface(network_object(bus, 'net.connman', path),
                     'net.connman.Technology').SetProperty('Powered', dbus.Boolean(powered, variant_level=1)),
-                log=lambda message: print(message, flush=True), require_available=True)
+                log=lambda message: print(message, flush=True), require_available=True,
+                prepare=prepare_service)
     old = next((str(path) for path, props in services if props.get('Type') == 'wifi' and props.get('State') in ('ready', 'online')), None)
     if not old:
         old=next((str(path) for path,props in services if props.get('Type')=='wifi'

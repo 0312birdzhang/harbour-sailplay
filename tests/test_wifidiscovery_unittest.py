@@ -45,6 +45,47 @@ class DiscoveryTests(unittest.TestCase):
         self.assertLessEqual(now[0], .85)
         scan.assert_called_once_with('/wifi')
 
+    def test_split_registry_recovery_waits_in_the_same_discovery(self):
+        now = [0.0]
+        manager = Mock()
+        manager.GetServices.side_effect = lambda **kwargs: [
+            ('/old' if now[0] < 1 else '/new', {'Type': 'wifi', 'Name': 'HU', 'Strength': 70})]
+        prepare = Mock(side_effect=lambda path: path == '/new')
+        scan = Mock()
+        def sleep(seconds):
+            now[0] += seconds
+        target, _ = discover(manager, '/wifi', 'HU', scan, Mock(), Mock(),
+            log=Mock(), clock=lambda: now[0], sleep=sleep,
+            require_available=True, prepare=prepare)
+        self.assertEqual(target, '/new')
+        self.assertEqual(now[0], 1)
+        scan.assert_not_called()
+
+    def test_registry_recovery_cannot_extend_the_discovery_deadline(self):
+        now = [0.0]
+        manager = Mock()
+        manager.GetServices.return_value = [('/hu', {'Type': 'wifi', 'Name': 'HU', 'Strength': 70})]
+        def sleep(seconds):
+            now[0] += seconds
+        target, _ = discover(manager, '/wifi', 'HU', Mock(), Mock(), Mock(),
+            log=Mock(), clock=lambda: now[0], sleep=sleep,
+            timeout=2, require_available=True, prepare=Mock(return_value=False))
+        self.assertIsNone(target)
+        self.assertEqual(now[0], 2)
+
+    def test_owner_disappearance_during_preparation_is_retried(self):
+        now = [0.0]
+        manager = Mock()
+        manager.GetServices.return_value = [('/hu', {'Type': 'wifi', 'Name': 'HU', 'Strength': 70})]
+        prepare = Mock(side_effect=[RestartError(), True])
+        def sleep(seconds):
+            now[0] += seconds
+        target, _ = discover(manager, '/wifi', 'HU', Mock(), Mock(), Mock(),
+            log=Mock(), clock=lambda: now[0], sleep=sleep,
+            require_available=True, prepare=prepare)
+        self.assertEqual(target, '/hu')
+        self.assertEqual(prepare.call_count, 2)
+
     def run_discovery(self, manager, visible):
         now = [0]
         power = Mock()
