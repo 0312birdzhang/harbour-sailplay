@@ -1,0 +1,64 @@
+name: Build RPM
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SAILFISH_RELEASE: '5.2.0.15'
+  X264_REVISION: 'c24e06c2e184345ceb33eb20a15d1024d9fd3497'
+  X264_SHA256: '090d730e867fc63631782a1287974635d1237d0fa7c6fd1d09fd543620a56689'
+
+jobs:
+  build:
+    name: Build aarch64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare build inputs
+        run: |
+          mkdir -p output
+          chmod 777 output
+          curl --fail --location --retry 3 \
+            "https://codeload.github.com/mirror/x264/tar.gz/$X264_REVISION" \
+            --output "$RUNNER_TEMP/x264.tar.gz"
+          printf '%s  %s\n' "$X264_SHA256" "$RUNNER_TEMP/x264.tar.gz" | sha256sum --check
+
+      - name: Build release RPM
+        run: |
+          docker run --rm --privileged \
+            --volume "$PWD:/share:ro" \
+            --volume "$PWD/output:/output" \
+            --volume "$RUNNER_TEMP/x264.tar.gz:/home/mersdk/x264.tar.gz:ro" \
+            "coderus/sailfishos-platform-sdk-aarch64:$SAILFISH_RELEASE" \
+            /bin/bash -ec '
+              target="SailfishOS-$1-aarch64"
+              mkdir -p build
+              cd build
+              cp -r /share/. .
+              sb2 -t "$target" -m sdk-install -R zypper --non-interactive install --no-recommends \
+                gcc gcc-c++ make pkgconfig rpm-build python3-base file qt5-qttools \
+                "pkgconfig(Qt5Compositor)" "pkgconfig(Qt5Quick)" \
+                "pkgconfig(Qt5Widgets)" "pkgconfig(Qt5DBus)" \
+                "pkgconfig(Qt5Network)" "pkgconfig(sailfishapp)" \
+                "pkgconfig(wayland-client)" "pkgconfig(wayland-server)" \
+                "pkgconfig(glesv2)"
+              sb2 -t "$target" bash "$PWD/rpm/build-arm.sh"
+              sb2 -t "$target" bash "$PWD/rpm/make-rpm.sh"
+              cp "$HOME"/rpmbuild/RPMS/aarch64/harbour-sailplay-*.aarch64.rpm /output/
+            ' -- "$SAILFISH_RELEASE"
+
+      - name: Upload RPM
+        uses: actions/upload-artifact@v4
+        with:
+          name: harbour-sailplay-aarch64-rpm
+          path: output/*.rpm
+          if-no-files-found: error

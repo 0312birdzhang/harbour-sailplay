@@ -2,25 +2,25 @@
 # Cross-build every ARM binary the RPM ships. Run INSIDE the SailfishOS SDK:
 #
 #   sudo ./sdk-chroot -u <sdkuser> sb2 -t SailfishOS-latest-aarch64 \
-#       bash /parentroot/mnt/d/code/sfos-carlife/harbour-sailife/rpm/build-arm.sh
+#       bash /path/to/harbour-sailplay/rpm/build-arm.sh
 #
 # Outputs land in rpm/payload/ (git-ignored); rpm/make-rpm.sh packs them.
 # x264 is built as a static PIC lib with AArch64 NEON assembly enabled
 # and linked into carlife-capture, so the RPM carries no x264 runtime
 # dependency — the SDK target repos have no x264 package.
 set -e
-ROOT=/parentroot/mnt/d/code/sfos-carlife/harbour-sailplay
+ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd)
 REPO=$ROOT/display-source
 PAYLOAD=$ROOT/rpm/payload
 mkdir -p "$PAYLOAD"
 
 # --- x264 static (aarch64) --------------------------------------------------
-X264_SRC=/home/pc/sailplay-x264-simd-src
-X264_OUT=/home/pc/sailplay-x264-simd-aarch64
+X264_SRC=$HOME/sailplay-x264-simd-src
+X264_OUT=$HOME/sailplay-x264-simd-aarch64
 if [ ! -f "$X264_OUT/libx264.a" ]; then
     rm -rf "$X264_SRC"
     mkdir -p "$X264_SRC" "$X264_OUT"
-    tar xzf /home/pc/x264.tar.gz -C "$X264_SRC" --strip-components=1
+    tar xzf "$HOME/x264.tar.gz" -C "$X264_SRC" --strip-components=1
     cd "$X264_SRC"
     ./configure --prefix="$X264_OUT" --enable-static --enable-pic \
         --disable-cli --disable-opencl

@@ -21,15 +21,17 @@ connection, visible applications and display settings.
 
 ## Build and device configuration
 
-The RPM scripts require the SailfishOS aarch64 SDK, x264 source/static library and Qt build dependencies. SDK paths in `rpm/build-arm.sh` and the WSL wrappers must be adapted to your checkout.
+GitHub Actions builds an aarch64 RPM on pushes and pull requests using the SailfishOS 5.2.0.15 SDK. Download the RPM from the workflow artifacts, or start a build with the manual workflow trigger.
 
-Accessory certificate pins are local, device-specific inputs and are not published. Save an observed accessory certificate locally and generate the verification pin:
+The RPM scripts require the SailfishOS aarch64 SDK, x264 source in `$HOME/x264.tar.gz` and Qt build dependencies. WSL wrapper paths must be adapted to your checkout.
+
+Successful authentication saves a certificate pin for each paired head unit under `/var/lib/sailplay/accessories/`. To include an observed accessory certificate in a custom RPM, generate a local verification pin.
 
 ```sh
 python3 scripts/export-accessory-pin.py accessory.der diagnostics/corolla-accessory-key.json
 ```
 
-The current RPM recipe expects that local pin filename. Configure the target BlueZ device path in `rpm/sailplay.service` for your own paired head unit. Do not reuse another vehicle's certificate pin.
+The RPM recipe includes `diagnostics/corolla-accessory-key.json` as the legacy fallback when that file is present. Configure the target BlueZ device path in `rpm/sailplay.service` for your own paired head unit.
 
 Run the SDK build/package wrapper, then install the resulting RPM. The service starts at boot after installation; configure the device path before starting it on a different head unit.
 
