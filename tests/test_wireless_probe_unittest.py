@@ -1,4 +1,5 @@
 """Exercise the executable against a mock accessory, including retransmission."""
+import ast
 import importlib.util
 import os
 import socket
@@ -7,6 +8,8 @@ import unittest
 import tempfile
 import fcntl
 import xml.etree.ElementTree as ET
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from carplay_proto.iap2link import ACK, DETECT, SYN, Decoder, Packet, encode, synchronization
 from carplay_proto.wire import Frame, encode_param
@@ -15,6 +18,92 @@ path = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'wireless-probe.
 spec = importlib.util.spec_from_file_location('wireless_probe', path)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+
+
+class ProfileRetryTests(unittest.TestCase):
+    def setUp(self):
+        with open(path) as source:
+            tree = ast.parse(source.read())
+        main = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'main')
+        connect = next(node for node in ast.walk(main)
+                       if isinstance(node, ast.FunctionDef) and node.name == 'connect')
+        self.code = compile(ast.Module(body=[connect], type_ignores=[]), path, 'exec')
+        self.target = '/org/bluez/hci1/dev_fixture'
+        self.device = Mock()
+        self.device.Get.return_value = True
+        self.objects = Mock()
+        self.objects.GetManagedObjects.return_value = {
+            self.target: {'org.bluez.Device1': {'Connected': True}}}
+        bus = Mock()
+        bus.get_object.side_effect = lambda name, object_path: self.objects if object_path == '/' else self.device
+        self.thread = Mock(name='worker')
+        self.thread.name = 'RFCOMM-client'
+        self.thread.is_alive.return_value = False
+        self.worker = (Mock(), self.thread, Mock())
+        self.manager = Mock()
+        class DbusError(Exception):
+            def get_dbus_name(self):
+                return 'fixture.Error'
+        self.error = DbusError
+        self.namespace = dict(module.__dict__, bus=bus,
+            dbus=SimpleNamespace(Interface=lambda obj, interface: obj, DBusException=DbusError),
+            args=SimpleNamespace(device=self.target), adapter='/org/bluez/hci1',
+            workers={self.target: self.worker}, connecting=[False], last_state=[None, 0],
+            select_head_unit=Mock(return_value=self.target), previous_head_unit=Mock(),
+            media_active=Mock(return_value=False), manager=self.manager,
+            retire_worker=Mock(), profile_power=Mock(), loop=Mock())
+        exec(self.code, self.namespace)
+
+    def test_finished_client_rebuilds_the_profile_before_reconnecting(self):
+        calls = Mock()
+        calls.attach_mock(self.manager.UnregisterProfile, 'unregister')
+        calls.attach_mock(self.manager.RegisterProfile, 'register')
+        calls.attach_mock(self.device.ConnectProfile, 'connect')
+        self.namespace['connect']()
+        self.assertEqual([call[0] for call in calls.mock_calls], ['unregister', 'register', 'connect'])
+        self.manager.UnregisterProfile.assert_called_once_with(module.PROFILE_PATH + '_client', timeout=3)
+        self.manager.RegisterProfile.assert_called_once_with(module.PROFILE_PATH + '_client',
+            module.ACCESSORY_UUID, {'Role': 'client', 'RequireAuthentication': True}, timeout=3)
+        self.namespace['retire_worker'].assert_called_once_with(self.worker)
+        self.assertNotIn(self.target, self.namespace['workers'])
+
+    def test_active_media_or_live_worker_keeps_the_profile(self):
+        for active, alive in ((True, False), (False, True)):
+            with self.subTest(active=active, alive=alive):
+                self.namespace['media_active'].return_value = active
+                self.thread.is_alive.return_value = alive
+                self.namespace['connect']()
+        self.manager.UnregisterProfile.assert_not_called()
+        self.device.ConnectProfile.assert_not_called()
+
+    def test_disconnected_bluetooth_keeps_the_profile(self):
+        self.device.Get.return_value = False
+        self.namespace['connect']()
+        self.manager.UnregisterProfile.assert_not_called()
+        self.device.ConnectProfile.assert_not_called()
+
+    def test_another_live_worker_defers_the_client_profile_rebuild(self):
+        other_thread = Mock()
+        other_thread.is_alive.return_value = True
+        self.namespace['workers']['/org/bluez/hci1/other'] = (Mock(), other_thread, Mock())
+        self.namespace['connect']()
+        self.manager.UnregisterProfile.assert_not_called()
+        self.device.ConnectProfile.assert_not_called()
+        self.assertIn(self.target, self.namespace['workers'])
+
+    def test_server_channel_retirement_preserves_the_client_profile(self):
+        self.thread.name = 'RFCOMM-server'
+        self.namespace['connect']()
+        self.namespace['retire_worker'].assert_called_once_with(self.worker)
+        self.manager.UnregisterProfile.assert_not_called()
+        self.device.ConnectProfile.assert_called_once()
+
+    def test_partial_profile_rebuild_failure_relaunches_the_backend(self):
+        self.manager.RegisterProfile.side_effect = self.error('fixture failure')
+        self.namespace['connect']()
+        self.namespace['loop'].quit.assert_called_once()
+        self.device.ConnectProfile.assert_not_called()
+        self.assertFalse(self.namespace['connecting'][0])
 
 
 class ProbeTests(unittest.TestCase):
