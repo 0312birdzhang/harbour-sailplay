@@ -48,7 +48,7 @@ class AudioSender:
         self.control=socket.socket(tcp.family,socket.SOCK_DGRAM);self.control.bind(tuple(local))
         self.stream_id=int.from_bytes(os.urandom(7),'big') or 1
         self.encoder=AudioEncoder(shared,self.stream_id)
-        self.stop=threading.Event();self.thread=None;self.process=None;self.log=None;self.log_thread=None
+        self.stop=threading.Event();self.thread=None;self.process=None;self.log=None
         self.gain=1.0
         self.receiver_info=info
     def description(self):
@@ -69,13 +69,16 @@ class AudioSender:
         """Wait for actual PCM before the receiver starts its audio resource."""
         if self.process is not None:return
         started=time.monotonic()
+        print('Audio preparation started codec={} warmupSeconds=4 timeoutSeconds={}'.format(
+            'AAC-LC' if self.aac else 'PCM',timeout),flush=True)
         avoid_diplay_audio_loop(self.receiver_info)
-        from .runtime_logging import private_handler
-        self.log=private_handler('audio-capture')
+        from .runtime_logging import ProcessOutput
         self.process=subprocess.Popen(['su','defaultuser','-s','/bin/sh','-c',
           'exec env XDG_RUNTIME_DIR=/run/user/100000 python3 /opt/sailplay/scripts/pulse-capture.py'],
           stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
-        self.log_thread=threading.Thread(target=self.capture_log,daemon=True);self.log_thread.start()
+        self.log=ProcessOutput('audio-capture',self.process.stderr,self.process.pid)
+        print('Audio capture process started pid={} elapsedMs={:.1f}'.format(
+            self.process.pid,(time.monotonic()-started)*1000),flush=True)
         if self.aac:
             from .aac import AacCapture
             self.aac_capture=AacCapture(self.process.stdout,self.stop,lambda:self.gain)
@@ -101,13 +104,6 @@ class AudioSender:
         print('Audio capture ready elapsedMs={:.1f} bufferedFrames={}'.format(
             (time.monotonic()-started)*1000,len(self.initial_pcm)//4),flush=True)
 
-    def capture_log(self):
-        for raw in iter(self.process.stderr.readline,b''):
-            line=raw.decode('utf-8',errors='replace').rstrip()[:16384]
-            if self.log:
-                self.log.handle(logging.LogRecord('audio-capture',logging.INFO,'',0,line,(),None))
-            else:
-                print('Audio capture: '+line,flush=True)
     def run(self):
         buf=getattr(self,'initial_pcm',b'');count=0;deadline=time.monotonic();last=time.monotonic();peak=0;capture_peak=0
         last_read=last;last_send=None;read_gap=send_gap=0;resets=0
@@ -176,8 +172,7 @@ class AudioSender:
             try:self.process.wait(timeout=4)
             except subprocess.TimeoutExpired:
                 os.killpg(self.process.pid,signal.SIGKILL);self.process.wait()
-            if self.log_thread:self.log_thread.join(1)
-            self.process.stderr.close()
+            if self.log is None:self.process.stderr.close()
         self.sock.close();self.control.close()
         if self.log:self.log.close()
 

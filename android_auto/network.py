@@ -117,6 +117,8 @@ class NetworkHandover:
             self.lease.plan_network(old, target, forget=not properties.get('Favorite'),
                                     wifi_path=wifi_path, powered=powered)
         agent_target, password, ssid = target, credentials.password, credentials.ssid
+        agent_error = [None]
+        log = self.log
 
         class Agent(dbus.service.Object):
             @dbus.service.method('net.connman.Agent', in_signature='oa{sv}', out_signature='a{sv}')
@@ -134,7 +136,9 @@ class NetworkHandover:
 
             @dbus.service.method('net.connman.Agent', in_signature='os', out_signature='')
             def ReportError(self, path, error):
-                pass
+                if str(path) == agent_target:
+                    agent_error[0] = str(error)
+                    log('Android Auto Wi-Fi agent reported error={}'.format(error))
 
             @dbus.service.method('net.connman.Agent', in_signature='', out_signature='')
             def Release(self):
@@ -157,11 +161,12 @@ class NetworkHandover:
             errors.append(error)
             completed.set()
 
+        attempts = 1
+        deadline = time.monotonic() + timeout
         if properties.get('State') not in ('ready', 'online'):
             self.service(target).Connect(reply_handler=completed.set, error_handler=failed, timeout=timeout)
         else:
             completed.set()
-        deadline = time.monotonic() + timeout
         while not self.stop.is_set() and time.monotonic() < deadline:
             properties = self.service(target).GetProperties()
             interface = str(properties.get('Ethernet', {}).get('Interface', ''))
@@ -176,8 +181,41 @@ class NetworkHandover:
                     self.log('Android Auto head-unit Wi-Fi association and local address confirmed')
                     return interface, local
             if completed.is_set() and errors:
-                if getattr(errors[0], 'get_dbus_name', lambda: '')() != 'net.connman.Error.NoCarrier':
-                    raise errors[0]
+                error = errors[0]
+                name = getattr(error, 'get_dbus_name', lambda: type(error).__name__)()
+                self.log('Android Auto Wi-Fi connect failed attempt={}/3 dbusError={} state={} strength={} error={} agentError={}'.format(
+                    attempts, name, properties.get('State'), properties.get('Strength'),
+                    properties.get('Error'), agent_error[0]))
+                if name == 'net.connman.Error.InProgress':
+                    errors.clear()
+                    completed.clear()
+                elif (name in ('net.connman.Error.NoCarrier', 'net.connman.Error.Failed')
+                        and properties.get('Error') not in ('invalid-key', 'auth-failed', 'blocked')
+                        and agent_error[0] not in ('invalid-key', 'auth-failed', 'blocked')
+                        and attempts < 3):
+                    if self.stop.wait(min(2, max(0, deadline - time.monotonic()))):
+                        raise InterruptedError('Android Auto Wi-Fi connection stopped')
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    try:
+                        technology.Scan(timeout=min(8, remaining))
+                    except Exception as scan_error:
+                        scan_name = getattr(scan_error, 'get_dbus_name', lambda: type(scan_error).__name__)()
+                        self.log('Android Auto Wi-Fi retry scan failed error={}'.format(scan_name))
+                    if self.stop.is_set():
+                        raise InterruptedError('Android Auto Wi-Fi connection stopped')
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    attempts += 1
+                    self.log('Android Auto retrying head-unit Wi-Fi attempt={}/3 remainingSeconds={:.1f}'.format(
+                        attempts, remaining))
+                    errors.clear()
+                    completed.clear()
+                    self.service(target).Connect(reply_handler=completed.set, error_handler=failed, timeout=remaining)
+                else:
+                    raise error
             self.stop.wait(.2)
         if self.stop.is_set():
             raise InterruptedError('Android Auto Wi-Fi connection stopped')

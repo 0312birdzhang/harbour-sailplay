@@ -623,6 +623,18 @@ Lancez la musique sur votre téléphone</translation>
       <source>Messaging account is unavailable</source>
       <translation>Le compte de messagerie est indisponible</translation>
     </message>
+    <message>
+      <source>Collect diagnostic logs</source>
+      <translation>Collecter les journaux de diagnostic</translation>
+    </message>
+    <message>
+      <source>Save detailed connection logs privately and rotate them automatically. The setting takes effect during the current session.</source>
+      <translation>Enregistrer les journaux de connexion détaillés de façon privée avec rotation automatique. Le réglage prend effet pendant la session en cours.</translation>
+    </message>
+    <message>
+      <source>Could not save diagnostic logging setting</source>
+      <translation>Impossible d’enregistrer le réglage des journaux de diagnostic</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

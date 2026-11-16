@@ -21,6 +21,7 @@ import fcntl
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from carplay_proto.bluezadapter import select_adapter, adapter_name, select_head_unit, previous_head_unit, remember_head_unit
 from carplay_proto.projectionpower import with_connection_power, ProfileConnectionPower
+from carplay_proto.runtime_logging import socket_endpoint
 from carplay_proto.iap2link import (ACK, DETECT, EAK, RST, SYN, Decoder,
                                    Packet, encode, parse_synchronization,
                                    synchronization)
@@ -147,7 +148,13 @@ def touch_handover_heartbeat():
 def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
           announce_wireless=False, local_address=None, session_out=None, wifi_handover=False,sustained=False,
           local_name='SailfishOS', paired_pin_path=None, on_authenticated=None,
-          transport='bluetooth'):
+          transport='bluetooth', connection_role='unknown'):
+    started = time.monotonic()
+    phase = 'detection'
+    received_bytes = 0
+    exit_reason = 'duration'
+    logging.info('iAP2 connection start transport=%s role=%s local=%s peer=%s durationSeconds=%s',
+                 transport, connection_role, socket_endpoint(sock,'getsockname'), socket_endpoint(sock,'getpeername'), duration)
     handover_started = False
     handover_command = None
     def retry_handover():
@@ -178,16 +185,15 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
         handover_command=['systemd-run', '--unit=sailplay-handover-{}-{}'.format(os.getpid(),time.monotonic_ns()),
             sys.executable, os.path.join(os.path.dirname(__file__), 'wifi-session-probe.py'),
             '--connect', '--direct-passphrase',
-            '--restore-after', '90', '--log-file', '/tmp/sailplay-wifi-probe.log']
+            '--restore-after', '90']
         if sustained:
             handover_command.append('--sustained')
-        else:
-            handover_command.append('--trace-supplicant')
         subprocess.run(handover_command,check=True)
         handover_started = True
         touch_handover_heartbeat()
         handover_retry.arm()
-        logging.info('%s triggered independent Wi-Fi/AirPlay handover', trigger)
+        logging.info('%s triggered independent Wi-Fi/AirPlay handover unit=%s elapsedMs=%.1f',
+                     trigger, handover_command[1], (time.monotonic() - started) * 1000)
 
     decoder, csm = Decoder(), Framer()
     deadline = time.monotonic() + duration if duration else float('inf')
@@ -206,7 +212,6 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
     authenticator = None
     authenticated = False
     peer_received_messages = set()
-    ea_protocols = []
     wifi_config = None
     navigation = NavigationSubscription()
     navigation_feed = ProviderNavigationFeed()
@@ -267,7 +272,9 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
             except socket.timeout:
                 continue
             if not raw:
+                exit_reason = 'peer EOF'
                 break
+            received_bytes += len(raw)
             for packet in decoder.feed(raw):
                 if transport == 'airplay':
                     if packet == DETECT:
@@ -289,6 +296,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                 if packet.control & RST:
                     raise ValueError('peer reset link')
                 if packet.control & SYN:
+                    phase = 'synchronization'
                     limits, sessions = parse_synchronization(packet.payload or b'')
                     logging.info('peer SYN limits=%s sessions=%s', limits, sessions)
                     controls = [s[0] for s in sessions if s[1] == 0 and s[2] in (1, 2)]
@@ -306,8 +314,10 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                     pending = None
                 if peer_syn and local_syn_acked and not negotiated:
                     negotiated = True
+                    phase = 'identification'
                     outgoing.append(Frame(0x1d00, b''))
-                    logging.info('iAP2 link negotiated; requesting accessory identification')
+                    logging.info('iAP2 link negotiated; requesting accessory identification elapsedMs=%.1f',
+                                 (time.monotonic() - started) * 1000)
                 if packet.control & EAK:
                     logging.warning('peer extended ACK; probe has no queued control packets')
                 if packet.control & ~(ACK) == 0 and packet.payload is not None:
@@ -344,9 +354,10 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                     logging.info('identification parameter ids=%s',
                                                  [(parameter.id, len(parameter.payload))
                                                   for parameter in frame.parameters()])
-                                    ea_protocols = parse_ea_protocols(frame)
+                                    parse_ea_protocols(frame)
                                     outgoing.extend([Frame(0x1d02, b''), Frame(0xaa00, b'')])
                                 elif frame.message_id == 0xaa01:
+                                    phase = 'authentication'
                                     parameters = frame.parameters()
                                     certificates = [p.payload for p in parameters if p.id == 0]
                                     if len(certificates) != 1 or not certificates[0]:
@@ -380,9 +391,22 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                                  authenticator.algorithm, len(signatures[0]))
                                     authenticator.verify(signatures[0])
                                     authenticated = True
+                                    phase = 'authenticated'
+                                    logging.info('iAP2 accessory authenticated elapsedMs=%.1f',
+                                                 (time.monotonic() - started) * 1000)
                                     if on_authenticated:
                                         on_authenticated()
                                     outgoing.append(Frame(0xaa05, b''))
+                                    if transport != 'airplay':
+                                        # EA sessions require a matching accessory application.
+                                        if peer_supports_wifi_configuration_request(peer_received_messages):
+                                            outgoing.append(request_wifi_configuration())
+                                            logging.info('pinned accessory challenge signature VERIFIED; '
+                                                         'Wi-Fi configuration request queued after authentication')
+                                        else:
+                                            logging.info('pinned accessory challenge signature VERIFIED; '
+                                                         'waiting for notification-driven Wi-Fi handover '
+                                                         '(peer does not advertise 0x5702)')
                                     if announce_wireless:
                                         if not local_address:
                                             raise ValueError('missing local Bluetooth transport identity')
@@ -418,23 +442,6 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                         if peer_supports_wifi_configuration_request(peer_received_messages):
                                             outgoing.append(request_wifi_configuration())
                                             logging.info('Wi-Fi configuration requested over AirPlay link')
-                                    else:
-                                        for protocol_id, protocol_name in ea_protocols:
-                                            if 0xea00 not in peer_received_messages:
-                                                logging.info('accessory does not receive 0xea00; skipping EA protocol=%d name=%r',
-                                                             protocol_id, protocol_name)
-                                                continue
-                                            outgoing.append(Frame(0xea00, encode_param(0, bytes([protocol_id])) +
-                                                                  encode_param(1, struct.pack('>H', protocol_id))))
-                                            logging.info('EA session requested protocol=%d session=%d name=%r',
-                                                         protocol_id, protocol_id, protocol_name)
-                                        if peer_supports_wifi_configuration_request(peer_received_messages):
-                                            outgoing.append(request_wifi_configuration())
-                                            logging.info('pinned accessory challenge signature VERIFIED; requesting Wi-Fi config')
-                                        else:
-                                            logging.info('pinned accessory challenge signature VERIFIED; '
-                                                         'waiting for notification-driven Wi-Fi handover '
-                                                         '(peer does not advertise 0x5702)')
                                 elif frame.message_id in (NAV_START, NAV_STOP):
                                     if not authenticated:
                                         logging.warning('ignoring navigation subscription before authentication')
@@ -514,8 +521,13 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                     sock.sendall(encode(Packet(ACK, sequence, last_rx, 0, None)))
         logging.info('probe ended; checksum errors=%d', decoder.errors)
     except (OSError, ValueError):
-        logging.exception('probe failed')
+        exit_reason = 'failure'
+        logging.exception('probe failed transport=%s role=%s phase=%s elapsedMs=%.1f receivedBytes=%d',
+                          transport, connection_role, phase, (time.monotonic() - started) * 1000, received_bytes)
     finally:
+        logging.info('iAP2 connection ended transport=%s role=%s phase=%s reason=%s elapsedMs=%.1f receivedBytes=%d negotiated=%s authenticated=%s',
+                     transport, connection_role, phase, 'stopped' if stop.is_set() else exit_reason,
+                     (time.monotonic() - started) * 1000, received_bytes, negotiated, authenticated)
         sock.close()
 
 
@@ -670,10 +682,14 @@ def main():
                                                          args.certificate_out or certificate_path, args.accessory_key,
                                                          args.announce_wireless, local_address, args.session_out, args.wifi_handover,args.sustained,
                                                          adapter_name(adapter_props), pin_path,
-                                                         (lambda: remember_head_unit(str(device))) if pin_path else None))
+                                                          (lambda: remember_head_unit(str(device))) if pin_path else None),
+                                      kwargs={'connection_role': self.role}, name='RFCOMM-' + self.role)
             workers[str(device)] = (stop, thread, sock)
+            logging.info('RFCOMM connected device=%s role=%s profile=%s fd=%d local=%s peer=%s properties=%s',
+                         device, self.role, self.__dbus_object_path__, sock.fileno(),
+                         socket_endpoint(sock,'getsockname'), socket_endpoint(sock,'getpeername'),
+                         sorted(str(key) for key in properties))
             thread.start()
-            logging.info('RFCOMM connected device=%s', device)
 
         @dbus.service.method('org.bluez.Profile1', in_signature='o', out_signature='')
         def RequestDisconnection(self, device):
@@ -682,7 +698,9 @@ def main():
             retire_worker(worker)
 
     profile = Profile(bus, PROFILE_PATH)
+    profile.role = 'server'
     client_profile = Profile(bus, PROFILE_PATH + '_client')
+    client_profile.role = 'client'
     manager = dbus.Interface(bus.get_object('org.bluez', '/org/bluez'),
                              'org.bluez.ProfileManager1')
     manager.RegisterProfile(PROFILE_PATH, PHONE_UUID, {

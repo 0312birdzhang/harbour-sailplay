@@ -53,6 +53,7 @@
 #include "mapcanvas.h"
 #include "contenthost.h"
 #include "musichost.h"
+#include "diagnosticslogging.h"
 
 static const char *kSystemConfig = "/opt/sailplay/carui-apps.conf";
 static volatile sig_atomic_t g_stopRequested = 0;
@@ -303,7 +304,7 @@ static void scanAvailableApps()
               [](const AvailableApp &a, const AvailableApp &b) {
                   return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
               });
-    fprintf(stderr, "carui: %d installed apps\n", g_available.size());
+    qInfo("carui: %d installed apps\n", g_available.size());
 }
 
 static const AvailableApp *findAvailable(const QString &id)
@@ -506,6 +507,7 @@ class CarUiController : public QObject
     Q_PROPERTY(QString serviceState READ serviceState NOTIFY serviceRunningChanged)
     Q_PROPERTY(QString serviceError READ serviceError NOTIFY serviceRunningChanged)
     Q_PROPERTY(bool serviceBusy READ serviceBusy NOTIFY serviceRunningChanged)
+    Q_PROPERTY(bool loggingEnabled READ loggingEnabled NOTIFY loggingEnabledChanged)
     Q_PROPERTY(QVariantMap status READ status NOTIFY statusChanged)
     Q_PROPERTY(int resolutionIndex READ resolutionIndex NOTIFY projectionSettingsChanged)
     Q_PROPERTY(int projectionFps READ projectionFps NOTIFY projectionSettingsChanged)
@@ -538,6 +540,7 @@ public:
         : QObject(parent), m_projection(projection), m_navigation(new SailplayNavigationHost(QString(), this)),
           m_content(new SailplayContentHost(this)), m_music(new SailplayMusicHost(this))
     {
+        m_loggingEnabled = diagnosticLoggingEnabled();
         connect(this, &CarUiController::currentAppChanged, this, [this]() {
             m_music->setActive(m_musicActive || m_dashboardActive);
             m_content->setActive(contentActive());
@@ -558,6 +561,11 @@ public:
             updateTheme();
             updateServiceState();
             updateReconnectState();
+            const bool logging = diagnosticLoggingEnabled();
+            if (logging != m_loggingEnabled) {
+                m_loggingEnabled = logging;
+                emit loggingEnabledChanged();
+            }
             const QDateTime dashStamp = QFileInfo(dashboardConfigPath()).lastModified();
             if (dashStamp != m_dashboardStamp) {
                 m_dashboardStamp = dashStamp;
@@ -923,12 +931,12 @@ public:
             const auto reply = watcher->reply();
             if (reply.type() == QDBusMessage::ErrorMessage) {
                 m_musicError = tr("Could not start the background player");
-                fprintf(stderr, "carui: background music activation failed: %s\n", reply.errorMessage().toUtf8().constData());
+                qInfo("carui: background music activation failed: %s\n", reply.errorMessage().toUtf8().constData());
                 emit rememberedMusicChanged();
             }
             watcher->deleteLater();
         });
-        fprintf(stderr, "carui: activating background music %s without phone window\n", id.toUtf8().constData());
+        qInfo("carui: activating background music %s without phone window\n", id.toUtf8().constData());
         return true;
     }
     Q_INVOKABLE QUrl artworkSource(const QUrl &remote, const QUrl &track) {
@@ -1039,7 +1047,7 @@ public:
         auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(call), this);
         connect(watcher, &QDBusPendingCallWatcher::finished, this, [watcher]() {
             const QDBusMessage reply = watcher->reply();
-            fprintf(stderr, "carui: MPRIS seek %s\n", reply.type() == QDBusMessage::ErrorMessage
+            qInfo("carui: MPRIS seek %s\n", reply.type() == QDBusMessage::ErrorMessage
                 ? reply.errorMessage().toUtf8().constData() : "accepted");
             watcher->deleteLater();
         });
@@ -1048,6 +1056,20 @@ public:
     QString serviceState() const { return m_serviceState; }
     QString serviceError() const { return m_serviceError; }
     bool serviceBusy() const { return m_serviceBusy; }
+    bool loggingEnabled() const { return m_loggingEnabled; }
+    Q_INVOKABLE bool setLoggingEnabled(bool enabled) {
+        const QString path = diagnosticsConfigPath();
+        if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
+        QSettings settings(path, QSettings::IniFormat);
+        settings.setValue(QStringLiteral("Diagnostics/enabled"), enabled);
+        settings.sync();
+        if (settings.status() != QSettings::NoError) return false;
+        QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+        m_loggingEnabled = enabled;
+        emit loggingEnabledChanged();
+        qInfo("Sailplay diagnostic collection enabled=%d", enabled);
+        return true;
+    }
     QVariantMap status() const { return m_status; }
     int resolutionIndex() const {
         QSettings settings(QDir::homePath() + QStringLiteral("/.config/sailplay/display.ini"), QSettings::IniFormat);
@@ -1090,15 +1112,15 @@ public:
         // Never block the GUI when no media session owns the command pipe.
         int fd = ::open("/tmp/sailplay-ui-command", O_WRONLY | O_NONBLOCK | O_NOFOLLOW);
         if (fd < 0) {
-            fprintf(stderr, "carui: return-to-car pipe open failed errno=%d\n", errno);
+            qInfo("carui: return-to-car pipe open failed errno=%d\n", errno);
             return;
         }
         const char command[] = "return-car\n";
         const ssize_t written = ::write(fd, command, sizeof(command) - 1);
         if (written != sizeof(command) - 1)
-            fprintf(stderr, "carui: return-to-car pipe write failed errno=%d\n", errno);
+            qInfo("carui: return-to-car pipe write failed errno=%d\n", errno);
         else
-            fprintf(stderr, "carui: return-to-car command queued\n");
+            qInfo("carui: return-to-car command queued\n");
         ::close(fd);
     }
 
@@ -1205,7 +1227,7 @@ public:
         emit dashboardSettingsChanged();
         m_configStamp = QFileInfo(userConfigPath()).lastModified();
         emit dockChanged();
-        fprintf(stderr, "carui: %d apps configured\n", g_apps.size());
+        qInfo("carui: %d apps configured\n", g_apps.size());
     }
 
     Q_INVOKABLE QVariantList availableApps(bool showAll = false) const
@@ -1306,7 +1328,7 @@ public:
         m_configStamp = QFileInfo(userConfigPath()).lastModified();
         emit tilesChanged();
         emit dockChanged();
-        fprintf(stderr, "carui: config saved, %d apps\n", g_apps.size());
+        qInfo("carui: config saved, %d apps\n", g_apps.size());
         return true;
     }
 
@@ -1364,6 +1386,7 @@ signals:
     void dockChanged();
     void currentAppChanged();
     void serviceRunningChanged();
+    void loggingEnabledChanged();
     void statusChanged();
 
 private:
@@ -1561,6 +1584,7 @@ private:
     QDateTime m_connectionStamp;
     bool m_serviceRunning = false;
     bool m_serviceBusy = false;
+    bool m_loggingEnabled = false;
     QString m_serviceState = QStringLiteral("unknown");
     QString m_serviceError;
     QString m_musicError;
@@ -1704,12 +1728,12 @@ private:
             m_hiddenApps.remove(appId);
             if (available->sdk.capabilities.contains(QStringLiteral("navigation")))
                 setDashboardApp(QStringLiteral("map"), appId);
-            fprintf(stderr, "carui: showing %s\n",
+            qInfo("carui: showing %s\n",
                     name.toUtf8().constData());
             emit currentAppChanged();
             return;
         }
-        fprintf(stderr, "carui: launching %s\n", name.toUtf8().constData());
+        qInfo("carui: launching %s\n", name.toUtf8().constData());
         const qint64 pid = available ? launchProjectedApp(*available) : launchApp(appId, exec);
         if (pid <= 0) return;
         if (available->sdk.capabilities.contains(QStringLiteral("navigation")))
@@ -1753,7 +1777,7 @@ private:
             identityTimer->setProperty("identityPid", pid);
             identityTimer->setProperty("identityBytes", identity);
             identityTimer->stop();
-            fprintf(stderr, "carui: renderer %s client pid=%lld\n", qPrintable(app.id), static_cast<long long>(pid));
+            qInfo("carui: renderer %s client pid=%lld\n", qPrintable(app.id), static_cast<long long>(pid));
         });
         m_renderers.insert(app.id, process);
         connect(process, static_cast<void(QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished),
@@ -1771,7 +1795,7 @@ private:
             m_appPids.remove(app.id);
             m_hiddenApps.remove(app.id);
             if (m_currentApp == app.id) { m_currentApp.clear(); emit currentAppChanged(); }
-            fprintf(stderr, "carui: renderer %s exited code=%d\n", qPrintable(app.id), code);
+            qInfo("carui: renderer %s exited code=%d\n", qPrintable(app.id), code);
             process->deleteLater();
         });
         connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, process, [process]() {
@@ -1785,7 +1809,7 @@ private:
             << app.sdk.rendererDesktopId << QStringLiteral("--") << app.sdk.rendererExecutable);
         if (!process->waitForStarted(1000)) {
             m_renderers.remove(app.id);
-            fprintf(stderr, "carui: renderer %s failed: %s\n", qPrintable(app.id), qPrintable(process->errorString()));
+            qInfo("carui: renderer %s failed: %s\n", qPrintable(app.id), qPrintable(process->errorString()));
             process->deleteLater();
             return 0;
         }
@@ -1844,6 +1868,9 @@ static void inheritSystemLocale()
 
 Q_DECL_EXPORT int main(int argc, char **argv)
 {
+    const bool mobileSettings = argc > 1
+        && QString::fromLocal8Bit(argv[1]).endsWith(QStringLiteral("mobile-settings.qml"));
+    if (mobileSettings) installMobileDiagnostics();
     qmlRegisterType<SailplayMapCanvas>("Sailplay", 1, 0, "MapCanvas");
     ::signal(SIGPIPE, SIG_IGN);
     inheritSystemLocale();
@@ -1860,9 +1887,6 @@ Q_DECL_EXPORT int main(int argc, char **argv)
     if (uiTranslator.load(QLocale(uiLocale), QStringLiteral("sailplay"), QStringLiteral("_"),
                           QStringLiteral("/opt/sailplay/carui/translations")))
         app.installTranslator(&uiTranslator);
-    const bool mobileSettings = argc > 1
-        && QString::fromLocal8Bit(argv[1]).endsWith(
-            QStringLiteral("mobile-settings.qml"));
     app.setApplicationName(mobileSettings ? QStringLiteral("harbour-sailplay")
                                           : QStringLiteral("carlife-ui"));
     // Use the same engine setup as native Sailfish applications, including
@@ -1894,13 +1918,13 @@ Q_DECL_EXPORT int main(int argc, char **argv)
         view->setSource(QUrl::fromLocalFile(QString::fromLocal8Bit(qml)));
         if (view->status() == QQuickView::Error) {
             for (const auto &e : view->errors())
-                fprintf(stderr, "QML error: %s\n",
+                qInfo("QML error: %s\n",
                         e.toString().toUtf8().constData());
             delete view;
             return 1;
         }
         view->show();
-        fprintf(stderr, "carui: showing mobile settings %s\n", qml);
+        qInfo("carui: showing mobile settings %s\n", qml);
         const int result = app.exec();
         delete view;
         return result;
@@ -1909,21 +1933,21 @@ Q_DECL_EXPORT int main(int argc, char **argv)
     QQmlComponent comp(&engine, QUrl::fromLocalFile(qml));
     if (comp.isError()) {
         for (const auto &e : comp.errors())
-            fprintf(stderr, "QML error: %s\n", e.toString().toUtf8().constData());
+            qInfo("QML error: %s\n", e.toString().toUtf8().constData());
         return 1;
     }
     QObject *rootObj = comp.create();
     if (!rootObj) {
-        fprintf(stderr, "carui: component create failed\n");
+        qInfo("carui: component create failed\n");
         return 1;
     }
     QQuickWindow *win = qobject_cast<QQuickWindow *>(rootObj);
     if (!win && !mobileSettings) {
-        fprintf(stderr, "carui: no window\n");
+        qInfo("carui: no window\n");
         return 1;
     }
 
-    fprintf(stderr, "carui: loaded %s\n", qml);
+    qInfo("carui: loaded %s\n", qml);
     return app.exec();
 }
 

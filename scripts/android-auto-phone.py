@@ -17,6 +17,7 @@ from android_auto.session import Session
 from android_auto.transport import Transport, server_context
 from android_auto.wireless import AA_UUID, WppClient
 from carplay_proto.bluezadapter import adapter_name, previous_head_unit, remember_head_unit, resolve_device, select_adapter
+from carplay_proto.networkdbus import network_interface, network_object
 from carplay_proto.networksession import restore_previous_network as restore_network
 from carplay_proto.projectionpower import ProjectionPower
 from carplay_proto.session import SessionBusy, SessionLease, selected_protocol
@@ -34,6 +35,7 @@ class Worker:
         self.thread = None
         self.phase = 'bluetooth'
         self.user_exit = False
+        self.started = time.monotonic()
 
     def close_bluetooth(self):
         if self.sock is not None:
@@ -175,11 +177,22 @@ def main():
         run_connection(worker, options)
         return
     bus = dbus.SystemBus()
-    object_manager = dbus.Interface(bus.get_object('org.bluez', '/'), 'org.freedesktop.DBus.ObjectManager')
+
+    def bluez_owner_changed(name, old_owner, new_owner):
+        logging.info('Android Auto BlueZ owner changed old=%s new=%s; rebuilding registration',
+                     old_owner, new_owner)
+        stop.set()
+        loop.quit()
+
+    bus.add_signal_receiver(bluez_owner_changed, signal_name='NameOwnerChanged',
+                            dbus_interface='org.freedesktop.DBus', bus_name='org.freedesktop.DBus',
+                            arg0='org.bluez')
+    object_manager = network_interface(network_object(bus, 'org.bluez', '/'), 'org.freedesktop.DBus.ObjectManager')
     objects = object_manager.GetManagedObjects()
     adapter, options.device = select_adapter(objects, options.device)
     phone_name = adapter_name(objects[adapter]['org.bluez.Adapter1'])
     workers, pending, suppressed = {}, set(), set()
+    failures, retry_at = {}, {}
     probe_thread = None
     discovered_sockets = []
     unavailable_probes = {}
@@ -202,7 +215,7 @@ def main():
 
         logging.info('Android Auto reconnecting verified receiver Bluetooth device=%s', device)
         try:
-            receiver = dbus.Interface(bus.get_object('org.bluez', device), 'org.bluez.Device1')
+            receiver = network_interface(network_object(bus, 'org.bluez', device), 'org.bluez.Device1')
             receiver.Disconnect(reply_handler=finished, error_handler=finished, timeout=10)
         except dbus.DBusException as error:
             finished(error)
@@ -220,6 +233,7 @@ def main():
         paired = current.get(device, {}).get('org.bluez.Device1', {}).get('Paired')
         previous = workers.get(device)
         if (stop.is_set() or selected_protocol() == 'carplay' or not paired or device in suppressed
+                or time.monotonic() < retry_at.get(device, 0)
                 or previous is not None and previous.thread.is_alive()):
             sock.close()
             pending.discard(device)
@@ -250,7 +264,7 @@ def main():
                 enriched, channels = discover_head_units(current, adapter, stop,
                     options.device or previous_head_unit(LAST_HEAD_UNIT))
                 target = select_head_unit(enriched, options.device, previous_head_unit(LAST_HEAD_UNIT), protocol)
-                if stop.is_set() or target in suppressed:
+                if stop.is_set() or target in suppressed or time.monotonic() < retry_at.get(target, 0):
                     return
                 if target not in channels:
                     if target is not None:
@@ -278,6 +292,7 @@ def main():
     class Profile(dbus.service.Object):
         @dbus.service.method('org.bluez.Profile1', in_signature='', out_signature='')
         def Release(self):
+            logging.info('BlueZ released Android Auto profile; rebuilding registration')
             loop.quit()
 
         @dbus.service.method('org.bluez.Profile1', in_signature='oha{sv}', out_signature='')
@@ -294,10 +309,11 @@ def main():
                 worker.close_bluetooth()
 
     profile = Profile(bus, PROFILE_PATH)
-    manager = dbus.Interface(bus.get_object('org.bluez', '/org/bluez'), 'org.bluez.ProfileManager1')
+    manager = network_interface(network_object(bus, 'org.bluez', '/org/bluez'), 'org.bluez.ProfileManager1')
     manager.RegisterProfile(PROFILE_PATH, AA_UUID,
                             {'Name': 'Sailplay Android Auto phone', 'Role': 'client',
-                             'RequireAuthentication': True, 'RequireAuthorization': False})
+                             'RequireAuthentication': True, 'RequireAuthorization': False},
+                            signature='osa{sv}')
 
     def connect():
         if stop.is_set():
@@ -314,9 +330,18 @@ def main():
                         suppressed.add(device)
                     del workers[device]
                     if not worker.user_exit and worker.reconnect_bluetooth:
+                        if time.monotonic() - worker.started >= 60:
+                            failures[device] = 0
+                        failures[device] = min(failures.get(device, 0) + 1, 5)
+                        delay = min(60, 5 * 2 ** (failures[device] - 1))
+                        retry_at[device] = time.monotonic() + delay
+                        logging.info('Android Auto receiver retry device=%s failures=%d delaySeconds=%d',
+                                     device, failures[device], delay)
                         reset_bluetooth(device)
             target = select_head_unit(current, options.device, previous_head_unit(LAST_HEAD_UNIT), protocol)
             if pending or workers or probe_thread is not None and probe_thread.is_alive():
+                return True
+            if target and time.monotonic() < retry_at.get(target, 0):
                 return True
             if not target or not current.get(target, {}).get('org.bluez.Device1', {}).get('Connected'):
                 probe_services(current, protocol)
@@ -331,7 +356,7 @@ def main():
                     logging.info('Android Auto profile connection failed %s', error.get_dbus_name())
                     probe_services(current, protocol, force=target)
 
-            device = dbus.Interface(bus.get_object('org.bluez', target), 'org.bluez.Device1')
+            device = network_interface(network_object(bus, 'org.bluez', target), 'org.bluez.Device1')
             device.ConnectProfile(AA_UUID, reply_handler=finished, error_handler=finished, timeout=12)
         except Exception:
             if target is not None:
@@ -350,6 +375,7 @@ def main():
     bus.add_signal_receiver(changed, signal_name='PropertiesChanged',
                             dbus_interface='org.freedesktop.DBus.Properties', bus_name='org.bluez',
                             path_keyword='path')
+
     GLib.idle_add(lambda: (connect(), False)[1])
     GLib.timeout_add_seconds(10, connect)
     logging.info('Android Auto phone Bluetooth profile registered adapter=%s', adapter)
@@ -367,7 +393,7 @@ def main():
             except Exception:
                 logging.exception('Android Auto worker shutdown failed')
         try:
-            manager.UnregisterProfile(PROFILE_PATH)
+            manager.UnregisterProfile(PROFILE_PATH, signature='o')
         except dbus.DBusException:
             pass
 

@@ -623,6 +623,18 @@ Start music on your phone</source>
       <source>Messaging account is unavailable</source>
       <translation>訊息帳號無法使用</translation>
     </message>
+    <message>
+      <source>Collect diagnostic logs</source>
+      <translation>收集診斷日誌</translation>
+    </message>
+    <message>
+      <source>Save detailed connection logs privately and rotate them automatically. The setting takes effect during the current session.</source>
+      <translation>詳細連線日誌儲存於私有目錄，並自動輪替。設定立即生效。</translation>
+    </message>
+    <message>
+      <source>Could not save diagnostic logging setting</source>
+      <translation>無法儲存診斷日誌設定</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

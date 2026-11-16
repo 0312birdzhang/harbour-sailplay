@@ -5,6 +5,11 @@ Page {
     id: aboutPage
     objectName: "sailplayAboutPage"
     allowedOrientations: Orientation.All
+    property int diagnosticTapCount: 0
+    readonly property bool diagnosticsUnlocked: carController.loggingEnabled || diagnosticTapCount >= 10
+    function diagnosticTap() {
+        diagnosticTapCount = Math.min(10, diagnosticTapCount + 1)
+    }
     SilicaFlickable {
         anchors.fill: parent
         contentHeight: content.height
@@ -14,16 +19,28 @@ Page {
             spacing: Theme.paddingMedium
             PageHeader { title: qsTranslate("Sailplay", "About") }
             Image {
+                objectName: "sailplayAboutIcon"
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: Theme.itemSizeExtraLarge; height: width
                 source: "file:///opt/sailplay/carui/harbour-sailplay.png"
                 fillMode: Image.PreserveAspectFit
+                MouseArea {
+                    objectName: "sailplayAboutIconTap"
+                    anchors.fill: parent
+                    onClicked: aboutPage.diagnosticTap()
+                }
             }
             Label {
+                objectName: "sailplayAboutName"
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "Sailplay"
                 font.pixelSize: Theme.fontSizeExtraLarge
                 color: Theme.highlightColor
+                MouseArea {
+                    objectName: "sailplayAboutNameTap"
+                    anchors.fill: parent
+                    onClicked: aboutPage.diagnosticTap()
+                }
             }
             Label {
                 objectName: "sailplayVersion"
@@ -32,6 +49,28 @@ Page {
                 text: qsTranslate("Sailplay", "Version %1").arg(carController.packageVersion)
                 font.pixelSize: Theme.fontSizeSmall
                 color: Theme.secondaryColor
+            }
+            TextSwitch {
+                objectName: "sailplayLoggingSwitch"
+                visible: aboutPage.diagnosticsUnlocked
+                width: parent.width
+                text: qsTranslate("Sailplay", "Collect diagnostic logs")
+                description: qsTranslate("Sailplay", "Save detailed connection logs privately and rotate them automatically. The setting takes effect during the current session.")
+                automaticCheck: false
+                checked: carController.loggingEnabled
+                onClicked: {
+                    aboutPage.diagnosticTapCount = 10
+                    diagnosticError.text = carController.setLoggingEnabled(!checked) ? ""
+                        : qsTranslate("Sailplay", "Could not save diagnostic logging setting")
+                }
+            }
+            Label {
+                id: diagnosticError
+                visible: aboutPage.diagnosticsUnlocked && text.length > 0
+                x: Theme.horizontalPageMargin; width: parent.width - 2 * x
+                wrapMode: Text.WordWrap
+                color: Theme.errorColor
+                font.pixelSize: Theme.fontSizeSmall
             }
             Label {
                 x: Theme.horizontalPageMargin; width: parent.width - 2 * x

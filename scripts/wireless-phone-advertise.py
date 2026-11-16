@@ -104,17 +104,7 @@ def main():
         sock.close()
         raise OSError(error, os.strerror(error))
     added = []
-    monitor = None
     try:
-        try:
-            import importlib.util
-            path = os.path.join(os.path.dirname(__file__), 'bluetooth-monitor.py')
-            spec = importlib.util.spec_from_file_location('sailplay_monitor', path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            monitor = module.Monitor(adapter_index)
-        except (OSError, ImportError, AttributeError):
-            logging.exception('passive HCI monitoring unavailable')
         for identifier in missing:
             value = uuid.UUID(identifier).bytes[::-1]
             command(sock, 0x0010, value + b'\x00', adapter_index)
@@ -125,8 +115,6 @@ def main():
         return result
     finally:
         try:
-            if monitor:
-                monitor.close()
             for value in reversed(added):
                 try:
                     command(sock, 0x0011, value, adapter_index)

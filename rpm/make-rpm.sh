@@ -13,7 +13,7 @@ cp -r "$REPO/carplay_proto" "$REPO/android_auto" "$REPO/sailplay_sdk" "$REPO/sdk
 cp "$REPO/LICENSE" "$STAGE/"
 find "$STAGE/carplay_proto" "$STAGE/android_auto" "$STAGE/sailplay_sdk" "$STAGE/sdk" -type d -name __pycache__ -exec rm -rf {} +
 mkdir -p "$STAGE/scripts" "$STAGE/diagnostics"
-for name in projection-service.py android-auto-phone.py restore-projection-network.py stop-projected-apps.py player-lyrics.py keyboard-server.py wireless-probe.py wireless-phone-advertise.py bluetooth-monitor.py wifi-session-probe.py pulse-capture.py media-control.py reload-audio-policy.py reconnect-car.py prepare-media-compat.py prepare-viewport-compat.py extract-artwork.py inspect-accessory-certificate.py; do
+for name in projection-service.py connection-monitor.py android-auto-phone.py restore-projection-network.py stop-projected-apps.py player-lyrics.py keyboard-server.py wireless-probe.py wireless-phone-advertise.py bluetooth-monitor.py wifi-session-probe.py pulse-capture.py media-control.py reload-audio-policy.py reconnect-car.py prepare-media-compat.py prepare-viewport-compat.py extract-artwork.py inspect-accessory-certificate.py; do
     cp "$REPO/scripts/$name" "$STAGE/scripts/"
 done
 cp "$REPO/diagnostics/corolla-accessory-key.json" "$STAGE/diagnostics/"

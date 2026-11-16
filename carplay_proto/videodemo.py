@@ -335,6 +335,7 @@ def disable_bluetooth(client,address):
     import re
     if not re.fullmatch(r'[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}',str(address)):
         raise ValueError('invalid local Bluetooth address')
+    print('Bluetooth handoff command requested localAddress={}'.format(address.upper()),flush=True)
     status,_,body=client.request('POST','/command',plistlib.dumps(
         {'type':'disableBluetooth','params':{'deviceID':address.upper()}},fmt=plistlib.FMT_BINARY),
         {'Content-Type':'application/x-apple-binary-plist'})
@@ -344,6 +345,15 @@ def disable_bluetooth(client,address):
 
 
 def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=15,live=False,on_activity=None,bluetooth_address=None,iap_link=None):
+    session_started = time.monotonic()
+    phase = 'session-start'
+    count = 0
+    def checkpoint(stage, before=None):
+        now = time.monotonic()
+        elapsed = 0 if before is None else now-before
+        print('MEDIA stage={} sessionElapsedMs={:.1f} stageElapsedMs={:.1f}'.format(
+            stage, (now-session_started)*1000, elapsed*1000),flush=True)
+    checkpoint(phase)
     display = info['displays'][0]
     pipeline = None
     width,height,fps=1920,720,30
@@ -445,21 +455,33 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                 'event_thread_alive': bool(events and events.thread.is_alive()),
             })
             power.start()
+        phase = 'event-connect'
+        before = time.monotonic()
+        checkpoint(phase + '-start')
         events = DemoEvents(address,int(setup_info['eventPort']),interface,shared,
                             event_command)
+        checkpoint(phase + '-ready', before)
         first_live_frame = None
         if live:
             commands = UiCommands()
             from .display import DisplayPipeline
             pipeline = DisplayPipeline(width,height,fps)
+            phase = 'display-start'
+            before = time.monotonic()
+            checkpoint(phase + '-start')
             pipeline.start()
             source = pipeline.frames(seconds)
             first_live_frame = next(source)
+            checkpoint(phase + '-first-frame-ready', before)
             print('Live screen first IDR ready: {} bytes'.format(sum(map(len,first_live_frame[1]))),flush=True)
         # Start the session before adding streams. HSAE starts audio receive
         # workers from SETUP only when the session's started flag is already set;
         # RECORD after stream SETUP starts ALSA but leaves the UDP queue unread.
+        phase = 'record'
+        before = time.monotonic()
+        checkpoint(phase + '-start')
         status,_,_ = client.request('RECORD','/')
+        checkpoint(phase + '-complete', before)
         print('Demo RECORD before stream SETUP status={}'.format(status),flush=True)
         if status!=200:
             raise RuntimeError('media RECORD rejected')
@@ -468,35 +490,62 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             from .audio import AudioSender
             audio=AudioSender(client,shared,info)
             if bluetooth_address and 'honda' not in str(info.get('model','')).lower():
+                phase = 'bluetooth-handoff'
+                before = time.monotonic()
+                checkpoint(phase + '-start')
                 disable_bluetooth(client,bluetooth_address)
+                checkpoint(phase + '-complete', before)
             elif bluetooth_address:
                 # The HU needs its Bluetooth link for iAP2 call/media control.
                 # Asking a Honda to disable it ends CarPlay after the next
                 # accessory timeout and removes the wireless CarPlay record.
                 print('Keeping accessory Bluetooth enabled for {}'.format(
                     info.get('model')),flush=True)
+        phase = 'screen-setup'
+        before = time.monotonic()
+        checkpoint(phase + '-start')
         status,_,body = client.request('SETUP','/setup',plistlib.dumps(payload,fmt=plistlib.FMT_BINARY),
             {'Content-Type':'application/x-apple-binary-plist'})
+        checkpoint(phase + '-complete', before)
         print('Demo screen SETUP status={}'.format(status),flush=True)
         if status!=200:
             raise RuntimeError('media SETUP rejected')
         response = plistlib.loads(body)
         print('Demo screen response={}'.format(response),flush=True)
         stream = next(s for s in response['streams'] if s['type']==110)
+        phase = 'video-connect'
+        before = time.monotonic()
+        checkpoint(phase + '-start')
         video = connect(address,int(stream['dataPort']),interface).sock
+        from .runtime_logging import socket_endpoint
+        print('VIDEO connected local={} peer={}'.format(
+            socket_endpoint(video,'getsockname'),socket_endpoint(video,'getpeername')),flush=True)
+        checkpoint(phase + '-ready', before)
         if audio:
+            phase = 'audio-prepare'
+            before = time.monotonic()
+            checkpoint(phase + '-start')
             audio.prepare()
+            checkpoint(phase + '-ready', before)
             # Phone is the resource arbiter: it asserts ownership using modesChanged.
             # changeModes requests travel from the head unit to the phone.
             request={'type':'modesChanged','params':modes}
+            phase = 'audio-resource'
+            before = time.monotonic()
+            checkpoint(phase + '-start')
             mode_status,_,mode_body=client.request('POST','/command',plistlib.dumps(request,fmt=plistlib.FMT_BINARY),
                                       {'Content-Type':'application/x-apple-binary-plist'})
+            checkpoint(phase + '-complete', before)
             print('Audio resource request status={}'.format(mode_status),flush=True)
             if mode_status!=200 or (mode_body and plistlib.loads(mode_body).get('status',0)!=0):
                 raise RuntimeError('HU did not grant audio resource')
+            phase = 'audio-setup'
+            before = time.monotonic()
+            checkpoint(phase + '-start')
             audio_status,_,audio_body=client.request('SETUP','/setup',
                 plistlib.dumps({'streams':[audio.description()]},fmt=plistlib.FMT_BINARY),
                 {'Content-Type':'application/x-apple-binary-plist'})
+            checkpoint(phase + '-complete', before)
             print('Audio SETUP after capture ready/resource claim status={}'.format(audio_status),flush=True)
             if audio_status!=200:raise RuntimeError('audio SETUP rejected')
             audio_stream=next(s for s in plistlib.loads(audio_body)['streams'] if s['type']==audio.description()['type'])
@@ -517,9 +566,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             source = ((config,nals) for nals in frames[:seconds*30])
         start = time.monotonic()
         last_keepalive = start
-        count = 0
+        phase = 'video-streaming'
         previous_config = None
-        sample = open('/tmp/sailplay-live-video.h264','wb') if live else None
         for config,nals in source:
             if audio and audio.stop.is_set():
                 print('Audio stream ended; continuing screen-only projection',flush=True)
@@ -533,13 +581,6 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             if live and not screen.send(config,nals,time.monotonic_ns()):
                 continue
             if config!=previous_config:
-                if sample:
-                    sps_size=int.from_bytes(config[6:8],'big')
-                    sps=config[8:8+sps_size]
-                    pps_pos=9+sps_size
-                    pps_size=int.from_bytes(config[pps_pos:pps_pos+2],'big')
-                    sample.write(b'\x00\x00\x00\x01'+sps+b'\x00\x00\x00\x01'+config[pps_pos+2:pps_pos+2+pps_size])
-                    sample.flush()
                 if not live:
                     video.sendall(encoder.config(config,width,height,time.monotonic_ns()))
                 previous_config=config
@@ -547,9 +588,6 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             delay = 0 if live else start+count/30-time.monotonic()
             if delay>0:
                 time.sleep(delay)
-            if sample and count<60:
-                sample.write(b''.join(b'\x00\x00\x00\x01'+n for n in nals))
-                sample.flush()
             packet=encoder.frame(nals,time.monotonic_ns(),width,height) if not live else None
             before=time.monotonic()
             try:
@@ -561,6 +599,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             count+=1
             if count==1:
                 print('Screen first IDR sent',flush=True)
+                checkpoint('first-video-frame-sent')
             now=time.monotonic()
             if not live and now-last_keepalive>=1:
                 video.sendall(struct.pack('<IB',0,2)+bytes(123))
@@ -568,7 +607,12 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             if count%300==0:
                 print('Demo video sent {} frames in {:.2f}s'.format(count,time.monotonic()-start),flush=True)
         print('Demo complete: {} frames'.format(count),flush=True)
+    except Exception as error:
+        print('MEDIA failed stage={} sessionElapsedMs={:.1f} frames={} error={} errno={}'.format(
+            phase,(time.monotonic()-session_started)*1000,count,type(error).__name__,getattr(error,'errno',None)),flush=True)
+        raise
     finally:
+        checkpoint('teardown-start')
         if iap_tunnel:
             iap_tunnel.close()
         if media:media.close()
@@ -578,8 +622,6 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             audio.close()
         if ended_audio:
             ended_audio.close()
-        if 'sample' in locals() and sample:
-            sample.close()
         if feedback:
             feedback.close()
         if screen:
@@ -598,3 +640,4 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             client.request('TEARDOWN','/')
         except Exception:
             pass
+        checkpoint('teardown-complete')

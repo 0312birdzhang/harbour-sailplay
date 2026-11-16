@@ -32,6 +32,7 @@ from android_auto.session import Session
 from android_auto.transport import (ENCRYPTED, FIRST, LAST, FrameReader,
                                     MessageAssembler, Packet, Transport, frame, server_context)
 from android_auto.wireless import Credentials, WppClient, WppReader, wpp_frame
+from carplay_proto import mediakeys, videodemo
 from carplay_proto.networksession import restore_network, restore_previous_network
 from carplay_proto.session import SessionBusy, SessionLease, current_owner, selected_protocol
 
@@ -217,7 +218,12 @@ class WirelessTests(unittest.TestCase):
                          + wpp_frame(8, b'ping')
                          + wpp_frame(1, field(1, '192.168.44.1') + field(2, 65000))
                          + wpp_frame(3, network))
-        credentials = client.negotiate('Sailplay')
+        with self.assertLogs(level='INFO') as diagnostics:
+            credentials = client.negotiate('Sailplay')
+        output = '\n'.join(diagnostics.output)
+        self.assertIn("WifiStartRequest address='192.168.44.1' port=65000 status=0 payload=", output)
+        self.assertNotIn(credentials.ssid, output)
+        self.assertNotIn(credentials.password, output)
         self.assertEqual((credentials.address, credentials.port), ('192.168.44.1', 65000))
         self.assertEqual((credentials.ssid, credentials.password), ('DiAutoAP', 'password8'))
         reader = WppReader()
@@ -235,13 +241,63 @@ class WirelessTests(unittest.TestCase):
         headunit.close()
 
     def test_invalid_endpoint_cannot_change_wifi(self):
-        for address in ('127.0.0.1', '0.0.0.0', '224.0.0.1'):
+        for address in ('127.0.0.1', '0.0.0.0', '224.0.0.1', '::', '::1', 'ff02::1', 'invalid', ''):
             phone, headunit = socket.socketpair()
             headunit.sendall(wpp_frame(1, field(1, address) + field(2, 5288)))
             with self.assertRaises(ValueError):
                 WppClient(phone, threading.Event()).negotiate()
             phone.close()
             headunit.close()
+
+    def test_rejected_status_is_distinguished_from_an_invalid_endpoint(self):
+        for status, address in ((-1, '192.168.44.1'), (1, '0.0.0.0')):
+            with self.subTest(status=status, address=address):
+                phone, headunit = socket.socketpair()
+                payload = field(1, address) + field(2, 5288) + field(3, status)
+                try:
+                    headunit.sendall(wpp_frame(1, payload))
+                    with self.assertLogs(level='INFO') as diagnostics, \
+                            self.assertRaisesRegex(ValueError, 'head unit rejected WPP projection status={}'.format(status)):
+                        WppClient(phone, threading.Event()).negotiate()
+                    output = '\n'.join(diagnostics.output)
+                    self.assertIn("address={!r} port=5288 status={}".format(address, status), output)
+                    self.assertIn('payload=' + payload.hex(), output)
+                    headunit.settimeout(.05)
+                    with self.assertRaises(socket.timeout):
+                        headunit.recv(4096)
+                finally:
+                    phone.close()
+                    headunit.close()
+
+    def test_invalid_or_missing_ports_are_rejected_with_diagnostics(self):
+        for port in (None, 0, -1, 65536):
+            with self.subTest(port=port):
+                phone, headunit = socket.socketpair()
+                payload = field(1, '192.168.44.1')
+                if port is not None:
+                    payload += field(2, port)
+                try:
+                    headunit.sendall(wpp_frame(1, payload))
+                    with self.assertLogs(level='INFO') as diagnostics, \
+                            self.assertRaisesRegex(ValueError, 'invalid WPP projection endpoint'):
+                        WppClient(phone, threading.Event()).negotiate()
+                    self.assertIn('port={!r} status=0'.format(port), '\n'.join(diagnostics.output))
+                finally:
+                    phone.close()
+                    headunit.close()
+
+    def test_malformed_start_request_records_its_payload(self):
+        for payload in (b'\x0a\x05a', field(1, 5288), field(1, '192.168.44.1') + field(2, 'invalid')):
+            with self.subTest(payload=payload):
+                phone, headunit = socket.socketpair()
+                try:
+                    headunit.sendall(wpp_frame(1, payload))
+                    with self.assertLogs(level='WARNING') as diagnostics, self.assertRaises(ValueError):
+                        WppClient(phone, threading.Event()).negotiate()
+                    self.assertIn('malformed WifiStartRequest payload=' + payload.hex(), '\n'.join(diagnostics.output))
+                finally:
+                    phone.close()
+                    headunit.close()
 
     def test_network_credentials_are_validated(self):
         for payload in (field(1, 'AP') + field(2, 'short'), field(1, 'A' * 33) + field(2, 'password8')):
@@ -866,7 +922,7 @@ class EntrypointTests(unittest.TestCase):
                 patch.object(entry, 'restore_network'), patch.object(entry, 'server_context'), \
                 patch.object(entry, 'connect_endpoint'), patch.object(entry, 'Transport', return_value=transport), \
                 patch.object(entry, 'Session', return_value=session), \
-                patch('carplay_proto.mediakeys.MediaKeys') as media_keys, patch('carplay_proto.videodemo.UiCommands'), \
+                patch.object(mediakeys, 'MediaKeys') as media_keys, patch.object(videodemo, 'UiCommands'), \
                 patch.object(entry, 'ProjectionPower', return_value=power), \
                 self.assertLogs(level='ERROR'):
             events.attach_mock(media_keys, 'media_keys')

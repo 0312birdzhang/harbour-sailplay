@@ -13,7 +13,7 @@ spec.loader.exec_module(probe)
 class HandshakeTimeoutTests(unittest.TestCase):
     def test_silent_continuous_channel_is_closed_for_retry(self):
         sock = Mock()
-        with patch.object(probe.time, 'monotonic', side_effect=[0, 16, 16]), \
+        with patch.object(probe.time, 'monotonic', side_effect=[0, 0, 16, 16, 16, 16]), \
                 self.assertLogs(level='ERROR') as logs:
             probe.probe(sock, threading.Event(), 0)
         sock.close.assert_called_once()

@@ -26,13 +26,15 @@ class DisplayFramesTests(unittest.TestCase):
 
     def test_launch_keeps_su_child_in_the_pipeline_process_group(self):
         from unittest.mock import Mock
-        with patch('builtins.open', return_value=Mock()), patch('subprocess.Popen') as launch:
+        with patch('carplay_proto.runtime_logging.ProcessOutput') as collect, patch('subprocess.Popen') as launch:
             pipeline = DisplayPipeline()
             pipeline.launch('carui', 'env WAYLAND_DISPLAY=test /opt/sailplay/carui/carui')
             arguments = launch.call_args.args[0]
             self.assertEqual(arguments[4], '--session-command')
             self.assertIn('SAILPLAY_DISPLAY_PIPELINE=' + pipeline.fifo, arguments[5])
             self.assertTrue(launch.call_args.kwargs['start_new_session'])
+            self.assertEqual(launch.call_args.kwargs['stdout'], __import__('subprocess').PIPE)
+            collect.assert_called_once_with('carui', launch.return_value.stdout, launch.return_value.pid)
 
     def test_projection_shell_uses_the_private_keyboard(self):
         from unittest.mock import Mock

@@ -37,22 +37,34 @@ def restore_network(lease, bus, log=print):
                     raise
         if plan.get('forget') and services[target].get('Favorite'):
             service(target).Remove()
+    services = {str(path): properties for path, properties in manager.GetServices()}
+    current = next((path for path, properties in services.items()
+                    if path != target and properties.get('Type') == 'wifi'
+                    and properties.get('State') in ('ready', 'online')), None)
+    if current and current != old:
+        old = current
+        plan = dict(plan, powered=True)
+        log('Projection Wi-Fi restoration keeps the current Wi-Fi connection')
     if old and old in services and services[old].get('State') not in ('ready', 'online'):
         try:
             service(old).Connect(timeout=20)
         except Exception as error:
-            if getattr(error, 'get_dbus_name', lambda: '')() != 'net.connman.Error.InProgress':
+            name = getattr(error, 'get_dbus_name', lambda: '')()
+            if name == 'net.connman.Error.NoCarrier':
+                log('Previous Wi-Fi network unavailable, retiring its restoration request')
+            elif name != 'net.connman.Error.InProgress':
                 raise
-            deadline = time.monotonic() + 20
-            while time.monotonic() < deadline:
-                state = dict(manager.GetServices()).get(old, {}).get('State')
-                if state in ('ready', 'online'):
-                    break
-                if state == 'failure':
-                    raise RuntimeError('previous Wi-Fi restoration failed') from error
-                time.sleep(.2)
             else:
-                raise TimeoutError('previous Wi-Fi restoration timed out') from error
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline:
+                    state = dict(manager.GetServices()).get(old, {}).get('State')
+                    if state in ('ready', 'online'):
+                        break
+                    if state == 'failure':
+                        raise RuntimeError('previous Wi-Fi restoration failed') from error
+                    time.sleep(.2)
+                else:
+                    raise TimeoutError('previous Wi-Fi restoration timed out') from error
     if not plan.get('powered', True) and plan.get('wifi_path'):
         import dbus
         technology = network_interface(network_object(bus, 'net.connman', plan['wifi_path']),

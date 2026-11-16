@@ -48,6 +48,11 @@ def main():
     parser.add_argument('--restore', nargs=2, metavar=('OLD', 'TARGET'))
     parser.add_argument('--restore-after', type=int, default=45)
     args = parser.parse_args()
+    session_started = time.monotonic()
+    from carplay_proto.runtime_logging import collection_enabled, persist_output, log_to_stdout, socket_endpoint
+    persist_output('wifi-restore' if args.restore else 'wifi-airplay', args.log_file)
+    log_to_stdout()
+    args.trace_supplicant = args.trace_supplicant and collection_enabled()
     media_lease = None
     if not args.restore:
         from carplay_proto.session import SessionBusy, SessionLease
@@ -57,28 +62,8 @@ def main():
         except SessionBusy:
             message = 'Existing media handover active; duplicate StartSession ignored'
             print(message, flush=True)
-            from carplay_proto.runtime_logging import private_handler
-            import logging
-            handler = private_handler('wifi-airplay')
-            if handler:
-                handler.handle(logging.LogRecord('wifi-airplay', logging.INFO, '', 0, message, (), None))
-                handler.close()
             return
         atexit.register(media_lease.close)
-    if args.log_file:
-        original_log=args.log_file
-        args.log_file += '.'+str(os.getpid())
-        descriptor = os.open(args.log_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        os.fchmod(descriptor, 0o600)
-        temporary_link=original_log+'.link.'+str(os.getpid())
-        os.symlink(args.log_file,temporary_link)
-        os.replace(temporary_link,original_log)
-        sys.stdout = os.fdopen(descriptor, 'w', buffering=1)
-        sys.stderr = sys.stdout
-    from carplay_proto.runtime_logging import persist_output
-    persist_output('wifi-restore' if args.restore else 'wifi-airplay')
-    from carplay_proto.runtime_logging import log_to_stdout
-    log_to_stdout()
     if not 10 <= args.restore_after <= 120:
         parser.error('restore-after must be 10..120 seconds')
     import dbus
@@ -153,6 +138,8 @@ def main():
         return
     with open(args.session) as stream:
         session = json.load(stream)
+    print('Wi-Fi handover started session={} security={} channel={} addresses={} port={}'.format(
+        media_lease.identity, session.get('security'), session.get('channel'), session['addresses'], session['port']),flush=True)
     from carplay_proto.networktrace import NetworkTrace
     network_trace = NetworkTrace(ssid=session['ssid'])
     phone_name = session.get('device_name')
@@ -358,7 +345,8 @@ def main():
         from carplay_proto.rtspclient import connect
         props = service(target).GetProperties()
         interface = str(props['Ethernet']['Interface'])
-        print('HU Wi-Fi connected; probing AirPlay', flush=True)
+        print('HU Wi-Fi connected; probing AirPlay elapsedMs={:.1f}'.format(
+            (time.monotonic()-session_started)*1000), flush=True)
         print('HU IP state: {}'.format({key:str(props.get(key)) for key in ('IPv4','IPv6','IPv6.Configuration')}), flush=True)
         addresses = list(session['addresses'])
         gateway = str(props.get('IPv4', {}).get('Gateway', ''))
@@ -367,8 +355,18 @@ def main():
         for address in addresses:
             client = None
             timing = None
+            setup_status = None
+            setup_info = None
+            attempt_started = time.monotonic()
+            stage = 'control-connect'
             try:
+                print('AirPlay attempt started address={} port={} interface={}'.format(
+                    address,session['port'],interface),flush=True)
                 client = connect(address, session['port'], interface)
+                print('AirPlay control connected local={} peer={} elapsedMs={:.1f}'.format(
+                    socket_endpoint(client.sock,'getsockname'),socket_endpoint(client.sock,'getpeername'),
+                    (time.monotonic()-attempt_started)*1000),flush=True)
+                stage = 'public-info'
                 status, headers, body = client.request('GET', '/info', plistlib.dumps({}, fmt=plistlib.FMT_BINARY),
                     {'Content-Type':'application/x-apple-binary-plist', 'User-Agent':'AirPlay/566.25.21'})
                 print('AirPlay /info status={}, bytes={}'.format(status, len(body)), flush=True)
@@ -386,10 +384,18 @@ def main():
                         with os.fdopen(descriptor, 'w') as identity_file:
                             json.dump(identity, identity_file)
                     try:
+                        stage = 'pair-setup'
+                        pairing_started = time.monotonic()
+                        print('AirPlay Pair-Setup started',flush=True)
                         pairing = pair_setup(client, identity['id'], bytes.fromhex(identity['private_key']))
-                        print('AirPlay Pair-Setup peer proof verified', flush=True)
+                        print('AirPlay Pair-Setup peer proof verified elapsedMs={:.1f}'.format(
+                            (time.monotonic()-pairing_started)*1000), flush=True)
+                        stage = 'pair-verify'
+                        pairing_started = time.monotonic()
+                        print('AirPlay Pair-Verify started',flush=True)
                         verified = pair_verify(client, identity['id'], bytes.fromhex(identity['private_key']), pairing)
-                        print('AirPlay Pair-Verify complete; encrypted control enabled', flush=True)
+                        print('AirPlay Pair-Verify complete; encrypted control enabled elapsedMs={:.1f}'.format(
+                            (time.monotonic()-pairing_started)*1000), flush=True)
                         from carplay_proto.airplaytiming import TimingServer
                         timing = TimingServer(client.sock.sock)
                         import uuid
@@ -406,13 +412,23 @@ def main():
                                  'osBuildVersion':AUDIO_COMPAT_BUILD,'sourceVersion':'566.25.21',
                                  'sessionUUID':str(uuid.uuid4()),'timingPort':timing.port,
                                  'features':[],'statsCollectionEnabled':False}
-                        setup_status, _, setup_body = client.request('SETUP','/setup',plistlib.dumps(setup,fmt=plistlib.FMT_BINARY),
+                        stage = 'initial-setup'
+                        setup_started = time.monotonic()
+                        print('Encrypted initial SETUP request={}'.format(json.dumps({
+                            key: setup[key] for key in ('deviceID','macAddress','model','osName',
+                                'osBuildVersion','sourceVersion','timingPort','features','statsCollectionEnabled')
+                        },sort_keys=True)),flush=True)
+                        setup_status, setup_headers, setup_body = client.request('SETUP','/setup',plistlib.dumps(setup,fmt=plistlib.FMT_BINARY),
                             {'Content-Type':'application/x-apple-binary-plist','User-Agent':'AirPlay/566.25.21'})
-                        print('Encrypted initial SETUP status={} bytes={}'.format(setup_status,len(setup_body)),flush=True)
+                        public_headers = {key: value for key, value in setup_headers.items()
+                            if key.lower() in ('server','cseq','content-type','content-length','connection','x-apple-error','x-apple-error-code')}
+                        print('Encrypted initial SETUP status={} bytes={} headers={} elapsedMs={:.1f}'.format(
+                            setup_status,len(setup_body),public_headers,(time.monotonic()-setup_started)*1000),flush=True)
                         if setup_status == 200:
                             setup_info = plistlib.loads(setup_body)
                             print('Initial SETUP response keys={} eventPort={} timingPort={}'.format(
                                 sorted(setup_info), setup_info.get('eventPort'), setup_info.get('timingPort')),flush=True)
+                        stage = 'encrypted-info'
                         status, headers, body = client.request('GET', '/info', plistlib.dumps({}, fmt=plistlib.FMT_BINARY),
                             {'Content-Type':'application/x-apple-binary-plist','User-Agent':'AirPlay/566.25.21'})
                         print('Encrypted AirPlay /info status={} bytes={}'.format(status,len(body)), flush=True)
@@ -420,8 +436,11 @@ def main():
                         raise
                 if status == 200:
                     info = plistlib.loads(body)
-                    with open('/tmp/sailplay-hu-info.plist','wb') as saved_info:
-                        saved_info.write(plistlib.dumps(info,fmt=plistlib.FMT_BINARY))
+                    if collection_enabled():
+                        descriptor = os.open('/tmp/sailplay-hu-info.plist', os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+                        os.fchmod(descriptor, 0o600)
+                        with os.fdopen(descriptor, 'wb') as saved_info:
+                            saved_info.write(plistlib.dumps(info,fmt=plistlib.FMT_BINARY))
                     print('AirPlay /info keys={}'.format(sorted(info)), flush=True)
                     for key in ('model','sourceVersion','features','statusFlags','displays','audioFormats','hidDevices'):
                         if key in info:
@@ -430,6 +449,10 @@ def main():
                                              'diagnostics','video-demo.h264')
                     live_ui = os.path.exists(os.path.join(os.path.dirname(demo_path),'display-ui'))
                     if live_ui or os.path.exists(demo_path):
+                        if setup_info is None:
+                            stage = 'initial-setup'
+                            raise RuntimeError('Encrypted initial SETUP rejected status={}'.format(setup_status))
+                        stage = 'media-session'
                         from carplay_proto.videodemo import run_demo
                         os.utime(restore_clock, None)
                         run_demo(client,address,interface,verified.shared,setup_info,info,demo_path,
@@ -440,7 +463,8 @@ def main():
                                                            session.get('bluetooth_address')))
                         break
             except Exception as error:
-                print('AirPlay probe failed: {}, errno={}'.format(type(error).__name__, getattr(error, 'errno', None)), flush=True)
+                print('AirPlay probe failed stage={} elapsedMs={:.1f} error={} errno={}'.format(
+                    stage,(time.monotonic()-attempt_started)*1000,type(error).__name__,getattr(error,'errno',None)), flush=True)
                 print('Failure detail: {}'.format(str(error).replace(session['passphrase'],'<password>')),flush=True)
             finally:
                 if timing:
@@ -528,11 +552,8 @@ def main():
             print('HU carrier not ready; scheduling scan retry {}/3'.format(no_carrier_retries[0]), flush=True)
             GLib.timeout_add_seconds(2, retry_no_carrier)
             return
-        if args.trace_supplicant:
-            output = subprocess.run(['journalctl', '_COMM=wpa_supplicant', '--since', '-2 min', '--no-pager', '-o', 'cat'],
-                                    stdout=subprocess.PIPE, universal_newlines=True).stdout
-            for line in output.splitlines()[-160:]:
-                print(line.replace(session['passphrase'], '<password>').replace(session['ssid'], '<HU-SSID>'), flush=True)
+        from carplay_proto.networktrace import daemon_evidence
+        daemon_evidence()
         loop.quit()
     def check_wpa2_retry():
         if wpa2_retry.started:

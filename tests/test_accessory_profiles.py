@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import socket
+import struct
 import sys
 import threading
 
@@ -153,7 +154,8 @@ def test_existing_rsa_pin_rejects_changed_certificate(legacy, tmp_path):
 
 @pytest.mark.parametrize('family', ['RSA', 'P256'])
 @pytest.mark.parametrize('valid', [True, False])
-def test_iap2_wire_challenge_and_success_require_verified_proof(tmp_path, family, valid):
+@pytest.mark.parametrize('wifi_request', [True, False])
+def test_iap2_wire_challenge_and_success_require_verified_proof(tmp_path, family, valid, wifi_request):
     path = Path(__file__).resolve().parents[1] / 'scripts' / 'wireless-probe.py'
     spec = importlib.util.spec_from_file_location('auth_profile_probe', path)
     module = importlib.util.module_from_spec(spec)
@@ -165,7 +167,8 @@ def test_iap2_wire_challenge_and_success_require_verified_proof(tmp_path, family
     phone, car = socket.socketpair()
     stop, authenticated = threading.Event(), threading.Event()
     worker = threading.Thread(target=module.probe, args=(phone, stop, 5),
-                              kwargs=dict(paired_pin_path=str(pin), on_authenticated=authenticated.set))
+                              kwargs=dict(paired_pin_path=str(pin), on_authenticated=authenticated.set,
+                                          announce_wireless=True, local_address='02:00:00:00:00:01'))
     decoder, queue = Decoder(), []
     car.settimeout(2)
     def receive():
@@ -182,7 +185,13 @@ def test_iap2_wire_challenge_and_success_require_verified_proof(tmp_path, family
         syn = receive()
         car.sendall(encode(Packet(ACK, 0x20, syn.sequence, 0, None)))
         ident = receive()
-        car.sendall(encode(Packet(ACK, 0x21, ident.sequence, 10, Frame(0x1d01, b'').encoded())))
+        received = [0x4e0c, 0x4e09, 0x4e0e, 0x4e0d, 0xea00, 0xea01]
+        if wifi_request:
+            received.append(0x5702)
+        identification = encode_param(7, struct.pack('>' + 'H' * len(received), *received))
+        for identifier in range(5):
+            identification += encode_param(10, encode_param(0, bytes([identifier])) + encode_param(1, b'\x00'))
+        car.sendall(encode(Packet(ACK, 0x21, ident.sequence, 10, Frame(0x1d01, identification).encoded())))
         assert receive().acknowledgement == 0x21
         accepted = receive()
         car.sendall(encode(Packet(ACK, 0x21, accepted.sequence, 0, None)))
@@ -211,8 +220,17 @@ def test_iap2_wire_challenge_and_success_require_verified_proof(tmp_path, family
             success = receive()
             assert success.payload == Frame(0xaa05, b'').encoded()
             assert pin.exists() and authenticated.is_set()
-            car.sendall(encode(Packet(ACK, 0x23, success.sequence, 0, None)))
-            assert Framer().offer(receive().payload)[0].message_id == 0x5702
+            launch = Frame(0xea02, encode_param(0, b'com.psa.mypeugeot\x00'))
+            car.sendall(encode(Packet(ACK, 0x24, success.sequence, 10, launch.encoded())))
+            assert receive().acknowledgement == 0x24
+            expected = ([0x5702] if wifi_request else []) + [0x4e0c, 0x4e09, 0x4e0e, 0x4e0d]
+            for message_id in expected:
+                packet = receive()
+                assert Framer().offer(packet.payload)[0].message_id == message_id
+                car.sendall(encode(Packet(ACK, 0x24, packet.sequence, 0, None)))
+            car.settimeout(.3)
+            with pytest.raises(socket.timeout):
+                car.recv(4096)
         else:
             assert car.recv(4096) == b''
             assert not pin.exists() and not authenticated.is_set()

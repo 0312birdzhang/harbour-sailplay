@@ -623,6 +623,18 @@ Start music on your phone</source>
       <source>Messaging account is unavailable</source>
       <translation>Учётная запись сообщений недоступна</translation>
     </message>
+    <message>
+      <source>Collect diagnostic logs</source>
+      <translation>Собирать диагностические журналы</translation>
+    </message>
+    <message>
+      <source>Save detailed connection logs privately and rotate them automatically. The setting takes effect during the current session.</source>
+      <translation>Сохранять подробные журналы подключений в приватном каталоге с автоматической ротацией. Настройка действует в текущем сеансе.</translation>
+    </message>
+    <message>
+      <source>Could not save diagnostic logging setting</source>
+      <translation>Не удалось сохранить настройку диагностических журналов</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

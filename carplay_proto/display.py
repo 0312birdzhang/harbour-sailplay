@@ -175,14 +175,14 @@ class DisplayPipeline:
         self.fifo='/tmp/sailplay-display-{}.h264'.format(os.getpid())
 
     def launch(self,name,command):
-        log=open('/home/defaultuser/sailplay-{}.log'.format(name),'ab')
-        log.write(('\nSailplay launch {} at {}\n'.format(name,time.time())).encode());log.flush()
-        self.logs.append(log)
+        from .runtime_logging import ProcessOutput
         # Keep su and its child in our process group for complete teardown.
         command = 'exec env SAILPLAY_DISPLAY_PIPELINE=' + self.fifo + ' ' + command
         process=subprocess.Popen(['su','defaultuser','-s','/bin/sh','--session-command',command],
-            stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
+            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,start_new_session=True)
         self.processes.append(process)
+        self.logs.append(ProcessOutput(name, process.stdout, process.pid))
+        print('DISPLAY child started component={} pid={} command={}'.format(name,process.pid,command),flush=True)
         return process
 
     def start(self,stop=None):

@@ -1,5 +1,6 @@
 """Phone-side Bluetooth Wi-Fi Projection Protocol (WPP)."""
 import ipaddress
+import logging
 import re
 import select
 import struct
@@ -109,11 +110,20 @@ class WppClient:
                 if status:
                     raise ValueError('unsupported WPP protocol version')
             elif message_type == 1:
-                start = Message(payload)
-                address, port = start.text(1), start.integer(2, signed=True)
+                try:
+                    start = Message(payload)
+                    address, port = start.text(1), start.integer(2, signed=True)
+                    status = start.integer(3, 0, signed=True)
+                except ValueError:
+                    logging.warning('Android Auto WPP malformed WifiStartRequest payload=%s', payload.hex())
+                    raise
+                logging.info('Android Auto WPP WifiStartRequest address=%r port=%r status=%d payload=%s',
+                             address, port, status, payload.hex())
+                if status:
+                    raise ValueError('head unit rejected WPP projection status={}'.format(status))
                 ip = ipaddress.ip_address(address)
                 if (ip.is_unspecified or ip.is_loopback or ip.is_multicast
-                        or port is None or not 1 <= port <= 65535 or start.integer(3, 0, signed=True)):
+                        or port is None or not 1 <= port <= 65535):
                     raise ValueError('invalid WPP projection endpoint')
                 received_endpoint = (address, port)
                 if endpoint is not None and endpoint != received_endpoint:

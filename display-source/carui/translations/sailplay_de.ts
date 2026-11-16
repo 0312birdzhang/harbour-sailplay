@@ -623,6 +623,18 @@ Musik auf dem Telefon starten</translation>
       <source>Messaging account is unavailable</source>
       <translation>Nachrichtenkonto ist nicht verfügbar</translation>
     </message>
+    <message>
+      <source>Collect diagnostic logs</source>
+      <translation>Diagnoseprotokolle aufzeichnen</translation>
+    </message>
+    <message>
+      <source>Save detailed connection logs privately and rotate them automatically. The setting takes effect during the current session.</source>
+      <translation>Detaillierte Verbindungsprotokolle privat speichern und automatisch rotieren. Die Einstellung gilt für die laufende Sitzung.</translation>
+    </message>
+    <message>
+      <source>Could not save diagnostic logging setting</source>
+      <translation>Die Einstellung für Diagnoseprotokolle konnte nicht gespeichert werden</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>
