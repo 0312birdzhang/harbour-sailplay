@@ -6,7 +6,7 @@ import time
 from .networkdbus import network_interface, network_object
 
 
-def restore_network(lease, bus, log=print):
+def restore_network(lease, bus, log=print, *, reconnect=True):
     plan = lease.state.get('network')
     if not plan:
         return
@@ -45,12 +45,18 @@ def restore_network(lease, bus, log=print):
         old = current
         plan = dict(plan, powered=True)
         log('Projection Wi-Fi restoration keeps the current Wi-Fi connection')
+    if not reconnect:
+        lease.update(network=dict(plan, old=old, target=None, forget=False, debug=None))
+        log('Previous Wi-Fi reconnection deferred until projection ends')
+        return
     if old and old in services and services[old].get('State') not in ('ready', 'online'):
         try:
             service(old).Connect(timeout=20)
         except Exception as error:
             name = getattr(error, 'get_dbus_name', lambda: '')()
-            if name == 'net.connman.Error.NoCarrier':
+            # Saved hotspots can return Failed/EIO after their interface disappears.
+            # Retire that optional reconnect after projection network cleanup.
+            if name in ('net.connman.Error.NoCarrier', 'net.connman.Error.Failed'):
                 log('Previous Wi-Fi network unavailable, retiring its restoration request')
             elif name != 'net.connman.Error.InProgress':
                 raise
@@ -74,9 +80,9 @@ def restore_network(lease, bus, log=print):
     log('Projection Wi-Fi restoration completed')
 
 
-def restore_previous_network(lease, bus, log=print):
+def restore_previous_network(lease, bus, log=print, *, reconnect=True):
     """Restore the journal and retire running timers from pre-journal RPMs."""
-    restore_network(lease, bus, log)
+    restore_network(lease, bus, log, reconnect=reconnect)
     systemd = network_interface(network_object(bus, 'org.freedesktop.systemd1',
                                  '/org/freedesktop/systemd1'), 'org.freedesktop.systemd1.Manager')
     jobs = []
@@ -116,5 +122,5 @@ def restore_previous_network(lease, bus, log=print):
         # Old running Python processes cannot observe the new ownership IDs.
         # Journal their rollback before stopping them, then restore under the lock.
         subprocess.run(['systemctl', 'stop', name], check=True, timeout=20)
-        restore_network(lease, bus, log)
+        restore_network(lease, bus, log, reconnect=reconnect)
         log('Retired legacy CarPlay Wi-Fi restoration job ' + name)

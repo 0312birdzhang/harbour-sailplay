@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 from android_auto.network import NetworkHandover
 from android_auto.protobuf import field
 from android_auto.wireless import Credentials
-from carplay_proto.networksession import restore_network
+from carplay_proto.networksession import restore_network, restore_previous_network
 from carplay_proto.session import SessionLease, current_owner
 
 
@@ -127,6 +127,91 @@ class NetworkCleanupTests(unittest.TestCase):
             self.assertIn('Previous Wi-Fi network unavailable, retiring its restoration request', messages)
             with SessionLease('carplay', path, None) as next_session:
                 self.assertIsNone(next_session.state['network'])
+
+    def test_failed_original_reconnect_retires_the_inherited_network_plan(self):
+        for protocol in ('carplay', 'android-auto'):
+            with self.subTest(protocol=protocol), tempfile.TemporaryDirectory() as directory:
+                path = directory + '/lock'
+                with SessionLease('carplay', path, None) as previous_session:
+                    previous_session.plan_network('/old', '/car', forget=True)
+                manager, old, car, systemd = Mock(), Mock(), Mock(), Mock()
+                manager.GetServices.return_value = [('/old', {'Type': 'wifi', 'State': 'idle'}),
+                                                   ('/car', {'Type': 'wifi', 'State': 'ready', 'Favorite': True})]
+                old.Connect.side_effect = ConnectFailed('Input/output error')
+                systemd.ListUnits.return_value = []
+                objects = {'/': manager, '/old': old, '/car': car,
+                           '/org/freedesktop/systemd1': systemd}
+                with SessionLease(protocol, path, None) as lease:
+                    self.assertEqual(lease.state['network']['old'], '/old')
+                    with patch('carplay_proto.networksession.network_object', side_effect=lambda bus, name, path: objects[path]), \
+                            patch('carplay_proto.networksession.network_interface', side_effect=lambda obj, name: obj):
+                        restore_previous_network(lease, None, log=Mock())
+                    self.assertIsNone(current_owner(path)['network'])
+                    lease.phase('connecting')
+                    self.assertEqual(current_owner(path)['phase'], 'connecting')
+                car.Disconnect.assert_called_once()
+                car.Remove.assert_called_once()
+                old.Connect.assert_called_once_with(timeout=20)
+                with SessionLease(protocol, path, None) as next_session:
+                    self.assertIsNone(next_session.state['network'])
+
+    def test_connection_preparation_defers_the_original_wifi_reconnect_and_power_restore(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = directory + '/lock'
+            with SessionLease('android-auto', path, None) as previous:
+                previous.plan_network('/old', '/car', forget=True, wifi_path='/wifi', powered=False)
+            manager, old, car, technology, systemd = Mock(), Mock(), Mock(), Mock(), Mock()
+            car_properties = {'Type': 'wifi', 'State': 'ready', 'Favorite': True}
+            manager.GetServices.return_value = [('/old', {'Type': 'wifi', 'State': 'idle'}),
+                                               ('/car', car_properties)]
+            car.Disconnect.side_effect = lambda: car_properties.update(State='idle')
+            systemd.ListUnits.return_value = []
+            objects = {'/': manager, '/old': old, '/car': car, '/wifi': technology,
+                       '/org/freedesktop/systemd1': systemd}
+            with SessionLease('carplay', path, None) as lease:
+                with patch.dict(sys.modules, dbus=SimpleNamespace(Boolean=lambda value, **kwargs: value)), \
+                        patch('carplay_proto.networksession.network_object', side_effect=lambda bus, name, path: objects[path]), \
+                        patch('carplay_proto.networksession.network_interface', side_effect=lambda obj, name: obj):
+                    restore_previous_network(lease, None, log=Mock(), reconnect=False)
+                    old.Connect.assert_not_called()
+                    technology.SetProperty.assert_not_called()
+                    plan = current_owner(path)['network']
+                    self.assertEqual(plan['old'], '/old')
+                    self.assertIsNone(plan['target'])
+                    self.assertEqual(plan['wifi_path'], '/wifi')
+                    self.assertFalse(plan['powered'])
+                    car.Disconnect.assert_called_once()
+                    car.Remove.assert_called_once()
+                    restore_network(lease, None, log=Mock())
+                old.Connect.assert_called_once_with(timeout=20)
+                technology.SetProperty.assert_called_once_with('Powered', False)
+                self.assertIsNone(current_owner(path)['network'])
+
+    def test_connection_preparation_retires_the_legacy_job_and_defers_home_reconnect(self):
+        with tempfile.TemporaryDirectory() as directory:
+            old_path, car_path = '/net/connman/service/wifi_home', '/net/connman/service/wifi_car'
+            unit_name = 'sailplay-wifi-restore-101.service'
+            arguments = ['python3', '/opt/sailplay/scripts/wifi-session-probe.py',
+                         '--restore', old_path, car_path, '--restore-after', '45']
+            unit_values = {'ExecStart': [('python3', arguments)], 'ExecMainStartTimestampMonotonic': 100}
+            unit = SimpleNamespace(Get=Mock(side_effect=lambda interface, name, **kwargs: unit_values[name]))
+            systemd, manager, old, car = Mock(), Mock(), Mock(), Mock()
+            systemd.ListUnits.return_value = [(unit_name, '', 'loaded', 'active', 'running', '', '/legacy')]
+            manager.GetServices.return_value = [(old_path, {'Type': 'wifi', 'State': 'idle'}),
+                                               (car_path, {'Type': 'wifi', 'State': 'ready', 'Favorite': True})]
+            objects = {'/org/freedesktop/systemd1': systemd, '/legacy': unit, '/': manager,
+                       old_path: old, car_path: car}
+            with SessionLease('carplay', directory + '/lock', None) as lease:
+                with patch('carplay_proto.networksession.network_object', side_effect=lambda bus, name, path: objects[path]), \
+                        patch('carplay_proto.networksession.network_interface', side_effect=lambda obj, name: obj), \
+                        patch('carplay_proto.networksession.subprocess.run') as stop:
+                    restore_previous_network(lease, None, log=Mock(), reconnect=False)
+                stop.assert_called_once_with(['systemctl', 'stop', unit_name], check=True, timeout=20)
+                car.Disconnect.assert_called_once()
+                car.Remove.assert_not_called()
+                old.Connect.assert_not_called()
+                self.assertEqual(current_owner(lease.lock_path)['network']['old'], old_path)
+                self.assertIsNone(current_owner(lease.lock_path)['network']['target'])
 
     def test_current_wifi_connection_supersedes_the_original_network_and_power_state(self):
         lease = SimpleNamespace(state={'network': {'old': '/old', 'target': '/car', 'forget': True,

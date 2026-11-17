@@ -86,7 +86,7 @@ def main():
     bus = dbus.SystemBus()
     if media_lease is not None:
         from carplay_proto.networksession import restore_previous_network
-        restore_previous_network(media_lease, bus)
+        restore_previous_network(media_lease, bus, reconnect=False)
         media_lease.phase('connecting')
     manager = network_interface(network_object(bus, 'net.connman', '/'), 'net.connman.Manager')
     loop = GLib.MainLoop()
@@ -128,6 +128,7 @@ def main():
             time.sleep(min(remaining, 1))
         print('RESTORE Wi-Fi safety timer expired at {:.3f}'.format(time.monotonic()), flush=True)
         old, target = args.restore
+        old = old or None
         from carplay_proto.session import SessionBusy, SessionLease
         restoration = SessionLease('carplay')
         try:
@@ -293,17 +294,16 @@ def main():
                     'net.connman.Technology').SetProperty('Powered', dbus.Boolean(powered, variant_level=1)),
                 log=lambda message: print(message, flush=True), require_available=True,
                 prepare=prepare_service)
-    old = next((str(path) for path, props in services if props.get('Type') == 'wifi' and props.get('State') in ('ready', 'online')), None)
-    if not old:
-        old=next((str(path) for path,props in services if props.get('Type')=='wifi'
-                  and props.get('Favorite') and str(path)!=target),None)
-    print('HU AP visible={}, existing Wi-Fi connected={}'.format(bool(target), bool(old)), flush=True)
+    previous_network = media_lease.state.get('network') or {}
+    old = next((str(path) for path, props in services if props.get('Type') == 'wifi'
+                and props.get('State') in ('ready', 'online')), None)
+    if not old and previous_network.get('old') != target:
+        old = previous_network.get('old')
+    print('HU AP visible={}, previous Wi-Fi recorded={}'.format(bool(target), bool(old)), flush=True)
     if not args.connect:
         return
     if not target:
         raise RuntimeError('HU Wi-Fi service unavailable after discovery and recovery')
-    if not old:
-        raise RuntimeError('no previous Wi-Fi service available for restoration')
     refresh_session(args.session, session)
     already_connected = target == old
     target_props = service(target).GetProperties()
@@ -331,7 +331,7 @@ def main():
     manager.RegisterAgent(dbus.ObjectPath('/org/sailplay/WifiAgent'))
     # A separate systemd unit survives SSH logout AND the probe unit's teardown.
     restore_command = ['systemd-run', '--unit=sailplay-wifi-restore-{}'.format(os.getpid()),
-                    sys.executable, os.path.abspath(__file__), '--restore', old, target,
+                    sys.executable, os.path.abspath(__file__), '--restore', old or '', target,
                     '--restore-after', str(args.restore_after)]
     restore_clock = '/tmp/sailplay-wifi-restore-clock-' + media_lease.identity
     descriptor = os.open(restore_clock, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -359,6 +359,7 @@ def main():
     if not already_connected:
         media_lease.plan_network(old, target,
             forget=args.direct_passphrase and not target_props.get('Favorite'),
+            wifi_path=previous_network.get('wifi_path'), powered=previous_network.get('powered', True),
             debug=previous_debug if args.trace_supplicant else None)
     if not already_connected:
         subprocess.run(restore_command, check=True,
