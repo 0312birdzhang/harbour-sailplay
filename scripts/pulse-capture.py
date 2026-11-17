@@ -49,7 +49,7 @@ def stream_diagnostics(output, heading='Sink Input'):
         for field in ('Sink','Source','Corked','Mute','Volume'):
             match=re.search(r'(?m)^\s*'+field+r':\s*(.+)$',block)
             if match:item[field.lower()]=match.group(1).strip()
-        for field in ('application.process.binary','media.role','policy.group','module-stream-restore.id'):
+        for field in ('application.process.binary','media.role','policy.group','xpolicy.group','module-stream-restore.id'):
             match=re.search(r'(?m)^\s*'+re.escape(field)+r'\s*=\s*"([^"]*)"',block)
             if match:item[field]=match.group(1)
         result.append(item)
@@ -235,14 +235,17 @@ def save_recovery(state):
 
 
 def private_playback(output,sink_index):
-    volumes=playback_volumes(output)
-    return [(item,volumes.get(item['id'],[])) for item in stream_diagnostics(output)
+    return [(item,volumes) for item,volumes in private_playback_all(output)
             if item.get('sink')==str(sink_index) and item.get('corked')=='no']
 
 
 def private_playback_all(output):
     volumes=playback_volumes(output)
-    return [(item,volumes.get(item['id'],[])) for item in stream_diagnostics(output)]
+    call_groups={'call','ipcall','aliencall','phone','telephony'}
+    return [(item,volumes.get(item['id'],[])) for item in stream_diagnostics(output)
+            if item.get('media.role') not in call_groups
+            and item.get('policy.group') not in call_groups
+            and item.get('xpolicy.group') not in call_groups]
 
 
 def restore_private_inputs(state):
@@ -363,6 +366,7 @@ def main():
             fields=line.split()
             if len(fields)<2:continue
             index,sink=fields[:2]
+            if index not in before:continue
             if sink!=sink_index:
                 moved.setdefault(index,sink)
                 if index not in recovery['streams'] and index in before:

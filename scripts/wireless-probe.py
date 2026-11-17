@@ -148,7 +148,7 @@ def touch_handover_heartbeat():
 def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
           announce_wireless=False, local_address=None, session_out=None, wifi_handover=False,sustained=False,
           local_name='SailfishOS', paired_pin_path=None, on_authenticated=None,
-          transport='bluetooth', connection_role='unknown'):
+          transport='bluetooth', connection_role='unknown', bluetooth_device=None):
     started = time.monotonic()
     phase = 'detection'
     received_bytes = 0
@@ -176,6 +176,8 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
             session_data = start.as_dict()
             session_data['device_name'] = local_name
             session_data['bluetooth_address'] = local_address
+            if bluetooth_device:
+                session_data['bluetooth_device'] = bluetooth_device
             json.dump(session_data, output)
 
     def start_handover(trigger):
@@ -689,7 +691,7 @@ def main():
                                                          args.announce_wireless, local_address, args.session_out, args.wifi_handover,args.sustained,
                                                          adapter_name(adapter_props), pin_path,
                                                           (lambda: remember_head_unit(str(device))) if pin_path else None),
-                                      kwargs={'connection_role': self.role}, name='RFCOMM-' + self.role)
+                                      kwargs={'connection_role': self.role, 'bluetooth_device': str(device)}, name='RFCOMM-' + self.role)
             workers[str(device)] = (stop, thread, sock)
             logging.info('RFCOMM connected device=%s role=%s profile=%s fd=%d local=%s peer=%s properties=%s',
                          device, self.role, self.__dbus_object_path__, sock.fileno(),

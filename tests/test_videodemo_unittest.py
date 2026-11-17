@@ -44,6 +44,33 @@ class VideoDemoTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in client.request.call_args_list],
                          ['RECORD', 'SETUP', 'TEARDOWN'])
 
+    def test_live_media_starts_and_closes_call_routing_for_the_session_head_unit(self):
+        from carplay_proto.videodemo import run_demo
+        client = Mock()
+        def request(method, *args, **kwargs):
+            if method == 'SETUP':
+                raise RuntimeError('stop after starting call routing')
+            return 200, {}, b''
+        client.request.side_effect = request
+        info = {'displays': [{'widthPixels': 1920, 'heightPixels': 720, 'uuid': 'display'}]}
+        with patch('carplay_proto.displaysettings.publish_display'), \
+             patch('carplay_proto.displaysettings.load_settings', return_value=(1920, 720, 30)), \
+             patch('carplay_proto.videodemo.DemoEvents'), \
+             patch('carplay_proto.videodemo.UiCommands'), \
+             patch('carplay_proto.mediakeys.MediaKeys'), \
+             patch('carplay_proto.touch.TouchInput'), \
+             patch('carplay_proto.projectionpower.ProjectionPower'), \
+             patch('carplay_proto.display.DisplayPipeline') as pipeline, \
+             patch('carplay_proto.audio.AudioSender'), \
+             patch('carplay_proto.callaudio.CallAudioRouter') as router:
+            pipeline.return_value.frames.return_value = iter([(b'config', [b'frame'])])
+            with self.assertRaisesRegex(RuntimeError, 'stop after starting call routing'):
+                run_demo(client, 'receiver', None, bytes(32), {'eventPort': 1}, info,
+                         live=True, bluetooth_device='/org/bluez/hci1/dev_CURRENT_HU')
+        router.assert_called_once_with('/org/bluez/hci1/dev_CURRENT_HU')
+        router.return_value.start.assert_called_once()
+        router.return_value.close.assert_called_once()
+
     def test_multislice_and_mixed_start_codes(self):
         data = b'\x00\x00\x00\x01\x67\x42\x00\x1f\x00\x00\x01\x68\x01'
         data += b'\x00\x00\x01\x65\x80\xaa\x00\x00\x00\x01\x65\x40\xbb'

@@ -344,7 +344,7 @@ def disable_bluetooth(client,address):
     if status!=200 or result!=0:raise RuntimeError('Bluetooth handoff rejected')
 
 
-def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=15,live=False,on_activity=None,bluetooth_address=None,iap_link=None):
+def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=15,live=False,on_activity=None,bluetooth_address=None,iap_link=None,bluetooth_device=None):
     session_started = time.monotonic()
     phase = 'session-start'
     count = 0
@@ -443,6 +443,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
     video = None
     feedback = None
     ended_audio = None
+    call_audio = None
     commands = None
     screen = None
     try:
@@ -501,6 +502,10 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                 # accessory timeout and removes the wireless CarPlay record.
                 print('Keeping accessory Bluetooth enabled for {}'.format(
                     info.get('model')),flush=True)
+            from .bluezadapter import previous_head_unit
+            from .callaudio import CallAudioRouter
+            call_audio = CallAudioRouter(bluetooth_device or previous_head_unit())
+            call_audio.start()
         phase = 'screen-setup'
         before = time.monotonic()
         checkpoint(phase + '-start')
@@ -618,6 +623,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         if media:media.close()
         if power:
             power.close()
+        if call_audio:
+            call_audio.close()
         if audio:
             audio.close()
         if ended_audio:

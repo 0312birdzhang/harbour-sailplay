@@ -11,6 +11,14 @@ import tempfile
 spec=importlib.util.spec_from_file_location('pulse',Path(__file__).resolve().parents[1]/'scripts/pulse-capture.py')
 pulse=importlib.util.module_from_spec(spec);spec.loader.exec_module(pulse)
 class PrivateMuteTests(unittest.TestCase):
+    def test_call_streams_keep_their_native_sink_and_volume_control(self):
+        text = ('Sink Input #1\n Sink: 9\n Corked: no\n media.role = "music"\n'
+                'Sink Input #2\n Sink: 0\n Corked: no\n policy.group = "call"\n'
+                'Sink Input #3\n Sink: 0\n Corked: no\n media.role = "phone"\n'
+                'Sink Input #4\n Sink: 9\n Corked: no\n xpolicy.group = "ipcall"\n')
+        self.assertEqual([item['id'] for item, volumes in pulse.private_playback_all(text)], ['1'])
+        self.assertEqual([item['id'] for item, volumes in pulse.private_playback(text, 9)], ['1'])
+
     def test_unmute_only_active_private_output(self):
         def block(i,sink,corked,mute):return f'Sink Input #{i}\n Sink: {sink}\n Corked: {corked}\n Mute: {mute}\n'
         text=block(1,9,'no','yes')+block(2,0,'no','yes')+block(3,9,'yes','yes')+block(4,9,'no','no')
