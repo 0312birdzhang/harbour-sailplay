@@ -2,6 +2,10 @@ import QtQuick 2.0
 
 QtObject {
     property bool day: carController.dayTheme
+    readonly property color background: day ? "#e3edf8" : "#17203a"
+    readonly property color positive: "#28774e"
+    readonly property color negative: "#963b48"
+    readonly property color actionText: "white"
     readonly property color text: day ? "#18283c" : "white"
     readonly property color secondary: day ? "#50627a" : "#aebcd4"
     readonly property color card: day ? "#f8fbff" : "#263249"

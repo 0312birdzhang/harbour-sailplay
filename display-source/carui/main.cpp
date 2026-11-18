@@ -1,4 +1,4 @@
-#include "themeschedule.h"
+#include "themesettings.h"
 #include <QGuiApplication>
 #include <QTranslator>
 #include <QLocale>
@@ -521,6 +521,7 @@ class CarUiController : public QObject
     Q_PROPERTY(QString dayStart READ dayStart NOTIFY themeSettingsChanged)
     Q_PROPERTY(QString nightStart READ nightStart NOTIFY themeSettingsChanged)
     Q_PROPERTY(bool followAmbience READ followAmbience NOTIFY themeSettingsChanged)
+    Q_PROPERTY(int themeMode READ themeMode NOTIFY themeSettingsChanged)
     Q_PROPERTY(bool musicActive READ musicActive NOTIFY currentAppChanged)
     Q_PROPERTY(bool returnToDashboard READ returnToDashboard NOTIFY currentAppChanged)
     Q_PROPERTY(bool hasRememberedMusic READ hasRememberedMusic NOTIFY rememberedMusicChanged)
@@ -725,61 +726,29 @@ public:
         return true;
     }
     static QString themeConfigPath() {
-        return QDir::homePath() + QStringLiteral("/.config/sailplay/theme.ini");
+        return SailplayThemeSettings::configPath();
     }
-    QString themeTime(const QString &key, const QString &fallback) const {
-        QSettings settings(themeConfigPath(), QSettings::IniFormat);
-        const QTime time = QTime::fromString(settings.value(key, fallback).toString(), QStringLiteral("HH:mm"));
-        return time.isValid() ? time.toString(QStringLiteral("HH:mm")) : fallback;
-    }
-    QString dayStart() const { return themeTime(QStringLiteral("DayStart"), QStringLiteral("07:00")); }
-    QString nightStart() const { return themeTime(QStringLiteral("NightStart"), QStringLiteral("19:00")); }
-    bool dayTheme() const { return m_dayTheme; }
-    bool followAmbience() const {
-        QSettings settings(themeConfigPath(), QSettings::IniFormat);
-        return settings.value(QStringLiteral("FollowAmbience"), true).toBool();
-    }
-    // Silica colour scheme of the active ambience: 0 light-on-dark, 1 dark-on-light.
-    // Re-read only when the dconf database changes; the theme timer runs every second.
-    int ambienceColorScheme() {
-        const QDateTime stamp = QFileInfo(QDir::homePath() + QStringLiteral("/.config/dconf/user")).lastModified();
-        if (m_colorScheme < 0 || stamp != m_dconfStamp) {
-            m_dconfStamp = stamp;
-            QProcess dconf;
-            dconf.start(QStringLiteral("dconf"), {QStringLiteral("read"), QStringLiteral("/desktop/jolla/theme/color_scheme")});
-            if (dconf.waitForFinished(1000) && dconf.exitCode() == 0) {
-                bool ok = false;
-                const int scheme = dconf.readAllStandardOutput().trimmed().toInt(&ok);
-                m_colorScheme = ok ? scheme : 0;
-            } else if (m_colorScheme < 0) {
-                m_colorScheme = 0;
-            }
-        }
-        return m_colorScheme;
-    }
+    QString dayStart() const { return m_theme.dayStart(); }
+    QString nightStart() const { return m_theme.nightStart(); }
+    bool dayTheme() const { return m_theme.dayTheme(); }
+    bool followAmbience() const { return m_theme.followAmbience(); }
+    int themeMode() const { return m_theme.mode(); }
     Q_INVOKABLE bool setFollowAmbience(bool follow) {
+        return setThemeMode(follow ? SailplayThemeSettings::Ambience : SailplayThemeSettings::Custom);
+    }
+    Q_INVOKABLE bool setThemeMode(int mode) {
+        const QStringList modes{QStringLiteral("headlights"), QStringLiteral("ambience"), QStringLiteral("custom")};
+        if (mode < 0 || mode >= modes.size()) return false;
         QDir().mkpath(QFileInfo(themeConfigPath()).absolutePath());
         QSettings settings(themeConfigPath(), QSettings::IniFormat);
-        settings.setValue(QStringLiteral("FollowAmbience"), follow);
+        settings.setValue(QStringLiteral("Mode"), modes[mode]);
+        settings.setValue(QStringLiteral("FollowAmbience"), mode == SailplayThemeSettings::Ambience);
         settings.sync();
         if (settings.status() != QSettings::NoError) return false;
         updateTheme(); return true;
     }
     void updateTheme() {
-        const QString day = dayStart(), night = nightStart();
-        const QTime now = QTime::currentTime();
-        const QTime d = QTime::fromString(day, QStringLiteral("HH:mm"));
-        const QTime n = QTime::fromString(night, QStringLiteral("HH:mm"));
-        const bool follow = followAmbience();
-        // Projected Silica apps use the phone ambience's colours, so the car
-        // theme must match it or light-on-dark apps sit on a light background.
-        const bool daytime = follow ? ambienceColorScheme() == 1
-            : day != night && sailplayDayAt(now.hour()*60+now.minute(), d.hour()*60+d.minute(), n.hour()*60+n.minute());
-        const QString schedule = (follow ? QStringLiteral("ambience|") : QString()) + day + QLatin1Char('|') + night;
-        if (daytime != m_dayTheme || schedule != m_themeSchedule) {
-            m_dayTheme = daytime; m_themeSchedule = schedule;
-            emit themeSettingsChanged();
-        }
+        if (m_theme.update()) emit themeSettingsChanged();
     }
     Q_INVOKABLE bool setThemeTime(bool daytime, const QString &value) {
         const QTime time = QTime::fromString(value, QStringLiteral("HH:mm"));
@@ -1564,10 +1533,7 @@ private:
     }
     QVariantList m_rows;
     QString m_currentApp;
-    bool m_dayTheme = false;
-    QString m_themeSchedule;
-    int m_colorScheme = -1;
-    QDateTime m_dconfStamp;
+    SailplayThemeSettings m_theme;
     bool m_dashboardActive = false;
     bool m_musicActive = false;
     bool m_returnToDashboard = false;

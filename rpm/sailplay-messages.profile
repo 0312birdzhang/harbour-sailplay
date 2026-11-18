@@ -2,5 +2,11 @@ whitelist ${RUNUSER}/imira-comp-0
 read-only ${RUNUSER}/imira-comp-0
 whitelist ${RUNUSER}/sailplay-maliit
 read-only ${RUNUSER}/sailplay-maliit
+mkdir ${HOME}/.config/sailplay
+whitelist ${HOME}/.config/sailplay
+read-only ${HOME}/.config/sailplay
+private-bin dconf
+whitelist /run/sailplay-vehicle-theme
+read-only /run/sailplay-vehicle-theme
 dbus-user.own org.sailplay.Client.*
 dbus-user.talk org.sailplay.System.Messages

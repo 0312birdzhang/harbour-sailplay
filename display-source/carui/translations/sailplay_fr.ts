@@ -2,6 +2,10 @@
 <TS version="2.1" language="fr" sourcelanguage="en">
   <context>
     <name>Sailplay</name>
+    <message><source>Theme mode</source><translation>Mode du thème</translation></message>
+    <message><source>Headlight linked</source><translation>Lié aux phares</translation></message>
+    <message><source>Custom</source><translation>Personnalisé</translation></message>
+    <message><source>Uses the car's day/night signal. Phone ambience is used until the car reports its state.</source><translation>Utilise le signal jour/nuit de la voiture. L’ambiance du téléphone est utilisée jusqu’à ce que la voiture indique son état.</translation></message>
     <message>
       <source>Connecting navigation</source>
       <translation>Connexion de la navigation</translation>

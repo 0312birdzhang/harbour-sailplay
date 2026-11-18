@@ -369,6 +369,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         raise ValueError('demo requires 1920x720 display')
     stream_id = int.from_bytes(__import__('os').urandom(7),'big') or 1
     touch = audio = power = media = None
+    from .vehicletheme import VehicleTheme
+    vehicle_theme = VehicleTheme('carplay') if live else None
     resume = threading.Event()
     resource_changed=threading.Event()
     mode_lock=threading.RLock();mode_revision=[0];duck=[1.0]
@@ -383,6 +385,10 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         from .iaptunnel import IAPTunnel
         iap_tunnel=IAPTunnel(iap_link,lambda data:send_iap(client,data))
     def event_command(value):
+        if vehicle_theme is not None:
+            result = vehicle_theme.command(value)
+            if result is not None:
+                return result
         if value.get('type')=='iAPSendMessage' and iap_tunnel:
             from .iaptunnel import tunnel_payload
             data=tunnel_payload(value)
@@ -448,6 +454,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
     screen = None
     try:
         if live:
+            vehicle_theme.start()
             from .projectionpower import ProjectionPower
             power = ProjectionPower(lambda: {
                 'events': events.received if events else 0,
@@ -618,6 +625,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         raise
     finally:
         checkpoint('teardown-start')
+        if vehicle_theme:
+            vehicle_theme.close()
         if iap_tunnel:
             iap_tunnel.close()
         if media:media.close()

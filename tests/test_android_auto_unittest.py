@@ -594,6 +594,11 @@ class LegacyNetworkTests(unittest.TestCase):
 
 
 class SessionTests(unittest.TestCase):
+    def setUp(self):
+        theme = patch('android_auto.session.VehicleTheme')
+        theme.start()
+        self.addCleanup(theme.stop)
+
     def test_bye_bye_response_is_the_last_message_even_with_queued_media(self):
         transport = FakeTransport([Packet(0, 15, field(1, 1))])
         session = Session(transport, None)

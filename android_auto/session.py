@@ -3,6 +3,7 @@ import logging
 import time
 
 from carplay_proto.displaysettings import load_settings, publish_display
+from carplay_proto.vehicletheme import VehicleTheme
 from .discovery import Discovery
 from .input import InputHandler, SUPPORTED_KEYS
 from .media import AudioProducer, MediaChannel, VideoProducer
@@ -20,6 +21,7 @@ class Session:
         self.display_settings, self.publish = display_settings, publish
         self.phone_name = phone_name
         self.on_connected = on_connected
+        self.vehicle_theme = VehicleTheme('android-auto')
         self.discovery = None
         self.early_notifications = []
         self.media = {}
@@ -42,7 +44,9 @@ class Session:
         if self.discovery is not None:
             raise ValueError('duplicate Android Auto service discovery response')
         self.discovery = Discovery(payload)
-        services = (self.discovery.video, self.discovery.audio, self.discovery.input)
+        night_sensor = next((service for service in self.discovery.services.values()
+                             if service.kind == 'sensor' and 10 in service.sensors), None)
+        services = (self.discovery.video, self.discovery.audio, self.discovery.input, night_sensor)
         for service in services:
             if service is not None:
                 self.requested.add(service.id)
@@ -55,12 +59,20 @@ class Session:
             self.handle(packet)
 
     def channel_opened(self, channel, payload):
-        if channel not in self.requested or Message(payload).integer(1, signed=True) != 0:
+        status = Message(payload).integer(1, signed=True)
+        if channel in self.requested and self.discovery.services[channel].kind == 'sensor' and status != 0:
+            self.requested.discard(channel)
+            logging.info('Android Auto night sensor channel rejected status=%s', status)
+            return
+        if channel not in self.requested or status != 0:
             raise ValueError('head unit rejected Android Auto channel open')
         if channel in self.opened:
             return
         self.opened.add(channel)
         service = self.discovery.services[channel]
+        if service.kind == 'sensor':
+            self.send(channel, 0x8001, field(1, 10) + field(2, 1000000))
+            return
         if service.kind in ('video', 'audio'):
             self.send(channel, 0x8000, field(1, service.codec))
         elif service.kind == 'input':
@@ -181,9 +193,12 @@ class Session:
             return
         service = self.discovery.services.get(channel)
         if service is not None and service.kind == 'sensor' and message_type == 0x8003:
-            # Navigation uses the phone's location and night-mode providers.
-            # Unsolicited receiver sensor batches do not change those providers.
-            Message(payload)
+            night = Message(payload).messages(10)
+            if 10 in service.sensors and night:
+                value = night[-1].integer(1)
+                if value not in (0, 1):
+                    raise ValueError('invalid Android Auto night sensor value')
+                self.vehicle_theme.update(bool(value))
             return
         if channel not in self.requested:
             raise ValueError('Android Auto message arrived on an unnegotiated channel={} type={:#x}'.format(
@@ -212,6 +227,10 @@ class Session:
                 if self.input is not None:
                     self.input.release()
             return
+        if service.kind == 'sensor':
+            if message_type == 0x8002:
+                logging.info('Android Auto night sensor subscription status=%s', Message(payload).integer(1))
+            return
         if service.kind == 'input':
             if message_type == 0x8003:
                 if Message(payload).integer(1, signed=True) != 0:
@@ -238,6 +257,7 @@ class Session:
         self.running = False
 
     def run(self, seconds=0):
+        self.vehicle_theme.start()
         self.transport.handshake()
         self.send(0, 5, field(4, self.phone_name) + field(5, 'Sailplay'))
         self.started_at = self.last_received = self.last_ping = time.monotonic()
@@ -278,7 +298,7 @@ class Session:
     def close(self):
         self.running = False
         errors = []
-        for owned in list(self.media.values()) + [self.input, self.media_keys, self.commands, self.transport]:
+        for owned in list(self.media.values()) + [self.input, self.media_keys, self.commands, self.transport, self.vehicle_theme]:
             if owned is None:
                 continue
             try:

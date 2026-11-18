@@ -59,6 +59,7 @@ class VideoDemoTests(unittest.TestCase):
              patch('carplay_proto.videodemo.UiCommands'), \
              patch('carplay_proto.mediakeys.MediaKeys'), \
              patch('carplay_proto.touch.TouchInput'), \
+             patch('carplay_proto.vehicletheme.VehicleTheme') as theme, \
              patch('carplay_proto.projectionpower.ProjectionPower'), \
              patch('carplay_proto.display.DisplayPipeline') as pipeline, \
              patch('carplay_proto.audio.AudioSender'), \
@@ -70,6 +71,8 @@ class VideoDemoTests(unittest.TestCase):
         router.assert_called_once_with('/org/bluez/hci1/dev_CURRENT_HU')
         router.return_value.start.assert_called_once()
         router.return_value.close.assert_called_once()
+        theme.return_value.start.assert_called_once()
+        theme.return_value.close.assert_called_once()
 
     def test_multislice_and_mixed_start_codes(self):
         data = b'\x00\x00\x00\x01\x67\x42\x00\x1f\x00\x00\x01\x68\x01'

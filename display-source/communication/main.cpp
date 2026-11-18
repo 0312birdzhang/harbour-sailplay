@@ -2,6 +2,7 @@
 #include "contenthost.h"
 #include "sailplayrenderer.h"
 #include "sailplaycontent.h"
+#include "themesettings.h"
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QQmlComponent>
@@ -10,6 +11,7 @@
 #include <QQuickView>
 #include <QTranslator>
 #include <QLocale>
+#include <QTimer>
 #include <sailfishapp.h>
 #include <cstdio>
 #include <csignal>
@@ -85,6 +87,14 @@ int main(int argc, char **argv)
     engine.rootContext()->setContextProperty(QStringLiteral("renderer"), &renderer);
     engine.rootContext()->setContextProperty(QStringLiteral("browser"), &browser);
     engine.rootContext()->setContextProperty(QStringLiteral("phoneApp"), phone);
+    SailplayThemeSettings theme;
+    theme.update();
+    engine.rootContext()->setContextProperty(QStringLiteral("dayTheme"), theme.dayTheme());
+    QTimer themeTimer;
+    QObject::connect(&themeTimer, &QTimer::timeout, &engine, [&]() {
+        if (theme.update()) engine.rootContext()->setContextProperty(QStringLiteral("dayTheme"), theme.dayTheme());
+    });
+    themeTimer.start(1000);
     const auto updateState = [&]() {
         engine.rootContext()->setContextProperty(QStringLiteral("communicationState"), SailplayContent::decode(renderer.state()));
     };

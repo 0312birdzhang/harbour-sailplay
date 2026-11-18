@@ -2,6 +2,10 @@
 <TS version="2.1" language="zh_TW" sourcelanguage="en">
   <context>
     <name>Sailplay</name>
+    <message><source>Theme mode</source><translation>主題模式</translation></message>
+    <message><source>Headlight linked</source><translation>大燈聯動</translation></message>
+    <message><source>Custom</source><translation>自訂</translation></message>
+    <message><source>Uses the car's day/night signal. Phone ambience is used until the car reports its state.</source><translation>依車機的日夜訊號切換亮暗。車機尚未回報狀態時使用手機氛圍。</translation></message>
     <message>
       <source>Connecting navigation</source>
       <translation>正在連接導航</translation>
