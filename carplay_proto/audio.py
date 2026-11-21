@@ -1,5 +1,6 @@
 """48 kHz stereo playback over CarPlay's encrypted RTP audio stream."""
 import array
+import configparser
 import logging
 import os
 import select
@@ -15,7 +16,22 @@ from .nativecrypto import NativeChaCha
 # Receiver protocol compatibility build, not the Sailfish OS release.
 # The HSAE receiver compares 13A1 against this %d%c%d value to choose
 # timestamp+SSRC (8-byte) RTP AAD. "5.2" compares older and selects 12-byte AAD.
-AUDIO_COMPAT_BUILD = '13A344'
+AUDIO_COMPAT_BUILD = '21A329'
+# 24A1 is an experimental iOS 27 compatibility identity, not a verified release.
+IOS_COMPAT_BUILDS = {9: '13A344', 17: AUDIO_COMPAT_BUILD, 27: '24A1'}
+
+
+def audio_compat_build(path='/home/defaultuser/.config/sailplay/projection.ini'):
+    override = os.environ.get('SAILPLAY_OS_BUILD')
+    if override in IOS_COMPAT_BUILDS.values():
+        return override
+    settings = configparser.ConfigParser()
+    try:
+        settings.read(path)
+        version = settings.getint('CarPlay', 'iosVersion', fallback=17)
+        return IOS_COMPAT_BUILDS.get(version, AUDIO_COMPAT_BUILD)
+    except (OSError, ValueError, configparser.Error):
+        return AUDIO_COMPAT_BUILD
 
 
 class AudioEncoder:

@@ -639,6 +639,22 @@ Start music on your phone</source>
       <source>Could not save diagnostic logging setting</source>
       <translation>无法保存诊断日志设置</translation>
     </message>
+    <message>
+      <source>CarPlay iOS compatibility</source>
+      <translation>CarPlay iOS 兼容版本</translation>
+    </message>
+    <message>
+      <source>Could not save iOS compatibility setting</source>
+      <translation>无法保存 iOS 兼容版本设置</translation>
+    </message>
+    <message>
+      <source>iOS 27 (experimental)</source>
+      <translation>iOS 27（实验）</translation>
+    </message>
+    <message>
+      <source>Reconnect to apply. iOS 27 uses the experimental build identity 24A1.</source>
+      <translation>重新连接后生效。iOS 27 使用实验性构建标识 24A1。</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

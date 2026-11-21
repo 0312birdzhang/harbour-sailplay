@@ -436,9 +436,10 @@ def main():
                         from carplay_proto.airplaytiming import TimingServer
                         timing = TimingServer(client.sock.sock)
                         import uuid
-                        from carplay_proto.audio import AUDIO_COMPAT_BUILD
+                        from carplay_proto.audio import audio_compat_build
+                        os_build = audio_compat_build()
                         print('AirPlay audio compatibility build={} RTP authenticated header=timestamp+SSRC (8 bytes)'.format(
-                            AUDIO_COMPAT_BUILD), flush=True)
+                            os_build), flush=True)
                         # CarPlay identifies devices by Bluetooth address: the head
                         # unit's own deviceID is its Bluetooth address, and the
                         # iAP2 link reports ours. Use the same identity here.
@@ -446,7 +447,7 @@ def main():
                         print('AirPlay sender deviceID={}'.format(device_id), flush=True)
                         setup = {'deviceID':device_id,'macAddress':device_id,
                                  'model':'Sailplay1,1','name':phone_name,'osName':'SailfishOS',
-                                 'osBuildVersion':AUDIO_COMPAT_BUILD,'sourceVersion':'566.25.21',
+                                 'osBuildVersion':os_build,'sourceVersion':'566.25.21',
                                  'sessionUUID':str(uuid.uuid4()),'timingPort':timing.port,
                                  'features':[],'statsCollectionEnabled':False}
                         stage = 'initial-setup'

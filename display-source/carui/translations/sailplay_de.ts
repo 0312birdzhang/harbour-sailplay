@@ -639,6 +639,22 @@ Musik auf dem Telefon starten</translation>
       <source>Could not save diagnostic logging setting</source>
       <translation>Die Einstellung für Diagnoseprotokolle konnte nicht gespeichert werden</translation>
     </message>
+    <message>
+      <source>CarPlay iOS compatibility</source>
+      <translation>CarPlay-iOS-Kompatibilität</translation>
+    </message>
+    <message>
+      <source>Could not save iOS compatibility setting</source>
+      <translation>Die iOS-Kompatibilitätseinstellung konnte nicht gespeichert werden</translation>
+    </message>
+    <message>
+      <source>iOS 27 (experimental)</source>
+      <translation>iOS 27 (experimentell)</translation>
+    </message>
+    <message>
+      <source>Reconnect to apply. iOS 27 uses the experimental build identity 24A1.</source>
+      <translation>Zum Anwenden erneut verbinden. iOS 27 verwendet die experimentelle Build-Kennung 24A1.</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>

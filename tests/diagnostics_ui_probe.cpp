@@ -107,6 +107,9 @@ static void tap(QQuickView *view, QQuickItem *item)
 static QQuickItem *unlock(QQuickView *view, QQuickItem *page)
 {
     QQuickItem *toggle = page->findChild<QQuickItem *>(QStringLiteral("sailplayLoggingSwitch"));
+    QQuickItem *versions = page->findChild<QQuickItem *>(QStringLiteral("sailplayIosVersionComboBox"));
+    require(versions && versions->property("currentIndex").toInt() == 1, "iOS compatibility must default to iOS 17");
+    require(logicOnly || !versions->isVisible(), "iOS compatibility must start hidden");
     require(toggle && !page->property("diagnosticsUnlocked").toBool(), "logging switch must start hidden when collection is disabled");
     require(logicOnly || !toggle->isVisible(), "logging switch must start invisible");
     require(toggle->property("text").toString() == QStringLiteral("收集诊断日志"), "logging switch Chinese text is incorrect");
@@ -120,6 +123,7 @@ static QQuickItem *unlock(QQuickView *view, QQuickItem *page)
         require(page->property("diagnosticTapCount").toInt() == click, "combined icon/name tap count is incorrect");
         require(page->property("diagnosticsUnlocked").toBool() == (click == 10), "logging switch unlocked at the wrong tap count");
         require(logicOnly || toggle->isVisible() == (click == 10), "logging switch revealed at the wrong tap count");
+        require(logicOnly || versions->isVisible() == (click == 10), "iOS compatibility revealed at the wrong tap count");
     }
     return toggle;
 }
@@ -128,6 +132,7 @@ Q_DECL_EXPORT int main(int argc, char **argv)
 {
     logicOnly = qgetenv("SAILPLAY_DIAGNOSTICS_UI_LOGIC_ONLY") == "1";
     QTemporaryDir settings;
+    qputenv("HOME", settings.path().toUtf8());
     if (qgetenv("SAILPLAY_DIAGNOSTICS_CONFIG").isEmpty())
         qputenv("SAILPLAY_DIAGNOSTICS_CONFIG", (settings.path() + QStringLiteral("/diagnostics.ini")).toUtf8());
     installMobileDiagnostics();
@@ -150,6 +155,19 @@ Q_DECL_EXPORT int main(int argc, char **argv)
             std::unique_ptr<QQuickView> view(SailfishApp::createView());
             QQuickItem *page = openAbout(view.get(), &controller);
             QQuickItem *toggle = unlock(view.get(), page);
+            QQuickItem *versions = page->findChild<QQuickItem *>(QStringLiteral("sailplayIosVersionComboBox"));
+            for (int index : {0, 2, 1}) {
+                QQmlExpression choose(QQmlEngine::contextForObject(versions), versions,
+                                      QStringLiteral("selectVersion(%1)").arg(index));
+                choose.evaluate();
+                require(!choose.hasError(), "iOS compatibility QML handler failed");
+                require(versions->property("currentIndex").toInt() == index && controller.iosVersionIndex() == index,
+                        "iOS compatibility UI selection failed");
+                CarUiController restored(nullptr, false);
+                require(restored.iosVersionIndex() == index, "iOS compatibility selection did not persist");
+            }
+            require(!controller.setIosVersion(-1) && !controller.setIosVersion(3), "invalid iOS selection accepted");
+            std::puts("IOS_COMPATIBILITY_THREE_CHOICES_AND_PERSISTENCE_PASS");
             require(!toggle->property("checked").toBool(), "logging switch must default unchecked");
             tap(view.get(), toggle);
             require(controller.loggingEnabled(), "UI click failed to enable persistent setting");

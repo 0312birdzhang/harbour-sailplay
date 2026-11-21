@@ -1,6 +1,10 @@
 import ctypes
 import unittest
-from carplay_proto.audio import AUDIO_COMPAT_BUILD
+import os
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+from carplay_proto.audio import AUDIO_COMPAT_BUILD, IOS_COMPAT_BUILDS, audio_compat_build
 
 
 class ReceiverCompatibilityTests(unittest.TestCase):
@@ -17,4 +21,27 @@ class ReceiverCompatibilityTests(unittest.TestCase):
             return (major.value, letter.value.upper(), minor.value) if count == 3 else None
         self.assertLess(parse('5.2'), parse('13A1'))
         self.assertIsNotNone(parse(AUDIO_COMPAT_BUILD))
-        self.assertLess(parse('13A1'), parse(AUDIO_COMPAT_BUILD))
+        for build in IOS_COMPAT_BUILDS.values():
+            self.assertLess(parse('13A1'), parse(build))
+
+    def test_persisted_versions_and_default(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
+            path = Path(directory) / 'projection.ini'
+            self.assertEqual(audio_compat_build(str(path)), '21A329')
+            for version, build in IOS_COMPAT_BUILDS.items():
+                path.write_text('[Projection]\nprotocol=carplay\n[CarPlay]\niosVersion={}\n'.format(version))
+                self.assertEqual(audio_compat_build(str(path)), build)
+            for text in ('[Projection]\nprotocol=auto\n', '[CarPlay]\niosVersion=bad\n',
+                         '[CarPlay]\niosVersion=99\n', 'invalid ini'):
+                path.write_text(text)
+                self.assertEqual(audio_compat_build(str(path)), AUDIO_COMPAT_BUILD)
+
+    def test_environment_override(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'projection.ini'
+            path.write_text('[CarPlay]\niosVersion=9\n')
+            for build in IOS_COMPAT_BUILDS.values():
+                with patch.dict(os.environ, {'SAILPLAY_OS_BUILD': build}):
+                    self.assertEqual(audio_compat_build(str(path)), build)
+            with patch.dict(os.environ, {'SAILPLAY_OS_BUILD': 'invalid'}):
+                self.assertEqual(audio_compat_build(str(path)), '13A344')

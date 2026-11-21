@@ -508,6 +508,7 @@ class CarUiController : public QObject
     Q_PROPERTY(QString serviceError READ serviceError NOTIFY serviceRunningChanged)
     Q_PROPERTY(bool serviceBusy READ serviceBusy NOTIFY serviceRunningChanged)
     Q_PROPERTY(bool loggingEnabled READ loggingEnabled NOTIFY loggingEnabledChanged)
+    Q_PROPERTY(int iosVersionIndex READ iosVersionIndex NOTIFY iosVersionChanged)
     Q_PROPERTY(QVariantMap status READ status NOTIFY statusChanged)
     Q_PROPERTY(int resolutionIndex READ resolutionIndex NOTIFY projectionSettingsChanged)
     Q_PROPERTY(int projectionFps READ projectionFps NOTIFY projectionSettingsChanged)
@@ -1026,6 +1027,23 @@ public:
     QString serviceError() const { return m_serviceError; }
     bool serviceBusy() const { return m_serviceBusy; }
     bool loggingEnabled() const { return m_loggingEnabled; }
+    int iosVersionIndex() const {
+        QSettings settings(QDir::homePath() + QStringLiteral("/.config/sailplay/projection.ini"), QSettings::IniFormat);
+        const int version = settings.value(QStringLiteral("CarPlay/iosVersion"), 17).toInt();
+        return version == 9 ? 0 : version == 27 ? 2 : 1;
+    }
+    Q_INVOKABLE bool setIosVersion(int index) {
+        if (index < 0 || index > 2) return false;
+        const int versions[] = {9, 17, 27};
+        const QString path = QDir::homePath() + QStringLiteral("/.config/sailplay/projection.ini");
+        if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
+        QSettings settings(path, QSettings::IniFormat);
+        settings.setValue(QStringLiteral("CarPlay/iosVersion"), versions[index]);
+        settings.sync();
+        if (settings.status() != QSettings::NoError) return false;
+        emit iosVersionChanged();
+        return true;
+    }
     Q_INVOKABLE bool setLoggingEnabled(bool enabled) {
         const QString path = diagnosticsConfigPath();
         if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
@@ -1356,6 +1374,7 @@ signals:
     void currentAppChanged();
     void serviceRunningChanged();
     void loggingEnabledChanged();
+    void iosVersionChanged();
     void statusChanged();
 
 private:

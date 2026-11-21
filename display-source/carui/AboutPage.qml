@@ -50,6 +50,37 @@ Page {
                 font.pixelSize: Theme.fontSizeSmall
                 color: Theme.secondaryColor
             }
+            ComboBox {
+                id: iosVersionComboBox
+                objectName: "sailplayIosVersionComboBox"
+                visible: aboutPage.diagnosticsUnlocked
+                width: parent.width
+                label: qsTranslate("Sailplay", "CarPlay iOS compatibility")
+                currentIndex: carController.iosVersionIndex
+                function selectVersion(index) {
+                    aboutPage.diagnosticTapCount = 10
+                    diagnosticError.text = carController.setIosVersion(index) ? ""
+                        : qsTranslate("Sailplay", "Could not save iOS compatibility setting")
+                    currentIndex = carController.iosVersionIndex
+                }
+                menu: ContextMenu {
+                    MenuItem { text: "iOS 9"; onClicked: iosVersionComboBox.selectVersion(0) }
+                    MenuItem { text: "iOS 17"; onClicked: iosVersionComboBox.selectVersion(1) }
+                    MenuItem { text: qsTranslate("Sailplay", "iOS 27 (experimental)"); onClicked: iosVersionComboBox.selectVersion(2) }
+                }
+                Connections {
+                    target: carController
+                    onIosVersionChanged: iosVersionComboBox.currentIndex = carController.iosVersionIndex
+                }
+            }
+            Label {
+                visible: aboutPage.diagnosticsUnlocked
+                x: Theme.horizontalPageMargin; width: parent.width - 2 * x
+                wrapMode: Text.WordWrap
+                font.pixelSize: Theme.fontSizeSmall
+                color: Theme.secondaryColor
+                text: qsTranslate("Sailplay", "Reconnect to apply. iOS 27 uses the experimental build identity 24A1.")
+            }
             TextSwitch {
                 objectName: "sailplayLoggingSwitch"
                 visible: aboutPage.diagnosticsUnlocked

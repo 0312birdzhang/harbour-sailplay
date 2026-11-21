@@ -639,6 +639,22 @@ Lancez la musique sur votre téléphone</translation>
       <source>Could not save diagnostic logging setting</source>
       <translation>Impossible d’enregistrer le réglage des journaux de diagnostic</translation>
     </message>
+    <message>
+      <source>CarPlay iOS compatibility</source>
+      <translation>Compatibilité iOS de CarPlay</translation>
+    </message>
+    <message>
+      <source>Could not save iOS compatibility setting</source>
+      <translation>Impossible d’enregistrer le réglage de compatibilité iOS</translation>
+    </message>
+    <message>
+      <source>iOS 27 (experimental)</source>
+      <translation>iOS 27 (expérimental)</translation>
+    </message>
+    <message>
+      <source>Reconnect to apply. iOS 27 uses the experimental build identity 24A1.</source>
+      <translation>Reconnectez-vous pour appliquer. iOS 27 utilise l’identifiant de build expérimental 24A1.</translation>
+    </message>
   </context>
   <context>
     <name>CarUiController</name>
