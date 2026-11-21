@@ -75,6 +75,9 @@ def main():
                     runtime = time.monotonic() - started[index]
                     logging.info('Projection backend exited executable=%s status=%d runtimeSeconds=%.1f',
                                  command[1], child.returncode, runtime)
+                    if child.returncode < 0:
+                        logging.error('Projection backend killed executable=%s signal=%d',
+                                      command[1], -child.returncode)
                     if runtime >= 60:
                         failures[index] = 0
                     retry(index)

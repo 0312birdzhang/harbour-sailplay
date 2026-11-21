@@ -66,6 +66,13 @@
 
 namespace {
 
+volatile sig_atomic_t g_stopRequested = 0;
+
+void requestStop(int)
+{
+    g_stopRequested = 1;
+}
+
 struct ShmHeader {
     quint32 magic;
     quint32 seq;
@@ -731,7 +738,7 @@ public:
     {
         fprintf(stderr, "imira-comp: surface created (%s)\n",
                 qPrintable(surface->className()));
-        QObject::connect(surface, &QWaylandSurface::mapped, [this, surface]() {
+        QObject::connect(surface, &QWaylandSurface::mapped, &m_surfaceCallbacks, [this, surface]() {
             // Cover windows are the little home-screen cards — they belong
             // to the phone's launcher, not onto the TV desktop.
             const QString title = surface->title();
@@ -763,8 +770,10 @@ public:
                     m_dock->setVisible(false);
                 m_shellItem = item;
                 QObject::connect(surface, &QWaylandSurface::unmapped,
+                                 &m_surfaceCallbacks,
                                  [this]() { m_shellItem = nullptr; });
                 QObject::connect(surface, &QWaylandSurface::surfaceDestroyed,
+                                 &m_surfaceCallbacks,
                                  [this]() { m_shellItem = nullptr; });
                 fprintf(stderr, "imira-comp: car-UI shell fullscreen %dx%d\n",
                         m_width, m_height);
@@ -776,7 +785,10 @@ public:
                 item->setParentItem(m_window->contentItem());
                 item->setZ(100000);
                 m_inputPanels.append(item);
-                auto fit = [this, item]() {
+                QPointer<QWaylandSurfaceItem> panel(item);
+                auto fit = [this, panel]() {
+                    if (!panel || !panel->surface()) return;
+                    QWaylandSurfaceItem *item = panel.data();
                     const QSize size = item->surface()->size();
                     if (size.isEmpty()) return;
                     item->setSize(QSizeF(size));
@@ -796,14 +808,16 @@ public:
                     [updateRegion](const QString &name, const QVariant &) {
                         if (name == QLatin1String("MOUSE_REGION")) updateRegion();
                     });
-                QObject::connect(surface, &QWaylandSurface::sizeChanged, item, fit);
-                auto remove = [this, item]() {
+                QObject::connect(surface, &QWaylandSurface::sizeChanged, &m_surfaceCallbacks, fit);
+                auto remove = [this, panel]() {
+                    if (!panel) return;
+                    QWaylandSurfaceItem *item = panel.data();
                     m_inputPanels.removeAll(item);
                     item->setVisible(false);
                     item->deleteLater();
                 };
-                QObject::connect(surface, &QWaylandSurface::unmapped, item, remove);
-                QObject::connect(surface, &QWaylandSurface::surfaceDestroyed, item, remove);
+                QObject::connect(surface, &QWaylandSurface::unmapped, &m_surfaceCallbacks, remove);
+                QObject::connect(surface, &QWaylandSurface::surfaceDestroyed, &m_surfaceCallbacks, remove);
                 fprintf(stderr, "imira-comp: private input-method overlay mapped\n");
                 return;
             }
@@ -830,8 +844,12 @@ public:
             surface->setProperty("sailplayViewportReady", false);
             surface->setProperty("sailplayRequestedSize", QSize());
             syncContent(item);
+            QPointer<QWaylandSurfaceItem> watchedItem(item);
             QObject::connect(surface, &QWaylandSurface::sizeChanged,
-                             [this, item]() {
+                             &m_surfaceCallbacks,
+                             [this, watchedItem]() {
+                if (!watchedItem || !watchedItem->surface()) return;
+                QWaylandSurfaceItem *item = watchedItem.data();
                 QWaylandSurface *surface = item->surface();
                 const QSize full(m_width - kDockW, m_height);
                 if (surface->property("sailplayMapBootstrap").toBool()
@@ -869,7 +887,7 @@ public:
             // after that transaction has settled.
             QPointer<QWaylandSurfaceItem> pendingItem(item);
             QPointer<QWaylandSurface> pendingSurface(surface);
-            QTimer::singleShot(120, m_window, [this, pendingItem, pendingSurface]() {
+            QTimer::singleShot(120, &m_surfaceCallbacks, [this, pendingItem, pendingSurface]() {
                 if (!pendingItem || !pendingSurface) return;
                 for (const ContentWin &c : m_content) {
                     if (c.item != pendingItem.data()) continue;
@@ -891,14 +909,14 @@ public:
             QTimer::singleShot(1000, m_window, [pendingItem]() {
                 if (pendingItem) pendingItem->setOpacity(1);
             });
-            QObject::connect(surface, &QWaylandSurface::unmapped,
-                             [this, item]() { removeContent(item); });
-            QObject::connect(surface, &QWaylandSurface::surfaceDestroyed,
-                             [this, item]() { removeContent(item); });
+            QObject::connect(surface, &QWaylandSurface::unmapped, &m_surfaceCallbacks,
+                             [this, pendingItem]() { if (pendingItem) removeContent(pendingItem.data()); });
+            QObject::connect(surface, &QWaylandSurface::surfaceDestroyed, &m_surfaceCallbacks,
+                             [this, pendingItem]() { if (pendingItem) removeContent(pendingItem.data()); });
             // Belt and braces: whatever path tears the surface object down,
             // the entry must never outlive it.
-            QObject::connect(surface, &QObject::destroyed,
-                             [this, item](QObject *) { removeContent(item); });
+            QObject::connect(surface, &QObject::destroyed, &m_surfaceCallbacks,
+                             [this, pendingItem](QObject *) { if (pendingItem) removeContent(pendingItem.data()); });
             fprintf(stderr,
                     "imira-comp: carlife content '%s' %dx%d at x=%d\n",
                     qPrintable(title), m_width - kDockW, m_height, kDockW);
@@ -1403,6 +1421,8 @@ private:
     int m_nextContentZ = 10;
     quint64 m_hideSerial = 0;
     qint64 m_cmdOff = 0;
+    // Disconnect callbacks before derived members and base-owned surfaces die.
+    QObject m_surfaceCallbacks;
 };
 
 // Task-bar half of the dock (needs the full Compositor type).
@@ -1925,12 +1945,23 @@ int main(int argc, char *argv[])
 
     // A killed compositor must not leave a stale frame buffer behind — a
     // reader latching onto it would stream one frozen frame forever.
-    signal(SIGTERM, [](int) { QCoreApplication::quit(); });
-    signal(SIGINT, [](int) { QCoreApplication::quit(); });
+    signal(SIGTERM, requestStop);
+    signal(SIGINT, requestStop);
+    QTimer shutdownTimer;
+    QObject::connect(&shutdownTimer, &QTimer::timeout, &app, [&app]() {
+        if (g_stopRequested) app.quit();
+    });
+    shutdownTimer.start(50);
 
     fprintf(stderr, "imira-comp: %dx%d@%d on wayland socket imira-comp-0\n",
             width, height, fps);
     int rc = app.exec();
+    frameTimer.stop();
+    ambienceTimer.stop();
+    statusTimer.stop();
+    context.makeCurrent(&offscreen);
+    renderControl.invalidate();
+    fprintf(stderr, "imira-comp: event loop stopped status=%d signal=%d\n", rc, int(g_stopRequested));
     shm_unlink(kShmName);
     return rc;
 }

@@ -41,6 +41,8 @@
 #include <QSurfaceFormat>
 #include <QThread>
 
+#include <MDConfItem>
+
 #include <algorithm>
 #include <clocale>
 #include <cstdio>
@@ -125,7 +127,9 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
   application->setOrganizationName("app.organicmaps");
   application->setApplicationName("organicmaps");
   std::setlocale(LC_NUMERIC, "C");
-  Check(argc == 2, "pass the installed or candidate QML directory");
+  Check(argc == 2 || (argc == 3 && QString::fromLocal8Bit(argv[2]) == "--appearance-only"),
+        "pass the QML directory and optional --appearance-only");
+  bool const appearanceOnly = argc == 3;
   Check(!qEnvironmentVariableIsEmpty("MWM_WRITABLE_DIR"), "use an isolated writable profile");
   auto const writable = QDir(QString::fromUtf8(qgetenv("MWM_WRITABLE_DIR"))).absolutePath();
   Check(writable.startsWith("/tmp/sailplay-map-device."), "writable profile must be this fixture's temporary directory");
@@ -162,11 +166,59 @@ __attribute__((visibility("default"))) int OrganicMapsMain(int argc, char * argv
   sailfish::PhonePresentation presentation(QUrl::fromLocalFile(qmlRoot + "/organicmaps.qml"), setup);
   QQmlEngine backendEngine;
   setup(backendEngine.rootContext());
+  framework.SetMapStyle(GetLightMapStyleVariant(framework.GetMapStyle()));
   QQmlComponent backendComponent(&backendEngine, QUrl::fromLocalFile(qmlRoot + "/Backend.qml"));
   std::unique_ptr<QObject> backendObject(backendComponent.create());
   Check(backendObject != nullptr, "windowless backend QML failed");
   Check(!framework.IsDrapeEngineCreated() && mapCore.window() == nullptr, "cold backend created a renderer");
   Check(!mapCore.trackRecording(), "isolated profile already has a recording");
+
+  MDConfItem colorScheme(QStringLiteral("/desktop/jolla/theme/color_scheme"));
+  bool const ambienceDark = colorScheme.value(0).toInt() == 0;
+  auto const checkAppearance = [&](bool dark)
+  {
+    Check(MapStyleIsDark(framework.GetMapStyle()) == dark, "headless backend applied the wrong map appearance");
+    Check(appSettings.mapIsDark() == dark, "phone appearance differs from the shared map");
+  };
+  checkAppearance(ambienceDark);
+  appSettings.setMapAppearance(sailfish::AppSettings::AppearanceLight);
+  checkAppearance(false);
+  appSettings.setMapAppearance(sailfish::AppSettings::AppearanceDark);
+  checkAppearance(true);
+  appSettings.setMapAppearance(sailfish::AppSettings::AppearanceScheduled);
+  checkAppearance(mapCore.routing()->darkOutside());
+  appSettings.setMapAppearance(sailfish::AppSettings::AppearanceAuto);
+  checkAppearance(ambienceDark);
+  Check(!framework.IsDrapeEngineCreated() && !presentation.isOpen(), "appearance settings created a phone view");
+  std::puts("MAP_HEADLESS_APPEARANCE_PASS cold-auto explicit-light explicit-dark scheduled shared-state");
+
+  if (appearanceOnly)
+  {
+    sailfish::SailplayMapCanvas canvas(mapCore, presentation);
+    QByteArray image;
+    bool engineCreated = false;
+    QObject::connect(&mapCore, &sailfish::MapItem::engineCreated, [&]
+    {
+      checkAppearance(ambienceDark);
+      engineCreated = true;
+    });
+    auto const fetch = [&] { image = canvas.Frame(QSize(640, 360)).value("image").toByteArray(); };
+    QTimer requests;
+    QObject::connect(&requests, &QTimer::timeout, fetch);
+    requests.start(200);
+    fetch();
+    WaitFor([&] { return !image.isEmpty(); }, 60000);
+    Check(engineCreated && !presentation.isOpen(), "first car frame required a phone view");
+    checkAppearance(ambienceDark);
+    Check(presentation.Show(), "phone QML failed to open over the car canvas");
+    for (auto * window : QGuiApplication::allWindows()) window->hide();
+    checkAppearance(ambienceDark);
+    presentation.Close();
+    checkAppearance(ambienceDark);
+    requests.stop();
+    std::printf("MAP_FIRST_FRAME_APPEARANCE_PASS dark=%d bytes=%d phone-open-close\n", ambienceDark, image.size());
+    return EXIT_SUCCESS;
+  }
 
   int engines = 0;
   int recordingUpdates = 0;

@@ -1,6 +1,7 @@
 """Route native Sailfish calls to the authenticated projection head unit."""
 import os
 import threading
+import time
 
 from .bluezadapter import resolve_device
 from .networkdbus import network_interface, network_object
@@ -21,7 +22,8 @@ class CallAudioRouter:
         self.thread = None
         self.call_ids = ()
         self.attempts = 0
-        self.profile_ready = False
+        self.profile_requested = False
+        self.profile_retry_at = 0
         self.profile_device = None
         self.profile_owner = None
         self.allowed_once = False
@@ -45,8 +47,9 @@ class CallAudioRouter:
             features = self.routes.GetAll()[4]
             if self.call_properties().get('voiceCalls'):
                 return False
-            if any(str(name) == BLUETOOTH_OVERRIDE and enabled for name, allowed, enabled in features):
-                self.routes.Disable(BLUETOOTH_OVERRIDE)
+            if any(str(name) == BLUETOOTH_OVERRIDE and allowed and not enabled
+                   for name, allowed, enabled in features):
+                self.routes.Enable(BLUETOOTH_OVERRIDE)
             self.owns_override = False
         if self.profile_device:
             if self.call_properties().get('voiceCalls'):
@@ -63,7 +66,8 @@ class CallAudioRouter:
                                     'org.freedesktop.DBus.Error.UnknownObject'):
                         raise
             self.profile_device = self.profile_owner = None
-        self.profile_ready = False
+        self.profile_requested = False
+        self.profile_retry_at = 0
         self.applied = False
         self.allowed_once = False
         self.attempts = 0
@@ -94,14 +98,12 @@ class CallAudioRouter:
         if other_headsets:
             self.report('Call audio automatic routing deferred: another HFP device is connected')
             return
-        if self.profile_ready and not device_properties.get('Connected'):
-            self.profile_ready = False
+        if self.profile_requested and not device_properties.get('Connected'):
+            self.profile_requested = False
             self.applied = False
-            self.attempts = 0
-        if not self.profile_ready:
-            if self.attempts >= 3:
-                return
+        if not self.profile_requested and self.attempts < 3 and time.monotonic() >= self.profile_retry_at:
             self.attempts += 1
+            self.profile_retry_at = time.monotonic() + 6
             device = network_interface(network_object(self.system, 'org.bluez', target), 'org.bluez.Device1')
             owner = self.system.get_name_owner('org.bluez')
             try:
@@ -113,8 +115,8 @@ class CallAudioRouter:
                     self.report('Call audio HFP connection attempt={} target={} error={}'.format(
                         self.attempts, target, name))
                     return
-            self.profile_ready = True
-            self.report('Call audio HFP connected target={}'.format(target))
+            self.profile_requested = True
+            self.report('Call audio HFP request accepted attempt={} target={}'.format(self.attempts, target))
         if self.stop.is_set():
             return
         # Connecting a profile can outlast the call which requested it.
@@ -127,22 +129,29 @@ class CallAudioRouter:
                                  if str(name) == BLUETOOTH_OVERRIDE), (False, False))
         if self.allowed_once and not allowed:
             # HFP can disappear while another profile keeps the ACL connected.
-            self.profile_ready = False
+            self.profile_requested = False
             self.applied = False
             self.attempts = 0
+            self.profile_retry_at = 0
+        elif not allowed and time.monotonic() >= self.profile_retry_at:
+            # An accepted request does not establish native call audio support.
+            self.profile_requested = False
         self.allowed_once = allowed
-        if not self.applied and allowed and properties.get('isAudioRouted'):
-            # The stock call UI disables bluetooth_override when the user
-            # chooses the phone. Apply our automatic selection once per call.
+        if not self.applied and allowed and device_properties.get('Connected') and properties.get('isAudioRouted'):
+            # bluetooth_override selects the phone. The stock Bluetooth call
+            # switch disables this feature to enable headset output and input.
+            # Apply our automatic selection once per call.
             if properties.get('audioMode') == 'ihf':
                 self.applied = True
             else:
-                if not enabled:
+                if enabled:
                     self.owns_override = True
-                    self.routes.Enable(BLUETOOTH_OVERRIDE)
+                    self.routes.Disable(BLUETOOTH_OVERRIDE)
                 self.applied = True
-        self.report('Call audio route target={} output={} input={} BluetoothAllowed={} BluetoothEnabled={}'.format(
-            target, output, microphone, allowed, enabled))
+        self.report('Call audio route target={} output={} input={} BluetoothAllowed={} PhoneOverride={} '
+                    'ACLConnected={} HFPRequested={} HFPAttempts={}'.format(
+                        target, output, microphone, allowed, enabled, bool(device_properties.get('Connected')),
+                        self.profile_requested, self.attempts))
 
     def run(self):
         import dbus

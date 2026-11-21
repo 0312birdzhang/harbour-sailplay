@@ -314,6 +314,24 @@ class WirelessTests(unittest.TestCase):
 
 
 class NegotiationTests(unittest.TestCase):
+    def test_disconnect_summary_retains_sent_frames_and_matching_acknowledgements(self):
+        service = Discovery(discovery_payload()).video
+        producer, transport = FakeProducer(), FakeTransport()
+        media = MediaChannel(service, service.configs[0], producer)
+        media.configure(field(1, 2) + field(2, 2) + field(3, 0))
+        media.start(transport)
+        producer.queue.put((producer.generation, b'config', b'frame', 123))
+        media.pump(transport)
+        media.pump(transport)
+        media.acknowledge(field(1, media.session_id + 1) + field(2, 2))
+        self.assertEqual(media.acknowledged, 0)
+        media.acknowledge(field(1, media.session_id) + field(2, 1))
+        with self.assertLogs(level='INFO') as diagnostics:
+            media.close()
+        summary = '\n'.join(diagnostics.output)
+        self.assertIn('kind=video channel=17', summary)
+        self.assertIn('framesSent=1 acknowledged=1 unacked=1', summary)
+
     def test_delayed_acknowledgements_preserve_a_progressing_media_window(self):
         service = Discovery(discovery_payload()).video
         media = MediaChannel(service, service.configs[0], FakeProducer())

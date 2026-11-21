@@ -354,6 +354,7 @@ class MediaChannel:
         self.pending_generation = None
         self.allowed_indices = []
         self.frames_sent = 0
+        self.acknowledged = 0
         self.last_acknowledged_at = 0
 
     def configure(self, payload):
@@ -398,6 +399,7 @@ class MediaChannel:
             raise ValueError('invalid Android Auto media acknowledgement')
         if count and self.sent:
             self.last_acknowledged_at = time.monotonic()
+        self.acknowledged += min(count, len(self.sent))
         for _ in range(min(count, len(self.sent))):
             self.sent.popleft()
 
@@ -435,4 +437,9 @@ class MediaChannel:
         return True
 
     def close(self):
+        logging.info('Android Auto media closing kind=%s channel=%d configured=%s started=%s '
+                     'framesSent=%d acknowledged=%d unacked=%d window=%d pending=%d producerError=%r',
+                     self.service.kind, self.service.id, self.configured, self.started,
+                     self.frames_sent, self.acknowledged, len(self.sent), self.max_unacked,
+                     len(self.pending), self.producer.error)
         self.producer.close()

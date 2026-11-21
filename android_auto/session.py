@@ -101,6 +101,8 @@ class Session:
         media = MediaChannel(service, selected, producer)
         self.media[channel] = media
         media.configure(payload)
+        logging.info('Android Auto media configured kind=%s channel=%d codec=%d config=%s ackWindow=%d',
+                     service.kind, channel, service.codec, selected, media.max_unacked)
         if service.kind == 'video':
             if self.publish is not None:
                 self.publish(display)
@@ -124,6 +126,8 @@ class Session:
         if mode not in (1, 2, 3, 4):
             raise ValueError('invalid Android Auto video focus mode')
         self.video_focus, self.input_focus = mode in (1, 4), mode == 1
+        logging.info('Android Auto video focus mode=%d video=%s input=%s',
+                     mode, self.video_focus, self.input_focus)
         video = self.media.get(self.discovery.video.id)
         if not self.input_focus and self.input is not None:
             self.input.release()
@@ -141,6 +145,7 @@ class Session:
         if mode not in range(1, 8):
             raise ValueError('invalid Android Auto audio focus mode')
         self.audio_focus = mode in (1, 2, 4, 6, 7)
+        logging.info('Android Auto audio focus mode=%d active=%s', mode, self.audio_focus)
         if self.discovery.audio is None:
             return
         audio = self.media.get(self.discovery.audio.id)

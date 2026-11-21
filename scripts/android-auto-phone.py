@@ -401,4 +401,8 @@ def main():
 if __name__ == '__main__':
     from carplay_proto.runtime_logging import configure
     configure('android-auto')
-    main()
+    try:
+        main()
+    except Exception:
+        logging.exception('Android Auto backend main loop failed')
+        raise SystemExit(1)
