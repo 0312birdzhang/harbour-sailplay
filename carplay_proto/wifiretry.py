@@ -3,21 +3,34 @@ import time
 
 
 class HandoverRetry:
-    """Retry a failed Wi-Fi handover while its authenticated Bluetooth link lives."""
-    def __init__(self, active, launch, clock=time.monotonic, interval=10):
+    """Retry a failed Wi-Fi handover while its authenticated Bluetooth link lives.
+
+    The first retry keeps the short interval the WPA2 fallback relies on.
+    Later ones back off: a head unit that sees a rapid series of failed
+    handovers can stop offering CarPlay to the phone until it has slept.
+    """
+    def __init__(self, active, launch, clock=time.monotonic, interval=10, maximum=60):
         self.active, self.launch, self.clock = active, launch, clock
         self.interval = interval
+        self.maximum = maximum
+        self.failures = 0
         self.deadline = None
 
+    def delay(self):
+        return min(self.maximum, self.interval * 2 ** self.failures)
+
     def arm(self):
-        self.deadline = self.clock() + self.interval
+        self.deadline = self.clock() + self.delay()
 
     def poll(self):
         if self.deadline is None or self.clock() < self.deadline:
             return False
-        self.arm()
         if self.active():
+            self.failures = 0
+            self.arm()
             return False
+        self.failures += 1
+        self.arm()
         self.launch()
         return True
 

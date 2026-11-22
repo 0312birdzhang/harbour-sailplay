@@ -25,9 +25,38 @@ class RetryTests(unittest.TestCase):
         self.assertTrue(retry.poll())
         self.assertFalse(retry.poll())
         launch.assert_called_once_with()
-        now[0] = 120
+        now[0] = 129
+        self.assertFalse(retry.poll())
+        now[0] = 130
         self.assertTrue(retry.poll())
         self.assertEqual(launch.call_count, 2)
+
+    def test_repeated_failures_back_off_to_a_bounded_interval(self):
+        now = [0]
+        launches = []
+        retry = HandoverRetry(lambda: False, lambda: launches.append(now[0]), clock=lambda: now[0])
+        retry.arm()
+        for now[0] in range(1, 181):
+            retry.poll()
+        self.assertEqual(launches, [10, 30, 70, 130])
+        self.assertEqual(retry.delay(), 60)
+
+    def test_active_media_resets_the_backoff(self):
+        now = [0]
+        active, launch = Mock(return_value=False), Mock()
+        retry = HandoverRetry(active, launch, clock=lambda: now[0])
+        retry.arm()
+        for now[0] in (10, 30):
+            self.assertTrue(retry.poll())
+        active.return_value = True
+        now[0] = 70
+        self.assertFalse(retry.poll())
+        active.return_value = False
+        now[0] = 79
+        self.assertFalse(retry.poll())
+        now[0] = 80
+        self.assertTrue(retry.poll())
+        self.assertEqual(launch.call_count, 3)
 
     def test_active_media_is_never_restarted_by_retry(self):
         now = [100]
