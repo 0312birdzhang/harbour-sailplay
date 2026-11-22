@@ -80,6 +80,7 @@ install -m 0644 display-source/carui/MapDestinationPanel.qml %{buildroot}/opt/sa
 install -m 0644 display-source/carui/MapBookmarkIcon.qml %{buildroot}/opt/sailplay/carui/MapBookmarkIcon.qml
 install -m 0644 display-source/carui/ContentPage.qml %{buildroot}/opt/sailplay/carui/ContentPage.qml
 install -m 0644 display-source/carui/MusicPlayer.qml %{buildroot}/opt/sailplay/carui/MusicPlayer.qml
+install -m 0644 display-source/carui/MusicPage.qml %{buildroot}/opt/sailplay/carui/MusicPage.qml
 install -m 0644 display-source/carui/mobile-settings.qml %{buildroot}/opt/sailplay/carui/mobile-settings.qml
 install -m 0644 display-source/carui/AboutPage.qml %{buildroot}/opt/sailplay/carui/AboutPage.qml
 install -m 0644 display-source/carui/AppSelectionPage.qml %{buildroot}/opt/sailplay/carui/AppSelectionPage.qml

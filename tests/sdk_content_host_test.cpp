@@ -119,6 +119,9 @@ int main(int argc, char **argv)
     declaration.presentation = "template";
     declaration.capabilities = QStringList{"content"};
     SailplayContentHost host;
+    QStringList activated;
+    QObject::connect(&host, &SailplayContentHost::itemActivated, &app,
+                     [&](const QString &id) { activated.append(id); });
     host.open(declaration, "Content");
     CHECK(waitFor([&]() { return host.ready() && host.items().size() == 1; }));
     CHECK(host.applicationId() == "native-content-shortcut");
@@ -149,6 +152,14 @@ int main(int argc, char **argv)
     CHECK(host.page().value("id") == "root");
     host.action("stop");
     CHECK(waitFor([&]() { return !host.busy() && host.page().value("message") == "Stopped"; }));
+    // Folders and page controls are not activations; a list item's action is.
+    CHECK(activated.isEmpty());
+    host.select("library");
+    CHECK(waitFor([&]() { return !host.busy() && host.items().size() == 50; }));
+    CHECK(activated.isEmpty());
+    host.select("7");
+    CHECK(waitFor([&]() { return !host.busy() && activated.size() == 1; }));
+    CHECK(activated.first() == "7");
     host.setActive(false);
     CHECK(waitFor([&]() { return provider.sessionCount() == 1 && provider.activeSessionCount() == 0; }));
 

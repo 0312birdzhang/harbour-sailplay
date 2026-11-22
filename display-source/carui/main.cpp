@@ -529,7 +529,10 @@ class CarUiController : public QObject
     Q_PROPERTY(QString lastMusicApp READ lastMusicApp NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString musicError READ musicError NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString lastMusicName READ lastMusicName NOTIFY rememberedMusicChanged)
-    Q_PROPERTY(bool musicContentAvailable READ musicContentAvailable NOTIFY rememberedMusicChanged)
+    Q_PROPERTY(QString musicPageApp READ musicPageApp NOTIFY musicPageChanged)
+    Q_PROPERTY(QString musicPageName READ musicPageName NOTIFY musicPageChanged)
+    Q_PROPERTY(QString musicPageIcon READ musicPageIcon NOTIFY musicPageChanged)
+    Q_PROPERTY(bool musicPageContentAvailable READ musicPageContentAvailable NOTIFY musicPageChanged)
     Q_PROPERTY(QString dashboardMapApp READ dashboardMapApp NOTIFY dashboardSettingsChanged)
     Q_PROPERTY(QObject *navigation READ navigation CONSTANT)
     Q_PROPERTY(QObject *content READ content CONSTANT)
@@ -543,6 +546,13 @@ public:
           m_content(new SailplayContentHost(this)), m_music(new SailplayMusicHost(this))
     {
         m_loggingEnabled = diagnosticLoggingEnabled();
+        // Choosing a track in a music app's browse page returns to the split
+        // dashboard, where the player card shows what was just started.
+        connect(m_content, &SailplayContentHost::itemActivated, this, [this]() {
+            if (contentActive() && isMusicApp(m_currentApp)) openDashboard();
+        });
+        // Without a chosen app the page follows the remembered player.
+        connect(this, &CarUiController::rememberedMusicChanged, this, &CarUiController::musicPageChanged);
         connect(this, &CarUiController::currentAppChanged, this, [this]() {
             m_music->setActive(m_musicActive || m_dashboardActive);
             m_content->setActive(contentActive());
@@ -776,6 +786,11 @@ public:
         return !musicApplicationId(state.value(QStringLiteral("MusicApp")).toString()).isEmpty();
     }
     Q_INVOKABLE QString preferredMusicService(const QStringList &services) const {
+        return musicServiceFor(lastMusicApp(), services);
+    }
+    // The MPRIS service published by one music app, whatever is playing.
+    Q_INVOKABLE QString musicServiceFor(const QString &appId, const QStringList &services) const {
+        if (appId.isEmpty()) return QString();
         for (const QString &service : services) {
             if (!service.startsWith(QStringLiteral("org.mpris.MediaPlayer2."))) continue;
             QDBusMessage get = QDBusMessage::createMethodCall(service, QStringLiteral("/org/mpris/MediaPlayer2"),
@@ -785,7 +800,7 @@ public:
             if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) continue;
             QString id = qvariant_cast<QDBusVariant>(reply.arguments().first()).variant().toString();
             if (id.endsWith(QStringLiteral(".desktop"))) id.chop(8);
-            if (musicApplicationId(id) == lastMusicApp()) return service;
+            if (musicApplicationId(id) == appId) return service;
         }
         return QString();
     }
@@ -862,13 +877,36 @@ public:
         m_musicActive = true;
         emit currentAppChanged();
     }
-    Q_INVOKABLE void browseMusic() {
-        const AvailableApp *app = findAvailable(lastMusicApp());
-        if (app && app->sdk.contentTemplate()) openContent(*app);
+    // The full-screen music page belongs to one app: the one whose tile was
+    // tapped, or the one that was playing when the dashboard card was tapped.
+    QString musicPageApp() const { return m_musicPageApp.isEmpty() ? lastMusicApp() : m_musicPageApp; }
+    QString musicPageName() const {
+        const AvailableApp *app = findAvailable(musicPageApp());
+        return app ? app->name : QString();
     }
-    bool musicContentAvailable() const {
-        const AvailableApp *app = findAvailable(lastMusicApp());
+    QString musicPageIcon() const {
+        const AvailableApp *app = findAvailable(musicPageApp());
+        return app ? app->icon : QString();
+    }
+    bool musicPageContentAvailable() const {
+        const AvailableApp *app = findAvailable(musicPageApp());
         return app && app->sdk.contentTemplate();
+    }
+    void setMusicPageApp(const QString &id) {
+        if (id == m_musicPageApp) return;
+        m_musicPageApp = id;
+        emit musicPageChanged();
+    }
+    Q_INVOKABLE void openMusicFor(const QString &desktopEntry) {
+        QString id = desktopEntry;
+        if (id.endsWith(QStringLiteral(".desktop"))) id.chop(8);
+        id = musicApplicationId(id);
+        setMusicPageApp(id.isEmpty() ? lastMusicApp() : id);
+        openMusic();
+    }
+    Q_INVOKABLE void browseMusic() {
+        const AvailableApp *app = findAvailable(musicPageApp());
+        if (app && app->sdk.contentTemplate()) openContent(*app);
     }
     QString musicError() const { return m_musicError; }
     Q_INVOKABLE bool ensureMusicBackend(const QString &requestedId = QString()) {
@@ -1364,6 +1402,7 @@ signals:
     void playerPositionAvailable(const QString &service, const QString &trackKey, double seconds);
     void themeSettingsChanged();
     void rememberedMusicChanged();
+    void musicPageChanged();
     void dashboardSettingsChanged();
     void artworkAvailable(const QString &key, const QUrl &localUrl);
     void projectionSettingsChanged();
@@ -1573,6 +1612,7 @@ private:
     QString m_serviceState = QStringLiteral("unknown");
     QString m_serviceError;
     QString m_musicError;
+    QString m_musicPageApp;
     bool m_serviceQueryPending = false;
     bool m_reconnectPending = false;
     bool m_reconnectQueryPending = false;
@@ -1667,6 +1707,7 @@ private:
         if (!available || !available->sdk.valid) return;
         if (isMusicApp(appId) && !(available && available->sdk.renderer())) {
             ensureMusicBackend(appId);
+            setMusicPageApp(appId);
             moveToFront(appId);
             openMusic();
             emit dockChanged();

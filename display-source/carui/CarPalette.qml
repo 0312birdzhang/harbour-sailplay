@@ -21,4 +21,16 @@ QtObject {
     readonly property color inactiveDot: day ? "#8294aa" : "#788193"
     readonly property color batteryCap: day ? "#657a94" : "#aeb5c5"
     readonly property color notice: day ? "#f5faff" : "#ed111a2c"
+
+    // Ambience roles. Each carries the name of the Silica Theme colour it
+    // stands for, and pages written against them use nothing else from this
+    // palette. Following the phone ambience later means rebinding these seven
+    // lines to Theme.primaryColor and its siblings, not touching the pages.
+    readonly property color primaryColor: text
+    readonly property color secondaryColor: secondary
+    readonly property color highlightColor: day ? "#1f5f9e" : "#9fd0ff"
+    readonly property color secondaryHighlightColor: day ? "#4a7bb0" : "#86b4dc"
+    readonly property color highlightBackgroundColor: button
+    readonly property color highlightDimmerColor: background
+    readonly property color overlayBackgroundColor: card
 }

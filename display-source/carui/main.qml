@@ -161,21 +161,19 @@ Window {
         }
     }
     Item {
-        visible: carController.dashboardActive || carController.musicActive
+        visible: carController.dashboardActive
         x: dock.width; width: root.width - x; height: root.height
         // Horizontal design units scale with width; vertical spacing follows height.
         property real verticalGap: height * 16 / 720
         property real mapWidth: (width - 48) * 0.65
         Loader {
             id: weatherCard
-            visible: !carController.musicActive
             x: parent.mapWidth + 32; y: parent.verticalGap
             width: parent.width - parent.mapWidth - 48
             height: (parent.height - 3 * parent.verticalGap) * 0.35
             source: "WeatherCard.qml"
         }
         Rectangle {
-            visible: !carController.musicActive
             x: 0; y: parent.verticalGap; width: parent.mapWidth + 16; height: parent.height - 2 * parent.verticalGap
             radius: 22; color: carPalette.card
             Text { anchors.centerIn: parent; width: parent.width - 40; wrapMode: Text.WordWrap
@@ -198,9 +196,9 @@ Window {
         }
         Rectangle {
             id: musicCard
-            x: carController.musicActive ? 16 : parent.mapWidth + 32
-            y: carController.musicActive ? parent.verticalGap : weatherCard.y + weatherCard.height + parent.verticalGap
-            width: carController.musicActive ? parent.width - 32 : parent.width - parent.mapWidth - 48
+            x: parent.mapWidth + 32
+            y: weatherCard.y + weatherCard.height + parent.verticalGap
+            width: parent.width - parent.mapWidth - 48
             height: parent.height - y - parent.verticalGap
             radius: 22; color: carPalette.card
             property var player: lockscreenMusic.mprisController
@@ -214,21 +212,15 @@ Window {
                 target: carController
                 onArtworkAvailable: if (key === musicCard.artworkKey) musicCard.artwork = localUrl
             }
+            // The card follows whatever is playing; tapping it opens that app's page.
             function openMusic() {
-                carController.openMusic()
+                carController.openMusicFor(player ? String(player.desktopEntry || "") : "")
             }
             MouseArea { anchors.fill: parent; onClicked: musicCard.openMusic() }
-            Rectangle {
-                anchors.right: parent.right; anchors.rightMargin: 16; y: 12; z: 5
-                width: 164; height: 54; radius: 12; color: carPalette.button
-                visible: carController.musicActive && carController.musicContentAvailable
-                Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Browse"); font.pixelSize: 24; color: carPalette.text }
-                MouseArea { anchors.fill: parent; onClicked: carController.browseMusic() }
-            }
             MusicPlayer {
                 id: lockscreenMusic
-                compact: !carController.musicActive
-                width: Math.min(parent.width - 64, compact ? parent.width : 1000)
+                compact: true
+                width: parent.width - 64
                 x: (parent.width - width) / 2
                 y: Math.max(12, (musicCard.height - height - musicProgress.height - lyricsArea.height - 12) / 2)
                 albumArtSource: musicCard.artwork
@@ -237,7 +229,7 @@ Window {
             Item {
                 id: musicProgress
                 z: 2
-                x: lockscreenMusic.x; width: lockscreenMusic.width; height: carController.musicActive ? 100 : 72
+                x: lockscreenMusic.x; width: lockscreenMusic.width; height: 72
                 y: lockscreenMusic.y + lockscreenMusic.height + 4
                 visible: lockscreenMusic.visible && !lockscreenMusic.idleCard
                 property var player: lockscreenMusic.mprisController
@@ -302,7 +294,7 @@ Window {
                             Rectangle { x: parent.width * parent.progress - width / 2; y: (parent.height - height) / 2; width: 14; height: 14; radius: 7; color: carPalette.text }
                         }
                     }
-                    width: parent.width; height: carController.musicActive ? 72 : 56
+                    width: parent.width; height: 56
                     minimumValue: 0; maximumValue: Math.max(1, musicProgress.durationSeconds)
                     stepSize: 1
                     enabled: !!musicProgress.player && musicProgress.player.canSeek && musicProgress.durationSeconds > 0
@@ -316,12 +308,12 @@ Window {
                     }
                 }
                 Text {
-                    x: 8; y: carController.musicActive ? 76 : 58; color: carPalette.secondary; font.pixelSize: 24
+                    x: 8; y: 58; color: carPalette.secondary; font.pixelSize: 24
                     text: musicProgress.timeText(seekSlider.pressed ? seekSlider.value : musicProgress.positionSeconds)
                 }
                 Text {
                     anchors.right: parent.right; anchors.rightMargin: 8
-                    y: carController.musicActive ? 76 : 58; color: carPalette.secondary; font.pixelSize: 24
+                    y: 58; color: carPalette.secondary; font.pixelSize: 24
                     text: musicProgress.durationSeconds > 0 ? musicProgress.timeText(musicProgress.durationSeconds) : "--:--"
                 }
             }
@@ -329,7 +321,7 @@ Window {
                 id: lyricsArea
                 x: lockscreenMusic.x; width: lockscreenMusic.width
                 y: musicProgress.y + musicProgress.height + 8
-                height: currentLine.text ? (carController.musicActive ? 100 : 54) : 0
+                height: currentLine.text ? 54 : 0
                 clip: true
                 property var lines: []
                 property int offsetMs: 0
@@ -359,17 +351,10 @@ Window {
                 Text {
                     id: currentLine
                     width: parent.width; horizontalAlignment: Text.AlignHCenter
-                    color: carPalette.text; font.pixelSize: carController.musicActive ? 34 : 26
+                    color: carPalette.text; font.pixelSize: 26
                     elide: Text.ElideRight
                     text: lyricsArea.currentIndex >= 0 && lyricsArea.currentIndex < lyricsArea.lines.length
                         ? lyricsArea.lines[lyricsArea.currentIndex][1] : ""
-                }
-                Text {
-                    y: 48; width: parent.width; visible: carController.musicActive
-                    horizontalAlignment: Text.AlignHCenter; color: carPalette.secondary; font.pixelSize: 26
-                    elide: Text.ElideRight
-                    text: lyricsArea.currentIndex + 1 < lyricsArea.lines.length && lyricsArea.currentIndex >= 0
-                        ? lyricsArea.lines[lyricsArea.currentIndex + 1][1] : ""
                 }
             }
             Text {
@@ -387,6 +372,12 @@ Window {
                 MouseArea { anchors.fill: parent; onClicked: carController.ensureMusicBackend() }
             }
         }
+    }
+    MusicPage {
+        visible: carController.musicActive
+        x: dock.width + 16; y: 16
+        width: root.width - x - 16; height: root.height - 32
+        palette: carPalette
     }
     ContentPage {
         visible: carController.contentActive
