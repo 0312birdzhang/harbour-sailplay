@@ -27,7 +27,7 @@ from carplay_proto.iap2link import (ACK, DETECT, EAK, RST, SYN, Decoder,
                                    synchronization)
 from carplay_proto.wire import Frame, Framer, encode_param, parse_params
 from carplay_proto.accessoryauth import PinnedAccessory, paired_accessory
-from carplay_proto.wireless import (parse_wifi_configuration, offers_wireless_carplay,
+from carplay_proto.wireless import (parse_wifi_configuration, offers_wireless_carplay, WifiRequestWatch,
                                     peer_supports_wifi_configuration_request,
                                     request_wifi_configuration,
                                     parse_start_session, StartSession)
@@ -220,6 +220,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
     authenticated = False
     peer_received_messages = set()
     peer_sent_messages = set()
+    wifi_request = WifiRequestWatch()
     wifi_config = None
     navigation = NavigationSubscription()
     navigation_feed = ProviderNavigationFeed()
@@ -247,6 +248,9 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                 if status != navigation_status:
                     navigation_status = status
                     logging.info('navigation feed=%s state=%s maneuver=%s component=%s', *status)
+            if wifi_request.overdue():
+                logging.warning('head unit left the Wi-Fi configuration request (0x5702) unanswered for %d s; '
+                                'it is not offering wireless CarPlay on this link', wifi_request.patience)
             if not negotiated and now >= detection_deadline:
                 raise ValueError('iAP2 handshake timeout; release RFCOMM for retry')
             if sync_at and not local_syn_acked and now >= sync_at:
@@ -266,6 +270,8 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                 sequence = (sequence + 1) & 255
                 frame = outgoing.pop(0)
                 logging.info('CSM tx message=0x%04x body_bytes=%d', frame.message_id, len(frame.body))
+                if frame.message_id == 0x5702:
+                    wifi_request.requested()
                 pending = Packet(ACK, sequence, last_rx, session, frame.encoded())
                 retries = 0
                 retry_at = 0
@@ -508,6 +514,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                     if not authenticated:
                                         raise ValueError('Wi-Fi credentials arrived before authentication')
                                     config = parse_wifi_configuration(frame)
+                                    wifi_request.answered()
                                     wifi_config = config
                                     logging.info('accessory Wi-Fi configuration received: %r', config)
                                     # Some head units (Honda) never send
@@ -521,6 +528,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                     if not authenticated:
                                         raise ValueError('StartSession before authentication')
                                     start = parse_start_session(frame, wifi_config)
+                                    wifi_request.answered()
                                     logging.info('parsed CarPlay StartSession: %r', start)
                                     if session_out:
                                         write_session(start)

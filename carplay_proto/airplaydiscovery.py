@@ -161,7 +161,7 @@ def discover(interface, timeout=5, log=print):
                     try:
                         sock.sendto(query, destination)
                     except OSError as error:
-                        log('AirPlay mDNS query failed errno={}'.format(error.errno))
+                        log('AirPlay mDNS query failed destination={} errno={}'.format(destination[0], error.errno))
                 next_query = now + 1
             ready, _, _ = select.select([sock for sock, _ in transports], [], [],
                                         max(0, min(1, deadline - time.monotonic())))

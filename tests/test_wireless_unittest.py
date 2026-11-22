@@ -1,6 +1,6 @@
 import unittest
 from carplay_proto.wire import Frame, ProtocolError, encode_param
-from carplay_proto.wireless import (parse_wifi_configuration, offers_wireless_carplay,
+from carplay_proto.wireless import (parse_wifi_configuration, offers_wireless_carplay, WifiRequestWatch,
                                     peer_supports_wifi_configuration_request,
                                     request_wifi_configuration,
                                     parse_start_session)
@@ -22,6 +22,31 @@ class WirelessTests(unittest.TestCase):
         self.assertFalse(offers_wireless_carplay([0xea03], []))
         # Peers that omit both lists keep the legacy behavior.
         self.assertTrue(offers_wireless_carplay(set(), set()))
+
+    def test_unanswered_wifi_request_is_reported_once_after_the_patience_delay(self):
+        now = [100]
+        watch = WifiRequestWatch(clock=lambda: now[0])
+        self.assertFalse(watch.overdue())
+        watch.requested()
+        now[0] = 109
+        watch.requested()
+        self.assertFalse(watch.overdue())
+        now[0] = 110
+        self.assertTrue(watch.overdue())
+        now[0] = 200
+        self.assertFalse(watch.overdue())
+
+    def test_answered_wifi_request_is_never_reported_and_rearms(self):
+        now = [100]
+        watch = WifiRequestWatch(clock=lambda: now[0])
+        watch.requested()
+        now[0] = 102
+        watch.answered()
+        now[0] = 150
+        self.assertFalse(watch.overdue())
+        watch.requested()
+        now[0] = 160
+        self.assertTrue(watch.overdue())
 
     def test_start_session_ipv6_and_private_credentials(self):
         import struct

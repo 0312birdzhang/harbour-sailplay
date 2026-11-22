@@ -206,9 +206,10 @@ class EndpointTests(unittest.TestCase):
 
 
 class DiscoveryTransportTests(unittest.TestCase):
-    def run_discovery(self, packets, timeout=2):
+    def run_discovery(self, packets, timeout=2, send_error=None):
         sock = Mock()
         sock.recvfrom.side_effect = packets
+        sock.sendto.side_effect = send_error
         now = [0.0]
         remaining = [len(packets)]
         def readable(sockets, writers, errors, wait):
@@ -253,6 +254,11 @@ class DiscoveryTransportTests(unittest.TestCase):
         self.assertEqual(elapsed, 2)
         self.assertEqual(sock.sendto.call_count, 2)
         self.assertTrue(any('reason=no-mDNS-receiver' in call.args[0] for call in log.call_args_list))
+
+    def test_failed_query_names_the_multicast_destination(self):
+        _, _, log, _ = self.run_discovery([], send_error=OSError(errno.EADDRNOTAVAIL, 'no source address'))
+        self.assertIn('AirPlay mDNS query failed destination=224.0.0.251 errno={}'.format(errno.EADDRNOTAVAIL),
+                      [call.args[0] for call in log.call_args_list])
 
     def test_bad_packets_and_responses_from_other_ports_do_not_end_discovery(self):
         response = dns_response(dns_record(INSTANCE, 33, SRV_DATA), dns_record(HOST, 1, ADDRESS_DATA))
