@@ -399,7 +399,7 @@ def main():
             try:
                 print('AirPlay attempt started address={} port={} interface={}'.format(
                     address,port,interface),flush=True)
-                client = connect(address, port, interface, bind_device=True, source_address_wait=5)
+                client = connect(address, port, interface, bind_device=True, source_address_wait=5, refused_wait=15)
                 print('AirPlay control connected local={} peer={} elapsedMs={:.1f}'.format(
                     socket_endpoint(client.sock,'getsockname'),socket_endpoint(client.sock,'getpeername'),
                     (time.monotonic()-attempt_started)*1000),flush=True)

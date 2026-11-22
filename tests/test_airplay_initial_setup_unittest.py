@@ -115,7 +115,8 @@ class InitialSetupTests(unittest.TestCase):
         media, output, connections = self.run_attempts([200], peer_addresses=[],
             network_props={'IPv4': {'Address': '192.168.3.100', 'Netmask': '255.255.255.0'}},
             discovered_endpoints=[('192.168.3.2', 12345)])
-        connections.assert_called_once_with('192.168.3.1', 7000, 'wlan0', bind_device=True, source_address_wait=5)
+        connections.assert_called_once_with('192.168.3.1', 7000, 'wlan0', bind_device=True, source_address_wait=5,
+                                            refused_wait=15)
         media.assert_called_once()
         self.assertIn('trying first host of leased network address=192.168.3.1', output)
         self.assertNotIn('discovering on interface', output)

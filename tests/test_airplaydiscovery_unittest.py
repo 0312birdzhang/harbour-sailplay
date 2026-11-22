@@ -284,7 +284,7 @@ class DiscoveryTransportTests(unittest.TestCase):
 
 
 class BoundControlTests(unittest.TestCase):
-    def connection_fixture(self, error_numbers, address='fe80::abcd', wait=5):
+    def connection_fixture(self, error_numbers, address='fe80::abcd', wait=5, **options):
         now = [100.0]
         sockets = []
         errors = iter(error_numbers)
@@ -302,7 +302,8 @@ class BoundControlTests(unittest.TestCase):
                 patch.object(rtspclient.time, 'monotonic', side_effect=lambda: now[0]), \
                 patch.object(rtspclient.time, 'sleep', side_effect=sleep) as sleeps:
             try:
-                client = rtspclient.connect(address, 7000, 'wlan0', bind_device=True, source_address_wait=wait)
+                client = rtspclient.connect(address, 7000, 'wlan0', bind_device=True, source_address_wait=wait,
+                                           **options)
                 error = None
             except OSError as failure:
                 client, error = None, failure
@@ -339,6 +340,36 @@ class BoundControlTests(unittest.TestCase):
                 self.assertEqual(elapsed, 0)
                 sleeps.assert_not_called()
                 sockets[0].close.assert_called_once_with()
+
+    def test_refused_control_connection_waits_for_the_receiver_to_listen(self):
+        for address in ('192.0.2.2', 'fe80::abcd'):
+            with self.subTest(address=address):
+                client, error, sockets, sleeps, elapsed = self.connection_fixture(
+                    [errno.ECONNREFUSED] * 6 + [None], address=address, refused_wait=15)
+                self.assertIsNone(error)
+                self.assertIs(client.sock, sockets[-1])
+                self.assertAlmostEqual(elapsed, 3)
+                self.assertEqual(sleeps.call_count, 6)
+                for sock in sockets[:-1]:
+                    sock.close.assert_called_once_with()
+                sockets[-1].close.assert_not_called()
+
+    def test_refused_wait_has_a_deadline_and_closes_all_failed_sockets(self):
+        client, error, sockets, _, elapsed = self.connection_fixture(
+            [errno.ECONNREFUSED] * 40, address='192.0.2.2', refused_wait=15)
+        self.assertIsNone(client)
+        self.assertEqual(error.errno, errno.ECONNREFUSED)
+        self.assertAlmostEqual(elapsed, 15)
+        self.assertLessEqual(len(sockets), 32)
+        for sock in sockets:
+            sock.close.assert_called_once_with()
+
+    def test_refused_wait_does_not_delay_other_errors(self):
+        _, error, sockets, sleeps, elapsed = self.connection_fixture(
+            [errno.EHOSTUNREACH], address='192.0.2.2', refused_wait=15)
+        self.assertEqual(error.errno, errno.EHOSTUNREACH)
+        self.assertEqual((len(sockets), elapsed), (1, 0))
+        sleeps.assert_not_called()
 
     def test_zero_address_wait_preserves_immediate_failure(self):
         _, error, sockets, sleeps, elapsed = self.connection_fixture([errno.EADDRNOTAVAIL], wait=0)
