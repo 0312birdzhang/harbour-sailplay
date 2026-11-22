@@ -1,5 +1,6 @@
 import unittest
-from carplay_proto.bluezadapter import select_adapter, adapter_name
+from unittest.mock import patch
+from carplay_proto.bluezadapter import select_adapter, adapter_name, select_head_unit
 
 
 class AdapterTests(unittest.TestCase):
@@ -29,3 +30,32 @@ class AdapterTests(unittest.TestCase):
     def test_no_adapter_is_explicit_error(self):
         with self.assertRaisesRegex(RuntimeError, 'No BlueZ'):
             select_adapter({})
+
+
+class IgnoredAccessoryTests(unittest.TestCase):
+    UUID = '00000000-deca-fade-deca-deafdecacaff'
+
+    def device(self, connected=True):
+        return {'org.bluez.Device1': {'Paired': True, 'Connected': connected, 'UUIDs': [self.UUID]}}
+
+    def setUp(self):
+        patcher = patch('carplay_proto.bluezadapter.authenticated_head_unit', return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_ignored_earbuds_do_not_replace_the_previous_vehicle(self):
+        objects = {'/earbuds': self.device(), '/car': self.device(connected=False)}
+        self.assertEqual(select_head_unit(objects, '/car', '/car'), '/earbuds')
+        self.assertEqual(select_head_unit(objects, '/car', '/car', {'/earbuds'}), '/car')
+        self.assertEqual(select_head_unit(objects, '/earbuds', '/car', {'/earbuds'}), '/car')
+
+    def test_ignored_earbuds_do_not_make_a_connected_vehicle_ambiguous(self):
+        objects = {'/earbuds': self.device(), '/car': self.device()}
+        with self.assertRaises(RuntimeError):
+            select_head_unit(objects, None, None)
+        self.assertEqual(select_head_unit(objects, None, None, {'/earbuds'}), '/car')
+
+    def test_ignored_previous_target_is_not_restored(self):
+        objects = {'/earbuds': self.device()}
+        self.assertIsNone(select_head_unit(objects, None, '/earbuds', {'/earbuds'}))
+        self.assertEqual(select_head_unit(objects, None, '/earbuds'), '/earbuds')

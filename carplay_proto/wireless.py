@@ -20,6 +20,19 @@ def peer_supports_wifi_configuration_request(received_message_ids):
     return not received_message_ids or 0x5702 in received_message_ids
 
 
+def offers_wireless_carplay(sent_message_ids, received_message_ids):
+    """Return whether an identified accessory can be a wireless CarPlay head unit.
+
+    Earbuds and other accessories expose the same iAP2 accessory UUID but
+    declare only External Accessory messages. A head unit declares at least
+    one CarPlay session (0x43xx), Bluetooth/wireless CarPlay update (0x4exx)
+    or Wi-Fi sharing (0x57xx) message. Peers that omit both lists keep the
+    legacy behavior.
+    """
+    declared = set(sent_message_ids) | set(received_message_ids)
+    return not declared or any(message_id >> 8 in (0x43, 0x4e, 0x57) for message_id in declared)
+
+
 class WifiConfiguration:
     __slots__ = ('ssid', 'passphrase', 'security', 'channel')
 

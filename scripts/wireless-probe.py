@@ -27,7 +27,7 @@ from carplay_proto.iap2link import (ACK, DETECT, EAK, RST, SYN, Decoder,
                                    synchronization)
 from carplay_proto.wire import Frame, Framer, encode_param, parse_params
 from carplay_proto.accessoryauth import PinnedAccessory, paired_accessory
-from carplay_proto.wireless import (parse_wifi_configuration,
+from carplay_proto.wireless import (parse_wifi_configuration, offers_wireless_carplay,
                                     peer_supports_wifi_configuration_request,
                                     request_wifi_configuration,
                                     parse_start_session, StartSession)
@@ -102,6 +102,10 @@ def service_record(channel):
 </record>''' % (PHONE_UUID, IAP_V2_UUID, channel)
 
 
+class UnsupportedAccessory(Exception):
+    """The identified iAP2 accessory is not a wireless CarPlay head unit."""
+
+
 def retire_worker(worker):
     """A new BlueZ channel supersedes the previous channel for that device."""
     if worker is None:
@@ -148,7 +152,8 @@ def touch_handover_heartbeat():
 def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
           announce_wireless=False, local_address=None, session_out=None, wifi_handover=False,sustained=False,
           local_name='SailfishOS', paired_pin_path=None, on_authenticated=None,
-          transport='bluetooth', connection_role='unknown', bluetooth_device=None):
+          transport='bluetooth', connection_role='unknown', bluetooth_device=None,
+          on_unsupported=None):
     started = time.monotonic()
     phase = 'detection'
     received_bytes = 0
@@ -214,6 +219,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
     authenticator = None
     authenticated = False
     peer_received_messages = set()
+    peer_sent_messages = set()
     wifi_config = None
     navigation = NavigationSubscription()
     navigation_feed = ProviderNavigationFeed()
@@ -351,12 +357,17 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                                          ','.join('0x%04x' % value for value in ids))
                                             if parameter.id == 7:
                                                 peer_received_messages = set(ids)
+                                            else:
+                                                peer_sent_messages = set(ids)
                                     logging.info('accessory identity name=%r model=%r manufacturer=%r',
                                                  identity.get(0, ''), identity.get(1, ''), identity.get(2, ''))
                                     logging.info('identification parameter ids=%s',
                                                  [(parameter.id, len(parameter.payload))
                                                   for parameter in frame.parameters()])
                                     parse_ea_protocols(frame)
+                                    if transport == 'bluetooth' and not offers_wireless_carplay(
+                                            peer_sent_messages, peer_received_messages):
+                                        raise UnsupportedAccessory()
                                     outgoing.extend([Frame(0x1d02, b''), Frame(0xaa00, b'')])
                                 elif frame.message_id == 0xaa01:
                                     phase = 'authentication'
@@ -522,6 +533,12 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                     # head units ignore one numbered 0 and keep retransmitting.
                     sock.sendall(encode(Packet(ACK, sequence, last_rx, 0, None)))
         logging.info('probe ended; checksum errors=%d', decoder.errors)
+    except UnsupportedAccessory:
+        exit_reason = 'unsupported accessory'
+        logging.info('accessory declares no CarPlay messages; not a head unit, ignoring device=%s '
+                     'until it reconnects', bluetooth_device)
+        if on_unsupported:
+            on_unsupported()
     except (OSError, ValueError):
         exit_reason = 'failure'
         logging.exception('probe failed transport=%s role=%s phase=%s elapsedMs=%.1f receivedBytes=%d',
@@ -662,6 +679,8 @@ def main():
                             'org.freedesktop.DBus.Properties').Get('org.bluez.Adapter1', 'Address'))
     loop = GLib.MainLoop()
     workers = {}
+    # Connected accessories identified as something other than a head unit.
+    ignored = set()
     profile_power = ProfileConnectionPower()
 
     class Profile(dbus.service.Object):
@@ -691,7 +710,9 @@ def main():
                                                          args.announce_wireless, local_address, args.session_out, args.wifi_handover,args.sustained,
                                                          adapter_name(adapter_props), pin_path,
                                                           (lambda: remember_head_unit(str(device))) if pin_path else None),
-                                      kwargs={'connection_role': self.role, 'bluetooth_device': str(device)}, name='RFCOMM-' + self.role)
+                                      kwargs={'connection_role': self.role, 'bluetooth_device': str(device),
+                                              'on_unsupported': lambda: ignored.add(str(device))},
+                                      name='RFCOMM-' + self.role)
             workers[str(device)] = (stop, thread, sock)
             logging.info('RFCOMM connected device=%s role=%s profile=%s fd=%d local=%s peer=%s properties=%s',
                          device, self.role, self.__dbus_object_path__, sock.fileno(),
@@ -729,7 +750,7 @@ def main():
         def connect():
             objects = dbus.Interface(bus.get_object('org.bluez', '/'),
                                      'org.freedesktop.DBus.ObjectManager').GetManagedObjects()
-            selected = select_head_unit(objects, args.device, previous_head_unit())
+            selected = select_head_unit(objects, args.device, previous_head_unit(), ignored)
             if selected and selected.startswith(adapter + '/') and selected != args.device:
                 logging.info('switching active CarPlay target: %s', selected)
                 retire_worker(workers.pop(args.device, None))
@@ -743,7 +764,7 @@ def main():
             if state != last_state[0] or time.monotonic() - last_state[1] >= 60:
                 logging.info('connection checkpoint target=%s bluetooth=%s pending=%s worker=%s media=%s', *state)
                 last_state[:] = [state, time.monotonic()]
-            if connecting[0] or (worker and worker[1].is_alive()) or active:
+            if connecting[0] or (worker and worker[1].is_alive()) or active or args.device in ignored:
                 return False
             def done(error=None):
                 connecting[0] = False
@@ -776,6 +797,8 @@ def main():
                 logging.info('Bluetooth power changed; rebuilding phone advertisement and profiles')
                 loop.quit()
                 return
+            if interface == 'org.bluez.Device1' and 'Connected' in changed and not changed['Connected']:
+                ignored.discard(str(path))
             if interface == 'org.bluez.Device1' and 'Connected' in changed and changed['Connected']:
                 GLib.timeout_add(1000, connect)
             if path == args.device and interface == 'org.bluez.Device1' and 'Connected' in changed:

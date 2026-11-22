@@ -10,14 +10,20 @@ def adapter_name(properties):
     return 'SailfishOS'
 
 
-def select_head_unit(objects, configured=None, previous=None):
-    """Prefer the connected, paired accessory over a previous vehicle."""
+def select_head_unit(objects, configured=None, previous=None, ignored=()):
+    """Prefer the connected, paired accessory over a previous vehicle.
+
+    ignored holds connected accessories whose iAP2 identification showed
+    they are not CarPlay head units, such as earbuds.
+    """
     configured = resolve_device(objects, configured)
     previous = resolve_device(objects, previous)
+    if previous in ignored:
+        previous = None
     uuid = '00000000-deca-fade-deca-deafdecacaff'
     candidates = [str(path) for path, interfaces in objects.items()
                   for props in [interfaces.get('org.bluez.Device1', {})]
-                  if props.get('Paired') and props.get('Connected')
+                  if props.get('Paired') and props.get('Connected') and str(path) not in ignored
                   and (uuid in [str(value).lower() for value in props.get('UUIDs', [])]
                        or authenticated_head_unit(path))]
     if len(candidates) == 1:
