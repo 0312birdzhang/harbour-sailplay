@@ -26,14 +26,26 @@ class LocalCarplayTests(unittest.TestCase):
     def test_unspecified_source_is_not_proof(self):
         self.probe.return_value='0.0.0.0';self.assertFalse(self.check())
 
-    def test_missing_gateway_uses_discovered_endpoint_on_the_confirmed_hu_wifi(self):
+    def test_missing_gateway_uses_the_first_host_on_the_confirmed_hu_wifi(self):
         self.props['State'] = 'configuration'
         self.props['IPv4'] = {'Address': '192.168.50.102', 'Netmask': '255.255.255.0'}
         self.probe.return_value = '192.168.50.102'
-        with patch('carplay_proto.airplaydiscovery.discover', return_value=[('192.168.50.2', 12345)]):
+        with patch('carplay_proto.airplaydiscovery.discover') as discover:
             self.assertTrue(verify_local_carplay(self.props, 'HU', 'HU', [], 7000, self.probe,
                                                log=Mock()))
-        self.probe.assert_called_once_with('192.168.50.2', 12345, 'wlan0')
+        self.probe.assert_called_once_with('192.168.50.1', 7000, 'wlan0')
+        discover.assert_not_called()
+
+    def test_missing_gateway_uses_discovered_endpoint_when_the_first_host_is_silent(self):
+        self.props['State'] = 'configuration'
+        self.props['IPv4'] = {'Address': '192.168.50.102', 'Netmask': '255.255.255.0'}
+        self.probe.side_effect = [OSError('unreachable'), '192.168.50.102']
+        with patch('carplay_proto.airplaydiscovery.discover', return_value=[('192.168.50.2', 12345)]), \
+                patch('carplay_proto.airplaydiscovery.interface_address', return_value='192.168.50.102'):
+            self.assertTrue(verify_local_carplay(self.props, 'HU', 'HU', [], 7000, self.probe,
+                                               log=Mock()))
+        self.assertEqual([call.args for call in self.probe.call_args_list],
+                         [('192.168.50.1', 7000, 'wlan0'), ('192.168.50.2', 12345, 'wlan0')])
 
     def test_discovery_cannot_bypass_unconfirmed_association(self):
         with patch('carplay_proto.airplaydiscovery.discover') as discover:
