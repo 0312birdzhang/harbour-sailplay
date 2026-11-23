@@ -49,6 +49,52 @@ class CallAudioTests(unittest.TestCase):
         self.router.routes.Enable.assert_not_called()
         self.router.routes.Disable.assert_not_called()
 
+    def test_standby_connects_hfp_before_any_call_and_keeps_it_between_calls(self):
+        self.router.keep_connected = True
+        self.target_properties['Connected'] = True
+        self.properties['voiceCalls'] = []
+        self.poll()
+        self.device.ConnectProfile.assert_called_once_with(HFP_HEADSET, timeout=6)
+        self.assertEqual(self.router.standby_device, '/org/bluez/hci1/dev_HU')
+        self.now += 60
+        self.poll()
+        self.device.ConnectProfile.assert_called_once()
+        self.properties['voiceCalls'] = ['/call/1']
+        self.device.ConnectProfile.side_effect = BluezError('org.bluez.Error.AlreadyConnected')
+        self.poll()
+        self.properties['voiceCalls'] = []
+        self.poll()
+        self.device.DisconnectProfile.assert_not_called()
+        self.assertTrue(self.router.release(final=True))
+        self.device.DisconnectProfile.assert_called_once_with(HFP_HEADSET, timeout=5)
+
+    def test_standby_waits_for_the_head_unit_and_reconnects_after_a_drop(self):
+        self.router.keep_connected = True
+        self.properties['voiceCalls'] = []
+        self.poll()
+        self.device.ConnectProfile.assert_not_called()
+        self.target_properties['Connected'] = True
+        self.now += 5
+        self.poll()
+        self.assertEqual(self.device.ConnectProfile.call_count, 1)
+        self.target_properties['Connected'] = False
+        self.now += 5
+        self.poll()
+        self.target_properties['Connected'] = True
+        self.now += 5
+        self.poll()
+        self.assertEqual(self.device.ConnectProfile.call_count, 2)
+
+    def test_standby_keeps_a_profile_connected_for_a_call(self):
+        self.router.keep_connected = True
+        self.poll()
+        self.assertEqual(self.router.profile_device, '/org/bluez/hci1/dev_HU')
+        self.properties['voiceCalls'] = []
+        self.poll()
+        self.device.DisconnectProfile.assert_not_called()
+        self.assertEqual(self.router.standby_device, '/org/bluez/hci1/dev_HU')
+        self.device.ConnectProfile.assert_called_once()
+
     def test_call_reconnects_the_authenticated_hu_and_enables_native_duplex_audio(self):
         self.poll()
         self.device.ConnectProfile.assert_called_once_with(HFP_HEADSET, timeout=6)

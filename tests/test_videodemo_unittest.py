@@ -6,6 +6,12 @@ from carplay_proto import crypto
 
 
 class VideoDemoTests(unittest.TestCase):
+    def test_only_marelli_carline_units_get_the_call_workarounds(self):
+        from carplay_proto.videodemo import marelli_carline
+        self.assertTrue(marelli_carline({'model':'Fiat CARLINE_13'}))
+        for info in ({}, {'model':None}, {'model':'Honda CIVIC'}, {'manufacturer':'Marelli','model':'Other'}):
+            self.assertFalse(marelli_carline(info))
+
     def test_desay_uses_legacy_headers_without_changing_honda(self):
         from carplay_proto.videodemo import screen_packet_profile
         self.assertEqual(screen_packet_profile({'model':'WILDLANDER'}),'legacy')
@@ -68,7 +74,7 @@ class VideoDemoTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'stop after starting call routing'):
                 run_demo(client, 'receiver', None, bytes(32), {'eventPort': 1}, info,
                          live=True, bluetooth_device='/org/bluez/hci1/dev_CURRENT_HU')
-        router.assert_called_once_with('/org/bluez/hci1/dev_CURRENT_HU')
+        router.assert_called_once_with('/org/bluez/hci1/dev_CURRENT_HU', keep_connected=False)
         router.return_value.start.assert_called_once()
         router.return_value.close.assert_called_once()
         theme.return_value.start.assert_called_once()

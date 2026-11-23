@@ -537,7 +537,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                     info.get('model')),flush=True)
             from .bluezadapter import previous_head_unit
             from .callaudio import CallAudioRouter
-            call_audio = CallAudioRouter(bluetooth_device or previous_head_unit())
+            call_audio = CallAudioRouter(bluetooth_device or previous_head_unit(),
+                                         keep_connected=marelli_carline(info))
             call_audio.start()
         phase = 'screen-setup'
         before = time.monotonic()
