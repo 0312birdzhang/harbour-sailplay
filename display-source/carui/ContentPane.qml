@@ -14,7 +14,7 @@ Item {
     property bool usable: true
     // Row shown as the current choice of a master list.
     property string currentId: ""
-    // Narrow columns use shorter rows and no pictures.
+    // Narrow columns use shorter rows.
     property bool compact: false
     property string listName: "contentList"
     property string rowName: "contentRow"
@@ -92,7 +92,7 @@ Item {
         model: visible ? pane.items : []
         delegate: Rectangle {
             objectName: pane.rowName
-            property bool pictured: !pane.compact && !!modelData.image
+            property bool pictured: !!modelData.image
             property bool lit: pane.lit(modelData)
             width: list.width; height: (pane.compact ? 72 : 84) * pane.uiScale; radius: 12 * pane.uiScale
             clip: true
@@ -109,12 +109,12 @@ Item {
                 id: rowPicture
                 active: parent.pictured; sourceComponent: picture
                 x: 18 * pane.uiScale; anchors.verticalCenter: parent.verticalCenter
-                width: active ? 64 * pane.uiScale : 0; height: 64 * pane.uiScale
+                width: active ? (pane.compact ? 56 : 64) * pane.uiScale : 0; height: (pane.compact ? 56 : 64) * pane.uiScale
                 onLoaded: { item.source = modelData.image; item.label = pane.plain(modelData.title) }
             }
             Column {
                 id: summary
-                x: (parent.pictured ? 98 : 24) * pane.uiScale; anchors.verticalCenter: parent.verticalCenter
+                x: (parent.pictured ? (pane.compact ? 90 : 98) : 24) * pane.uiScale; anchors.verticalCenter: parent.verticalCenter
                 width: parent.width - x - (trailing.width + 28 * pane.uiScale); spacing: 2 * pane.uiScale
                 Text {
                     width: parent.width; text: pane.plain(modelData.title); textFormat: Text.PlainText

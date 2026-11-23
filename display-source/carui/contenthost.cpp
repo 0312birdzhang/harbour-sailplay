@@ -38,10 +38,14 @@ SailplayContentHost::SailplayContentHost(QObject *parent) : QObject(parent), m_s
             m_activatedItem.clear();
             if (!error.isEmpty()) { fail(message); return; }
             if (!m_pageRequest) {
+                // An action may have changed the pinned folder, such as a queue.
+                m_sideWanted = !m_sideId.isEmpty();
                 refresh();
-                if (!activated.isEmpty()) emit itemActivated(activated);
+                // With a side panel the choice is shown in place: stay on the page.
+                if (!activated.isEmpty() && m_sideId.isEmpty()) emit itemActivated(activated);
                 return;
             }
+            if (m_target != Main) { receivePane(result); return; }
             const QVariantMap page = SailplayContent::decode(result.value(QStringLiteral("content"))).toMap();
             if (!SailplayContent::validPage(page) || page.value("id").toString() != m_location.id
                 || page.value("offset").toUInt() != m_offset) {
@@ -55,8 +59,8 @@ SailplayContentHost::SailplayContentHost(QObject *parent) : QObject(parent), m_s
             }
             const QVariantMap presentation =
                 SailplayContent::cleanPresentation(result.value(QStringLiteral("presentation")), page);
-            const QVariantList incoming =
-                SailplayContent::presentedItems(page.value("items").toList(), presentation);
+            const QVariantList incoming = withoutSide(page,
+                SailplayContent::presentedItems(page.value("items").toList(), presentation));
             if (!m_offset && enterTabs(page, incoming, presentation)) return;
             QVariantList items = m_offset ? m_items : QVariantList();
             QSet<QString> ids;
@@ -103,6 +107,11 @@ void SailplayContentHost::close()
     m_root.clear();
     m_rootPresentation.clear();
     m_layout = QStringLiteral("list");
+    m_detail.clear();
+    m_side.clear();
+    m_sideId.clear();
+    m_target = Main;
+    m_detailWanted = m_sideWanted = false;
     m_items.clear();
     m_history.clear();
     m_location = Location();
@@ -120,6 +129,10 @@ void SailplayContentHost::receiveState()
         m_rootPresentation.clear();
         m_page.clear();
         m_items.clear();
+        m_detail.clear();
+        m_side.clear();
+        m_sideId.clear();
+        m_detailWanted = m_sideWanted = false;
     } else {
         const QVariantMap root = SailplayContent::decode(m_session.state().value(QStringLiteral("content"))).toMap();
         if (!SailplayContent::validRoot(root)) {
@@ -132,6 +145,12 @@ void SailplayContentHost::receiveState()
         const bool contentChanged = root != m_root || presentation != m_rootPresentation;
         m_root = root;
         m_rootPresentation = presentation;
+        const QString side = presentation.value(QStringLiteral("side")).toString();
+        if (side != m_sideId) {
+            m_sideId = side;
+            m_side.clear();
+        }
+        if (contentChanged) m_sideWanted = !m_sideId.isEmpty();
         // A pending action remains pending across its own state publication.
         if (contentChanged && !busy()) refresh();
     }
@@ -142,6 +161,7 @@ void SailplayContentHost::requestPage(uint offset)
 {
     if (!ready()) return;
     m_offset = offset;
+    m_target = Main;
     m_requestedVersion = m_root.value("version").toULongLong();
     m_pageRequest = true;
     QVariantMap parameters = {{"id", m_location.id}, {"offset", offset}, {"limit", uint(50)}};
@@ -158,8 +178,153 @@ void SailplayContentHost::present(const QVariantMap &page, const QVariantList &i
     m_page = page;
     m_items = items;
     m_layout = presentation.value(QStringLiteral("layout"), QStringLiteral("list")).toString();
+    chooseMaster();
     m_error.clear();
     emit changed();
+    pump();
+}
+
+QVariantMap SailplayContentHost::side() const
+{
+    if (!m_side.isEmpty() || m_sideId.isEmpty()) return m_side;
+    return {{"id", m_sideId}, {"title", QString()}, {"items", QVariantList()}, {"actions", QVariantList()},
+            {"message", QString()}, {"hasMore", false}};
+}
+
+// The pinned folder has its own panel: it is not also a row or a tab of the root page.
+QVariantList SailplayContentHost::withoutSide(const QVariantMap &page, const QVariantList &items) const
+{
+    if (m_sideId.isEmpty() || page.value("id") != QStringLiteral("root")) return items;
+    QVariantList result;
+    for (const QVariant &entry : items)
+        if (entry.toMap().value("id").toString() != m_sideId) result.append(entry);
+    return result;
+}
+
+// A split page shows its folders on the left and the chosen one's rows on the
+// right. Keep the chosen folder while it remains, else take the first one.
+void SailplayContentHost::chooseMaster()
+{
+    QString chosen;
+    if (m_layout == QStringLiteral("split") && m_location.query.isEmpty()) {
+        for (const QVariant &entry : m_items) {
+            const QVariantMap item = entry.toMap();
+            if (item.value("kind") != QStringLiteral("folder") || !item.value("enabled").toBool()) continue;
+            const QString id = item.value("id").toString();
+            if (chosen.isEmpty()) chosen = id;
+            if (id == m_location.master) { chosen = id; break; }
+        }
+    }
+    if (chosen.isEmpty()) {
+        // Nothing to choose from: an ordinary list.
+        if (m_layout == QStringLiteral("split")) m_layout = QStringLiteral("list");
+        m_location.master.clear();
+        m_detail.clear();
+        m_detailWanted = false;
+        return;
+    }
+    if (chosen != m_location.master || m_detail.value("id").toString() != chosen) m_detail.clear();
+    m_location.master = chosen;
+    // Loading further rows of the left list leaves the right one alone.
+    if (!m_offset || m_detail.isEmpty()) m_detailWanted = true;
+}
+
+// One request at a time: after the page itself, its detail, then the side panel.
+void SailplayContentHost::pump()
+{
+    if (m_request || !ready()) return;
+    if (m_detailWanted && !m_location.master.isEmpty()) requestPane(Detail, 0);
+    else if (m_sideWanted && !m_sideId.isEmpty()) requestPane(Side, 0);
+}
+
+void SailplayContentHost::requestPane(Target target, uint offset)
+{
+    if (!ready()) return;
+    m_target = target;
+    m_paneOffset = offset;
+    (target == Detail ? m_detailWanted : m_sideWanted) = false;
+    m_requestedVersion = m_root.value("version").toULongLong();
+    m_pageRequest = true;
+    m_request = m_session.invoke(QStringLiteral("content.browse"),
+        {{"id", target == Detail ? m_location.master : m_sideId}, {"offset", offset}, {"limit", uint(50)}});
+    emit changed();
+}
+
+void SailplayContentHost::receivePane(const QVariantMap &result)
+{
+    const Target target = m_target;
+    m_target = Main;
+    QVariantMap &pane = target == Detail ? m_detail : m_side;
+    const QString expected = target == Detail ? m_location.master : m_sideId;
+    const QVariantMap page = SailplayContent::decode(result.value(QStringLiteral("content"))).toMap();
+    if (expected.isEmpty() || !SailplayContent::validPage(page) || page.value("id").toString() != expected
+        || page.value("offset").toUInt() != m_paneOffset) {
+        // A secondary area that cannot be shown does not take the page down.
+        pane.clear();
+        emit changed();
+        pump();
+        return;
+    }
+    if (page.value("version").toULongLong() != m_requestedVersion
+        || m_root.value("version").toULongLong() != m_requestedVersion) {
+        requestPane(target, 0);
+        return;
+    }
+    const QVariantMap presentation =
+        SailplayContent::cleanPresentation(result.value(QStringLiteral("presentation")), page);
+    const QVariantList incoming = SailplayContent::presentedItems(page.value("items").toList(), presentation);
+    QVariantList items = m_paneOffset ? pane.value("items").toList() : QVariantList();
+    QSet<QString> ids;
+    for (const QVariant &entry : items) ids.insert(entry.toMap().value("id").toString());
+    for (const QVariant &entry : incoming) {
+        const QString identity = entry.toMap().value("id").toString();
+        if (ids.contains(identity)) continue;
+        ids.insert(identity);
+        items.append(entry);
+    }
+    QString layout = presentation.value(QStringLiteral("layout")).toString();
+    if (layout.isEmpty() || layout == QStringLiteral("split")) layout = QStringLiteral("list");
+    pane = QVariantMap{{"id", expected}, {"title", page.value("title")}, {"layout", layout}, {"items", items},
+        {"actions", page.value("actions")}, {"message", page.value("message")},
+        {"messageKind", page.value("messageKind")}, {"hasMore", page.value("hasMore")},
+        {"next", m_paneOffset + uint(incoming.size())}};
+    emit changed();
+    pump();
+}
+
+void SailplayContentHost::selectDetail(const QString &id)
+{
+    for (const QVariant &item : m_detail.value("items").toList()) {
+        if (item.toMap().value("id").toString() == id) { invokeItem(item.toMap(), true); return; }
+    }
+}
+
+void SailplayContentHost::moreDetail()
+{
+    if (!ready() || busy() || !m_detail.value("hasMore").toBool()) return;
+    if (m_detail.value("items").toList().size() >= 500) m_detail.insert("items", QVariantList());
+    requestPane(Detail, m_detail.value("next").toUInt());
+}
+
+void SailplayContentHost::selectSide(const QString &id)
+{
+    for (const QVariant &item : m_side.value("items").toList()) {
+        if (item.toMap().value("id").toString() == id) { invokeItem(item.toMap()); return; }
+    }
+}
+
+void SailplayContentHost::sideAction(const QString &id)
+{
+    for (const QVariant &item : m_side.value("actions").toList()) {
+        if (item.toMap().value("id").toString() == id) { invokeItem(item.toMap()); return; }
+    }
+}
+
+void SailplayContentHost::moreSide()
+{
+    if (!ready() || busy() || !m_side.value("hasMore").toBool()) return;
+    if (m_side.value("items").toList().size() >= 500) m_side.insert("items", QVariantList());
+    requestPane(Side, m_side.value("next").toUInt());
 }
 
 // A tabbed page lists folders only. Its folders become a tab bar and the host
@@ -191,8 +356,11 @@ void SailplayContentHost::refresh()
     if (m_location.tabsOwner == QStringLiteral("root") && m_location.query.isEmpty() && !m_root.isEmpty()) {
         // The root's folders may have changed: rebuild its tab bar, keeping the selected tab when it remains.
         const QString selected = m_location.id;
+        const QString master = m_location.master;
         m_location = Location();
-        const QVariantList items = SailplayContent::presentedItems(m_root.value("items").toList(), m_rootPresentation);
+        m_location.master = master;
+        const QVariantList items = withoutSide(m_root,
+            SailplayContent::presentedItems(m_root.value("items").toList(), m_rootPresentation));
         if (enterTabs(m_root, items, m_rootPresentation)) {
             for (const QVariant &entry : m_location.tabs) {
                 const QVariantMap item = entry.toMap();
@@ -206,7 +374,8 @@ void SailplayContentHost::refresh()
         }
     }
     if (m_location.id == QStringLiteral("root") && m_location.query.isEmpty() && !m_root.isEmpty()) {
-        const QVariantList items = SailplayContent::presentedItems(m_root.value("items").toList(), m_rootPresentation);
+        const QVariantList items = withoutSide(m_root,
+            SailplayContent::presentedItems(m_root.value("items").toList(), m_rootPresentation));
         if (enterTabs(m_root, items, m_rootPresentation)) return;
         present(m_root, items, m_rootPresentation);
     } else requestPage();
@@ -249,7 +418,19 @@ void SailplayContentHost::invokeItem(const QVariantMap &item, bool listItem)
 void SailplayContentHost::select(const QString &id)
 {
     for (const QVariant &item : m_items) {
-        if (item.toMap().value("id").toString() == id) { invokeItem(item.toMap(), true); return; }
+        if (item.toMap().value("id").toString() != id) continue;
+        if (m_layout == QStringLiteral("split") && item.toMap().value("kind") == QStringLiteral("folder")) {
+            // Choosing a folder of a split page shows it on the right; it does not leave the page.
+            if (!ready() || busy() || !item.toMap().value("enabled").toBool() || id == m_location.master) return;
+            m_location.master = id;
+            m_detail.clear();
+            m_detailWanted = true;
+            emit changed();
+            pump();
+            return;
+        }
+        invokeItem(item.toMap(), true);
+        return;
     }
 }
 

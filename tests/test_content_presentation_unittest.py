@@ -41,6 +41,18 @@ class PresentationTests(unittest.TestCase):
             content_page(items=folders, tabs='yes')
         self.assertEqual(merge_content(page, {'tabs': 1, 'layout': ['grid']}), page)
 
+    def test_split_layout_and_side_panel(self):
+        folders = [content_item('queue', 'Queue'), content_item('albums', 'Albums')]
+        rich = content_page(items=folders, layout='split', side='queue')
+        page, presentation = split_content(rich)
+        self.assertEqual(presentation, {'layout': 'split', 'side': 'queue'})
+        self.assertEqual(merge_content(page, presentation), rich)
+        for side in (3, 'a' * 257, 'a\0b'):
+            with self.assertRaises(Fault):
+                content_page(items=folders, side=side)
+        self.assertEqual(merge_content(page, {'side': ''}), page)
+        self.assertEqual(merge_content(page, {'side': 7}), page)
+
     def test_merging_restores_the_rich_page(self):
         rich = content_page(items=rows(), layout='grid')
         self.assertEqual(merge_content(*split_content(rich)), rich)

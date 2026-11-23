@@ -75,7 +75,8 @@ QVariant SailplayContent::decode(const QVariant &value)
 }
 
 namespace {
-const QStringList layouts = {QStringLiteral("list"), QStringLiteral("grid"), QStringLiteral("wide")};
+const QStringList layouts = {QStringLiteral("list"), QStringLiteral("grid"), QStringLiteral("wide"),
+                             QStringLiteral("split")};
 const QStringList playbackStates = {QStringLiteral("unplayed"), QStringLiteral("started"),
                                     QStringLiteral("playing"), QStringLiteral("finished")};
 
@@ -89,11 +90,12 @@ bool validImage(const QVariant &value)
 }
 }
 
-QVariantMap SailplayContent::presentation(const QString &layout, bool tabs)
+QVariantMap SailplayContent::presentation(const QString &layout, bool tabs, const QString &side)
 {
     QVariantMap result;
     if (layouts.contains(layout)) result.insert(QStringLiteral("layout"), layout);
     if (tabs) result.insert(QStringLiteral("tabs"), true);
+    if (text(side, 256, true)) result.insert(QStringLiteral("side"), side);
     return result;
 }
 
@@ -124,6 +126,8 @@ QVariantMap SailplayContent::cleanPresentation(const QVariant &value, const QVar
         result.insert(QStringLiteral("layout"), layout.toString());
     const QVariant tabs = source.value(QStringLiteral("tabs"));
     if (tabs.type() == QVariant::Bool && tabs.toBool()) result.insert(QStringLiteral("tabs"), true);
+    if (text(source.value(QStringLiteral("side")), 256, true))
+        result.insert(QStringLiteral("side"), source.value(QStringLiteral("side")).toString());
     if (source.value(QStringLiteral("items")).type() != QVariant::Map) return result;
     const QVariantMap entries = source.value(QStringLiteral("items")).toMap();
     QVariantMap hints;

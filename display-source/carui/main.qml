@@ -1,6 +1,7 @@
 import QtQuick 2.0
 import QtQuick.Window 2.0
 import Sailfish.Silica 1.0 as Silica
+import Amber.Mpris 1.0
 
 Window {
     id: projectionWindow
@@ -438,7 +439,40 @@ Window {
         width: root.width - x - 16; height: root.height - 32
         provider: carController.content
         palette: carPalette
+        player: contentPlayer
     }
+    // The player of the application being browsed, for the transport of its
+    // side panel. It stays on that application's player whatever else plays.
+    MprisController {
+        id: contentMpris
+        singleService: true
+        onAvailableServicesChanged: contentPlayer.pin()
+        onCurrentServiceChanged: if (contentPlayer.service && currentService !== contentPlayer.service) contentPlayer.pin()
+    }
+    QtObject {
+        id: contentPlayer
+        property string service: ""
+        readonly property bool available: service !== "" && contentMpris.currentService === service
+        readonly property bool playing: available && contentMpris.playbackStatus === Mpris.Playing
+        readonly property string title: available ? String(contentMpris.metaData.title || "") : ""
+        readonly property string artist: available ? String(contentMpris.metaData.contributingArtist || "") : ""
+        readonly property bool canGoNext: available && contentMpris.canGoNext
+        readonly property bool canGoPrevious: available && contentMpris.canGoPrevious
+        function pin() {
+            var wanted = carController.contentActive
+                ? carController.musicServiceForApp(carController.currentApp, contentMpris.availableServices) : ""
+            service = wanted
+            if (wanted && contentMpris.currentService !== wanted) contentMpris.currentService = wanted
+        }
+        function playPause() {
+            if (!available) return
+            if (playing) { if (contentMpris.canPause) contentMpris.pause() }
+            else if (contentMpris.canPlay) contentMpris.play()
+        }
+        function next() { if (canGoNext) contentMpris.next() }
+        function previous() { if (canGoPrevious) contentMpris.previous() }
+    }
+    Connections { target: carController; onCurrentAppChanged: contentPlayer.pin() }
     NavigationCard {
         visible: carController.navigationActive
         x: dock.width + 16

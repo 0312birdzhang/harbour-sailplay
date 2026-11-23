@@ -77,6 +77,118 @@ int main(int argc, char **argv)
         fprintf(stderr, "CONTENT_PYTHON_QT_PASS typed-map-arrays browsing pagination search actions messages\n");
         return 0;
     }
+    if (argc > 1 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--presentation")) {
+        // Tabs, a split page and a pinned side panel, as a podcast or music player would ask for.
+        qulonglong version = 1;
+        QStringList queue = {"q1", "q2"};
+        const auto folder = [](const QString &id, const QString &title) { return SailplayContent::item(id, title); };
+        const auto rootPage = [&]() {
+            QVariantMap page = SailplayContent::page("root", "Player");
+            page["version"] = version;
+            page["items"] = QVariantList{folder("queue", "Queue"), folder("subs", "Subscriptions"), folder("news", "New")};
+            return page;
+        };
+        const QVariantMap rootHints = SailplayContent::presentation(QString(), true, "queue");
+        CHECK(rootHints.value("tabs").toBool() && rootHints.value("side") == "queue");
+        SailplayProvider provider("native-content", {{"content", rootPage()}, {"contentPresentation", rootHints}}, {"content"});
+        const auto browse = [&](qulonglong invocation, const QVariantMap &parameters) {
+            const QString id = parameters.value("id").toString();
+            QVariantMap page = SailplayContent::page(id, id.toUpper());
+            page["version"] = version;
+            page["offset"] = parameters.value("offset").toUInt();
+            QVariantMap hints;
+            QVariantList entries;
+            if (id == "queue") {
+                for (const QString &track : queue)
+                    entries.append(SailplayContent::item(track, "Track " + track, "action", "content.play", {{"id", track}}));
+                CHECK(SailplayContent::hint(hints, queue.first(), QString(), "playing"));
+                page["actions"] = QVariantList{SailplayContent::item("clear", "Clear", "action", "content.clear")};
+            } else if (id == "subs") {
+                hints = SailplayContent::presentation("split");
+                entries = QVariantList{folder("p1", "Podcast 1"), folder("p2", "Podcast 2")};
+                CHECK(SailplayContent::hint(hints, "p1", "/tmp/p1.png"));
+                CHECK(!SailplayContent::hint(hints, "p2", "relative.png"));
+            } else if (id == "news") {
+                hints = SailplayContent::presentation("grid");
+                entries = QVariantList{SailplayContent::item("n1", "New 1", "action", "content.add", {{"id", "n1"}})};
+            } else if (id == "p1" || id == "p2") {
+                hints = SailplayContent::presentation("split");   // ignored in a detail area
+                for (const QString &episode : {QStringLiteral("a"), QStringLiteral("b")})
+                    entries.append(SailplayContent::item(id + episode, "Episode " + episode, "action", "content.add",
+                                                         {{"id", id + episode}}));
+                CHECK(SailplayContent::hint(hints, id + "a", QString(), "started"));
+            }
+            page["items"] = entries;
+            QVariantMap result{{"content", page}};
+            if (!hints.isEmpty()) result.insert("presentation", hints);
+            CHECK(provider.complete(invocation, result));
+        };
+        provider.setActionHandler("content.browse", browse);
+        provider.setActionHandler("content.search", browse);
+        const auto changeQueue = [&](qulonglong invocation, const QVariantMap &parameters, bool clear) {
+            if (clear) queue = QStringList{"q1"}; else queue.append(parameters.value("id").toString());
+            ++version;
+            CHECK(provider.publish({{"content", rootPage()}, {"contentPresentation", rootHints}}));
+            CHECK(provider.complete(invocation));
+        };
+        provider.setActionHandler("content.add", [&](qulonglong i, const QVariantMap &p) { changeQueue(i, p, false); });
+        provider.setActionHandler("content.clear", [&](qulonglong i, const QVariantMap &p) { changeQueue(i, p, true); });
+        provider.setActionHandler("content.play", [&](qulonglong i, const QVariantMap &) { CHECK(provider.complete(i)); });
+        CHECK(provider.start());
+        CHECK(QDBusConnection::sessionBus().registerService("org.example.NativeContent"));
+        SailplayApplication declaration;
+        declaration.valid = declaration.declared = true;
+        declaration.applicationId = "native-content";
+        declaration.service = "org.example.NativeContent";
+        declaration.path = "/org/sailplay/v1/App";
+        declaration.presentation = "template";
+        declaration.capabilities = QStringList{"content"};
+        SailplayContentHost host;
+        int activations = 0;
+        QObject::connect(&host, &SailplayContentHost::itemActivated, &app, [&](const QString &) { ++activations; });
+        host.open(declaration, "Player");
+        const auto settled = [&]() { return host.ready() && !host.busy(); };
+        const auto rows = [](const QVariantMap &pane) { return pane.value("items").toList(); };
+        // The pinned folder is a panel, not a tab; the first tab is a split page with its first folder chosen.
+        CHECK(waitFor([&]() { return settled() && rows(host.side()).size() == 2 && rows(host.detail()).size() == 2; }));
+        CHECK(host.tabs().size() == 2 && host.currentTab() == "subs" && !host.canGoBack());
+        CHECK(host.layout() == "split" && host.items().size() == 2 && host.currentItem() == "p1");
+        CHECK(host.items().first().toMap().value("image") == "/tmp/p1.png");
+        CHECK(host.items().last().toMap().value("image").toString().isEmpty());
+        CHECK(host.detail().value("id") == "p1" && host.detail().value("layout") == "list");
+        CHECK(rows(host.detail()).first().toMap().value("playback") == "started");
+        CHECK(host.side().value("id") == "queue" && host.side().value("actions").toList().size() == 1);
+        CHECK(rows(host.side()).first().toMap().value("playback") == "playing");
+        // Choosing another folder of a split page replaces the right side and adds no history.
+        host.select("p2");
+        CHECK(waitFor([&]() { return settled() && host.detail().value("id") == "p2"; }));
+        CHECK(host.currentItem() == "p2" && !host.canGoBack() && host.currentTab() == "subs");
+        CHECK(rows(host.detail()).first().toMap().value("id") == "p2a");
+        // An action on the right changes the queue: the panel follows and the page stays.
+        host.selectDetail("p2b");
+        CHECK(waitFor([&]() { return settled() && rows(host.side()).size() == 3; }));
+        CHECK(activations == 0 && host.currentItem() == "p2" && host.currentTab() == "subs");
+        CHECK(waitFor([&]() { return settled() && host.detail().value("id") == "p2"; }));
+        // Another tab has its own arrangement and no detail.
+        host.selectTab("news");
+        CHECK(waitFor([&]() { return settled() && host.currentTab() == "news" && host.items().size() == 1; }));
+        CHECK(host.layout() == "grid" && host.currentItem().isEmpty() && host.detail().isEmpty());
+        host.select("n1");
+        CHECK(waitFor([&]() { return settled() && rows(host.side()).size() == 4; }));
+        CHECK(host.currentTab() == "news" && activations == 0);
+        // The panel's own controls and rows.
+        host.sideAction("clear");
+        CHECK(waitFor([&]() { return settled() && rows(host.side()).size() == 1; }));
+        host.selectSide("q1");
+        CHECK(waitFor([&]() { return settled(); }));
+        CHECK(rows(host.side()).size() == 1 && host.tabs().size() == 2);
+        host.close();
+        CHECK(host.side().isEmpty() && host.detail().isEmpty() && host.tabs().isEmpty());
+        CHECK(waitFor([&]() { return provider.sessionCount() == 0; }));
+        provider.close();
+        fprintf(stderr, "CONTENT_PRESENTATION_PASS tabs split side-panel hints actions\n");
+        return 0;
+    }
     QVariantMap root = SailplayContent::page("root", "Content 中文");
     root["items"] = QVariantList{SailplayContent::item("library", "Library")};
     root["searchEnabled"] = true;

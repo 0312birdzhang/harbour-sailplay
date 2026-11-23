@@ -10,9 +10,10 @@ QVariantMap item(const QString &id, const QString &title, const QString &kind = 
                  const QString &action = QString(), const QVariantMap &parameters = QVariantMap());
 // Optional presentation hints travel beside a page: under "presentation" in a
 // query result and under "contentPresentation" in the state for the root page.
-// Layouts are "list", "grid" and "wide"; playback is "unplayed", "started",
-// "playing" or "finished"; an image is an absolute file or an http(s) address.
-QVariantMap presentation(const QString &layout = QString(), bool tabs = false);
+// Layouts are "list", "grid", "wide" and "split"; playback is "unplayed",
+// "started", "playing" or "finished"; an image is an absolute file or an
+// http(s) address; side names a folder the host keeps in a panel (root only).
+QVariantMap presentation(const QString &layout = QString(), bool tabs = false, const QString &side = QString());
 bool hint(QVariantMap &presentation, const QString &itemId, const QString &image,
           const QString &playback = QString());
 QVariantMap cleanPresentation(const QVariant &value, const QVariantMap &page);
