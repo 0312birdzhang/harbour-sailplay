@@ -2,14 +2,45 @@
 import dbus
 
 from .client import SessionClient
-from .content_model import content_page, validate_content, validate_query
+from .content_model import content_page, merge_content, split_content, validate_content, validate_query
 from .contract import APP_PATH, CONTENT_INTERFACE, method
 from .model import Fault, state_copy
 from .service import Backend, SessionObject, wire_dictionary
 
 
+def wire_presentation(value):
+    """The hints of a page as `a{sv}`; an empty dictionary when it has none."""
+    _, presentation = split_content(value)
+    if 'items' in presentation:
+        presentation['items'] = dbus.Dictionary(
+            {identity: wire_dictionary(hints) for identity, hints in presentation['items'].items()}, signature='sv')
+    return wire_dictionary(presentation) if presentation else {}
+
+
+def content_result(value):
+    """A query result: the page, and its presentation when it has one."""
+    result = {'content': wire_content(value)}
+    presentation = wire_presentation(value)
+    if presentation:
+        result['presentation'] = presentation
+    return result
+
+
+def _state_with_presentation(state, default=None):
+    """Publish the root page's hints beside it, under `contentPresentation`."""
+    value = state_copy(state)
+    root = value.get('content', default)
+    value['content'] = wire_root(root)
+    presentation = wire_presentation(root)
+    if presentation:
+        value['contentPresentation'] = presentation
+    else:
+        value.pop('contentPresentation', None)
+    return value
+
+
 def wire_content(value):
-    value = validate_content(value)
+    value, _ = split_content(value)
     value['offset'] = dbus.UInt32(value['offset'])
     value['version'] = dbus.UInt64(value['version'])
     for key in ('items', 'actions'):
@@ -56,13 +87,11 @@ class ContentBackend(Backend):
             handler = actions[name]
             actions[name] = lambda parameters, invocation, handler=handler, name=name: handler(
                 validate_query(parameters, search=name == 'content.search'), invocation)
-        state = state_copy({} if state is None else state)
-        state['content'] = wire_root(state.get('content', content_page()))
+        state = _state_with_presentation({} if state is None else state, content_page())
         super().__init__(service, application_id, state, actions, ('content',), bus, path, on_lifecycle)
 
     def publish(self, state):
-        value = state_copy(state)
-        value['content'] = wire_root(value.get('content'))
+        value = _state_with_presentation(state)
         before = self.model.revision
         revision = super().publish(value)
         if revision != before:
@@ -81,7 +110,8 @@ class ContentClient(SessionClient):
 
     def _content_state(self, revision, state):
         try:
-            self.content = {} if not revision else validate_content(state.get('content'))
+            self.content = {} if not revision else merge_content(
+                validate_content(state.get('content')), state.get('contentPresentation'))
         except Fault as error:
             self._failed(self._epoch, error)
             return
