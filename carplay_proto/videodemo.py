@@ -55,6 +55,21 @@ def screen_packet_profile(info):
     return 'legacy' if 'desay' in identity or model == 'WILDLANDER' else 'ios'
 
 
+def marelli_carline(info):
+    """Fiat/Stellantis head units built on Marelli's CARLINE platform."""
+    return 'carline' in str(info.get('model','')).lower()
+
+
+def keep_bluetooth(info):
+    """Whether the head unit keeps its Bluetooth link during projection.
+
+    Honda needs it for iAP2. A Marelli CARLINE unit takes native calls over
+    hands-free itself, and refuses the profile once asked to disable
+    Bluetooth, which leaves call audio on the phone.
+    """
+    return 'honda' in str(info.get('model','')).lower() or marelli_carline(info)
+
+
 class ScreenEncoder:
     def __init__(self, shared, stream_id, packet_profile='ios'):
         if packet_profile not in ('ios', 'legacy'):
@@ -497,7 +512,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         if live:
             from .audio import AudioSender
             audio=AudioSender(client,shared,info)
-            if bluetooth_address and 'honda' not in str(info.get('model','')).lower():
+            if bluetooth_address and not keep_bluetooth(info):
                 phase = 'bluetooth-handoff'
                 before = time.monotonic()
                 checkpoint(phase + '-start')
@@ -507,6 +522,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                 # The HU needs its Bluetooth link for iAP2 call/media control.
                 # Asking a Honda to disable it ends CarPlay after the next
                 # accessory timeout and removes the wireless CarPlay record.
+                # A Marelli CARLINE unit needs it for hands-free call audio.
                 print('Keeping accessory Bluetooth enabled for {}'.format(
                     info.get('model')),flush=True)
             from .bluezadapter import previous_head_unit
