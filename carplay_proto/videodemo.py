@@ -450,6 +450,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
     feedback = None
     ended_audio = None
     call_audio = None
+    mobile_data = None
     commands = None
     screen = None
     try:
@@ -513,6 +514,9 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             from .callaudio import CallAudioRouter
             call_audio = CallAudioRouter(bluetooth_device or previous_head_unit())
             call_audio.start()
+            from .mobiledata import MobileDataKeeper
+            mobile_data = MobileDataKeeper()
+            mobile_data.start()
         phase = 'screen-setup'
         before = time.monotonic()
         checkpoint(phase + '-start')
@@ -634,6 +638,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             power.close()
         if call_audio:
             call_audio.close()
+        if mobile_data:
+            mobile_data.close()
         if audio:
             audio.close()
         if ended_audio:
