@@ -95,6 +95,39 @@ class UiCommandTests(unittest.TestCase):
             screen.ownership.assert_called_with(1)
             self.assertEqual([r['entity'] for r in payloads[-1]['params']['resources']],[1,1])
         finally:feedback.close()
+    def audio_return(self,reopen_audio):
+        import time
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        modes={'appStates':[],'resources':[{'resourceID':i,'entity':1,'permanentEntity':1} for i in (1,2)]}
+        changed=threading.Event();resume=threading.Event();screen=Mock()
+        audio=SimpleNamespace(gain=1.0,reopen=Mock())
+        peer=('192.168.3.1',7000)
+        class Client:
+            sock=SimpleNamespace(sock=SimpleNamespace(getpeername=lambda:peer))
+            def request(self,method,path,body=b'',headers=None):return 200,{},b''
+        client=Client()
+        feedback=ScreenFeedback(client,modes=modes,resume=resume,screen=screen,resource_changed=changed,audio=audio,
+                                reopen_audio=reopen_audio)
+        def wait_for(predicate):
+            end=time.monotonic()+2
+            while not predicate() and time.monotonic()<end:time.sleep(.01)
+            self.assertTrue(predicate())
+        try:
+            next(r for r in modes['resources'] if r['resourceID']==2).update(entity=2)
+            changed.set();wait_for(lambda:audio.gain==0)
+            audio.reopen.assert_not_called()
+            next(r for r in modes['resources'] if r['resourceID']==2).update(entity=1)
+            changed.set();wait_for(lambda:audio.gain==1 and not changed.is_set())
+            time.sleep(.05)
+        finally:feedback.close()
+        return audio,client,peer
+    def test_audio_stream_is_reopened_once_when_the_head_unit_returns_audio(self):
+        audio,client,peer=self.audio_return(True)
+        audio.reopen.assert_called_once_with(client,peer)
+    def test_audio_stream_is_left_alone_unless_the_head_unit_needs_it(self):
+        audio,_,_=self.audio_return(False)
+        audio.reopen.assert_not_called()
     def test_denied_reentry_does_not_unmute_or_claim_screen(self):
         import time
         from types import SimpleNamespace

@@ -255,7 +255,7 @@ class UiCommands:
 
 class ScreenFeedback:
     """Keep control requests away from the video producer's critical path."""
-    def __init__(self,client,commands=None,modes=None,resume=None,screen=None,resource_changed=None,audio=None,duck=None,mode_lock=None,mode_revision=None):
+    def __init__(self,client,commands=None,modes=None,resume=None,screen=None,resource_changed=None,audio=None,duck=None,mode_lock=None,mode_revision=None,reopen_audio=False):
         self.client=client
         self.commands=commands
         self.modes=modes
@@ -263,6 +263,8 @@ class ScreenFeedback:
         self.screen=screen
         self.resource_changed=resource_changed
         self.audio=audio
+        self.audio_entity=1
+        self.reopen_audio=reopen_audio
         self.duck=duck if duck is not None else [1.0]
         self.mode_lock=mode_lock or threading.RLock()
         self.mode_revision=mode_revision if mode_revision is not None else [0]
@@ -303,6 +305,7 @@ class ScreenFeedback:
                     command_status=plistlib.loads(body).get('status',0) if body else 0
                     accepted=status==200 and command_status==0
                     if accepted:
+                        reopen=False
                         with self.mode_lock:
                             current=self.mode_revision[0]==revision
                             if current:
@@ -312,6 +315,13 @@ class ScreenFeedback:
                                     entity=next(r['entity'] for r in self.modes['resources'] if r['resourceID']==2)
                                     self.audio.gain=self.duck[0] if entity==1 else 0.0
                                     print('Audio resource reconciled entity={} senderGain={}'.format(entity,self.audio.gain),flush=True)
+                                    returned=entity==1 and self.audio_entity==2
+                                    self.audio_entity=entity
+                                    reopen=returned and self.reopen_audio
+                        if reopen:
+                            # Outside the mode lock: this is two requests to the receiver.
+                            try:self.audio.reopen(self.client,self.client.sock.sock.getpeername())
+                            except Exception as error:print('Audio reopen failed: {}: {}'.format(type(error).__name__,error),flush=True)
                         if current and self.screen:self.screen.ownership(owner)
                         elif not current and self.resource_changed is not None:self.resource_changed.set()
                     elif changed:
@@ -586,7 +596,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             from .screenstream import ScreenStream
             screen=ScreenStream(client,address,interface,shared,display,video,stream_id,width,height,
                                 request_keyframe=pipeline.request_keyframe,packet_profile=packet_profile)
-            feedback=ScreenFeedback(client,commands,modes,resume,screen,resource_changed,audio,duck,mode_lock,mode_revision)
+            feedback=ScreenFeedback(client,commands,modes,resume,screen,resource_changed,audio,duck,mode_lock,mode_revision,
+                                    reopen_audio=marelli_carline(info))
         if live:
             import itertools
             source = itertools.chain([first_live_frame],source)

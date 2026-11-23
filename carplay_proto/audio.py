@@ -67,6 +67,7 @@ class AudioSender:
         self.stop=threading.Event();self.thread=None;self.process=None;self.log=None
         self.gain=1.0
         self.receiver_info=info
+        self.shared=shared;self.send_lock=threading.Lock()
     def description(self):
         return {'type':102 if self.aac else 100,'streamConnectionID':self.stream_id,'audioFormat':8388608 if self.aac else 32768,'audioType':'media',
                 'audioLatencyMs':1000 if self.aac else 100,'ct':4 if self.aac else 1,'sr':48000,'ch':2,'input':False,'controlPort':self.control.getsockname()[1],
@@ -81,6 +82,35 @@ class AudioSender:
         if self.process is None:self.prepare()
         self.thread=threading.Thread(target=self.run_aac if self.aac else self.run,daemon=True);self.thread.start()
         print('Audio RTP sender started: {} 48000Hz stereo encrypted spf={}'.format('AAC-LC' if self.aac else 'PCM',1024 if self.aac else 352),flush=True)
+    def reopen(self,client,peer):
+        """Replace the receiver's audio stream, keeping the capture running.
+
+        A Marelli CARLINE unit stops rendering main audio after it borrowed
+        the resource for a phone call: RTP keeps flowing, but the sample
+        clock it reports in /feedback jumps and then stays frozen. It plays
+        again when given a fresh stream once it hands audio back.
+        """
+        import plistlib
+        kind=102 if self.aac else 100
+        headers={'Content-Type':'application/x-apple-binary-plist'}
+        with self.send_lock:
+            status,_,_=client.request('TEARDOWN','/',plistlib.dumps(
+                {'streams':[{'type':kind,'streamConnectionID':self.stream_id}]},fmt=plistlib.FMT_BINARY),headers)
+            print('Audio reopen TEARDOWN status={}'.format(status),flush=True)
+            stream_id=int.from_bytes(os.urandom(7),'big') or 1
+            description=dict(self.description(),streamConnectionID=stream_id)
+            status,_,body=client.request('SETUP','/setup',plistlib.dumps({'streams':[description]},fmt=plistlib.FMT_BINARY),headers)
+            print('Audio reopen SETUP status={}'.format(status),flush=True)
+            if status!=200:return False
+            response=next(s for s in plistlib.loads(body)['streams'] if s['type']==kind)
+            old=self.sock
+            sock=socket.socket(old.family,socket.SOCK_DGRAM)
+            local=list(old.getsockname());local[1]=0;sock.bind(tuple(local));sock.settimeout(.5)
+            dest=list(peer);dest[1]=int(response['dataPort']);sock.connect(tuple(dest))
+            self.stream_id=stream_id;self.encoder=AudioEncoder(self.shared,stream_id);self.sock=sock
+            old.close()
+            print('Audio reopen complete dataPort={} streamConnectionID={}'.format(response['dataPort'],stream_id),flush=True)
+            return True
     def prepare(self,timeout=10):
         """Wait for actual PCM before the receiver starts its audio resource."""
         if self.process is not None:return
@@ -144,7 +174,7 @@ class AudioSender:
                     now=time.monotonic()
                     if deadline<now-.1:deadline=now;resets+=1
                     if self.stop.wait(max(0,deadline-now)):break
-                    self.sock.send(self.encoder.packet(chunk))
+                    with self.send_lock:self.sock.send(self.encoder.packet(chunk))
                     sent=time.monotonic()
                     if last_send is not None:send_gap=max(send_gap,sent-last_send)
                     last_send=sent;deadline+=352/48000;count+=1
@@ -164,7 +194,7 @@ class AudioSender:
                 now=time.monotonic()
                 if deadline<now-.1:deadline=now
                 if self.stop.wait(max(0,deadline-now)):break
-                self.sock.send(self.encoder.encoded_packet(frame))
+                with self.send_lock:self.sock.send(self.encoder.encoded_packet(frame))
                 sent=time.monotonic()
                 if previous is not None:gap=max(gap,sent-previous)
                 previous=sent;deadline+=1024/48000;count+=1
