@@ -618,6 +618,11 @@ def airplay_link(sock, stop, local_name='SailfishOS', local_address=None,
           paired_pin_path=pin_path, transport='airplay')
 
 
+def bluez_restarted(name, new_owner):
+    """True when a NameOwnerChanged signal announces a new bluetoothd."""
+    return str(name) == 'org.bluez' and bool(str(new_owner))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--channel', type=int, default=19)
@@ -792,7 +797,23 @@ def main():
                                 bus_name='org.bluez', path_keyword='path')
         GLib.idle_add(connect)
         # A failed attempt must not require another Bluetooth Connected signal.
-        GLib.timeout_add_seconds(10, lambda: (connect(), True)[1])
+        def retry():
+            try:
+                connect()
+            except dbus.DBusException as error:
+                # Keep the timer: an exception would silently remove it.
+                logging.warning('CarPlay connection check failed: %s', error.get_dbus_name())
+            return True
+        GLib.timeout_add_seconds(10, retry)
+    def bluez_owner_changed(name, old_owner, new_owner):
+        if bluez_restarted(name, new_owner):
+            # A new bluetoothd knows neither our SDP record nor our profiles;
+            # the car then connects, finds no CarPlay service and hangs up.
+            logging.info('BlueZ restarted; rebuilding phone advertisement and profiles')
+            loop.quit()
+    bus.add_signal_receiver(bluez_owner_changed, signal_name='NameOwnerChanged',
+                            dbus_interface='org.freedesktop.DBus', bus_name='org.freedesktop.DBus',
+                            path='/org/freedesktop/DBus', arg0='org.bluez')
     logging.info('phone profile registered; waiting for RFCOMM connection')
     if args.seconds:
         GLib.timeout_add_seconds(args.seconds, lambda: (loop.quit(), False)[1])
