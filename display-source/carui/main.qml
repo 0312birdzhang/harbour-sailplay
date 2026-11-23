@@ -86,6 +86,15 @@ Window {
                 x: 25; y: 207 + index * 121; width: 90; height: 90; radius: 21; color: dockTouch.pressed ? carPalette.pressed : carPalette.card
                 Image { anchors.centerIn: parent; width: 78; height: 78; fillMode: Image.PreserveAspectFit; source: modelData.icon ? "file://" + modelData.icon : ""; visible: source !== "" }
                 Text { anchors.centerIn: parent; text: modelData.icon ? "" : modelData.name.charAt(0); color: carPalette.text; font.pixelSize: 38 }
+                // The ambience glow marks the application on screen.
+                Silica.GlassItem {
+                    objectName: "dockActiveGlow"
+                    visible: modelData.appId !== "" && (carController.currentApp === modelData.appId
+                        || (carController.musicActive && carController.lastMusicApp === modelData.appId))
+                    anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height / 2 + 6
+                    width: 52; height: 52
+                    color: carPalette.highlightColor; falloffRadius: 0.2; radius: 0.2; cache: false
+                }
                 MouseArea { id: dockTouch; anchors.fill: parent; onClicked: carController.dockClicked(modelData.appId) }
             }
         }
