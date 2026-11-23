@@ -30,6 +30,17 @@ class PresentationTests(unittest.TestCase):
             'b': {'image': 'https://example.org/b.jpg'},
             'c': {'playback': 'finished'}}})
 
+    def test_tabs_and_wide_cards(self):
+        folders = [content_item('new', 'New'), content_item('all', 'All')]
+        rich = content_page(items=folders, layout='wide', tabs=True)
+        page, presentation = split_content(rich)
+        self.assertEqual(presentation, {'layout': 'wide', 'tabs': True})
+        self.assertEqual(merge_content(page, presentation), rich)
+        self.assertNotIn('tabs', content_page(items=folders, tabs=False))
+        with self.assertRaises(Fault):
+            content_page(items=folders, tabs='yes')
+        self.assertEqual(merge_content(page, {'tabs': 1, 'layout': ['grid']}), page)
+
     def test_merging_restores_the_rich_page(self):
         rich = content_page(items=rows(), layout='grid')
         self.assertEqual(merge_content(*split_content(rich)), rich)

@@ -15,6 +15,9 @@ class SailplayContentHost : public QObject
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(QVariantMap page READ page NOTIFY changed)
     Q_PROPERTY(QVariantList items READ items NOTIFY changed)
+    Q_PROPERTY(QString layout READ layout NOTIFY changed)
+    Q_PROPERTY(QVariantList tabs READ tabs NOTIFY changed)
+    Q_PROPERTY(QString currentTab READ currentTab NOTIFY changed)
 
 public:
     explicit SailplayContentHost(QObject *parent = nullptr);
@@ -27,10 +30,14 @@ public:
     QString error() const { return m_error; }
     QVariantMap page() const { return m_page; }
     QVariantList items() const { return m_items; }
+    QString layout() const { return m_layout; }
+    QVariantList tabs() const { return m_location.tabs; }
+    QString currentTab() const { return m_location.tabs.isEmpty() ? QString() : m_location.id; }
     void open(const SailplayApplication &declaration, const QString &name);
     void setActive(bool active);
     void close();
     Q_INVOKABLE void select(const QString &id);
+    Q_INVOKABLE void selectTab(const QString &id);
     Q_INVOKABLE void action(const QString &id);
     Q_INVOKABLE void search(const QString &query);
     Q_INVOKABLE void back();
@@ -46,8 +53,13 @@ private:
     struct Location {
         QString id = QStringLiteral("root");
         QString query;
+        // Folders of a tabbed page, shown above the selected one's content.
+        QVariantList tabs;
+        QString tabsOwner;
     };
     void receiveState();
+    void present(const QVariantMap &page, const QVariantList &items, const QVariantMap &presentation);
+    bool enterTabs(const QVariantMap &page, const QVariantList &items, const QVariantMap &presentation);
     void requestPage(uint offset = 0);
     void invokeItem(const QVariantMap &item, bool listItem = false);
     void fail(const QString &message);
@@ -56,6 +68,8 @@ private:
     QString m_name;
     QString m_error;
     QVariantMap m_root;
+    QVariantMap m_rootPresentation;
+    QString m_layout = QStringLiteral("list");
     QVariantMap m_page;
     QVariantList m_items;
     QList<Location> m_history;

@@ -14,7 +14,7 @@ MAX_ITEMS = 50
 # Optional presentation hints. They travel beside the page, never inside it,
 # so that a host or a provider which predates them keeps working unchanged.
 PLAYBACK = ('unplayed', 'started', 'playing', 'finished')
-LAYOUTS = ('list', 'grid')
+LAYOUTS = ('list', 'grid', 'wide')
 HINT_FIELDS = ('image', 'playback')
 MAX_IMAGE = 2048
 MAX_OFFSET = (1 << 32) - 1
@@ -74,12 +74,15 @@ def validate_item(value):
 
 
 def content_page(identity='root', title='', items=(), actions=(), search_enabled=False,
-                 message='', message_kind='none', offset=0, has_more=False, version=1, layout=''):
-    """A page; rows may carry hints and `layout` selects a standard arrangement."""
+                 message='', message_kind='none', offset=0, has_more=False, version=1, layout='', tabs=False):
+    """A page; rows may carry hints, `layout` selects a standard arrangement
+    and `tabs` shows the page's folders as a tab bar above the selected one."""
     page = dict(id=identity, title=title, version=version, items=list(items), actions=list(actions),
         searchEnabled=search_enabled, message=message, messageKind=message_kind, offset=offset, hasMore=has_more)
     if layout != '':
         page['layout'] = layout
+    if tabs is not False:
+        page['tabs'] = tabs
     return merge_content(*split_content(page))
 
 
@@ -87,10 +90,12 @@ def split_content(value):
     """Separate a page from its hints: a strict Content1 page and a presentation."""
     if not isinstance(value, dict):
         raise Fault('InvalidArgument', 'content page fields do not match Content1')
-    page = {key: entry for key, entry in value.items() if key != 'layout'}
-    layout = value.get('layout', '')
+    page = {key: entry for key, entry in value.items() if key not in ('layout', 'tabs')}
+    layout, tabs = value.get('layout', ''), value.get('tabs', False)
     if layout != '' and layout not in LAYOUTS:
         raise Fault('InvalidArgument', 'unknown content layout')
+    if not isinstance(tabs, (bool, Boolean)):
+        raise Fault('InvalidArgument', 'content tabs must be a boolean')
     hints = {}
     for key in ('items', 'actions'):
         entries = page.get(key)
@@ -105,6 +110,8 @@ def split_content(value):
     presentation = {}
     if layout != '':
         presentation['layout'] = str(layout)
+    if tabs:
+        presentation['tabs'] = True
     if hints:
         presentation['items'] = hints
     return validate_content(page), presentation
@@ -115,8 +122,10 @@ def clean_presentation(value, page):
     result = {}
     if not isinstance(value, dict):
         return result
-    if value.get('layout') in LAYOUTS:
+    if isinstance(value.get('layout'), str) and value['layout'] in LAYOUTS:
         result['layout'] = str(value['layout'])
+    if isinstance(value.get('tabs'), (bool, Boolean)) and value['tabs']:
+        result['tabs'] = True
     identities = {item['id'] for item in page['items']}
     hints = {}
     entries = value.get('items')
@@ -126,7 +135,7 @@ def clean_presentation(value, page):
         kept = {}
         if _image(entry.get('image')):
             kept['image'] = str(entry['image'])
-        if entry.get('playback') in PLAYBACK:
+        if isinstance(entry.get('playback'), str) and entry['playback'] in PLAYBACK:
             kept['playback'] = str(entry['playback'])
         if kept:
             hints[str(identity)] = kept
@@ -140,8 +149,9 @@ def merge_content(page, presentation=None):
     presentation = clean_presentation(presentation, page)
     hints = presentation.get('items', {})
     result = dict(page, items=[dict(item, **hints.get(item['id'], {})) for item in page['items']])
-    if 'layout' in presentation:
-        result['layout'] = presentation['layout']
+    for key in ('layout', 'tabs'):
+        if key in presentation:
+            result[key] = presentation[key]
     return result
 
 

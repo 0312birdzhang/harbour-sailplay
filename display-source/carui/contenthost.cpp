@@ -53,7 +53,11 @@ SailplayContentHost::SailplayContentHost(QObject *parent) : QObject(parent), m_s
                 requestPage();
                 return;
             }
-            const QVariantList incoming = page.value("items").toList();
+            const QVariantMap presentation =
+                SailplayContent::cleanPresentation(result.value(QStringLiteral("presentation")), page);
+            const QVariantList incoming =
+                SailplayContent::presentedItems(page.value("items").toList(), presentation);
+            if (!m_offset && enterTabs(page, incoming, presentation)) return;
             QVariantList items = m_offset ? m_items : QVariantList();
             QSet<QString> ids;
             for (const QVariant &entry : items) ids.insert(entry.toMap().value("id").toString());
@@ -63,10 +67,7 @@ SailplayContentHost::SailplayContentHost(QObject *parent) : QObject(parent), m_s
                 ids.insert(identity);
                 items.append(entry);
             }
-            m_page = page;
-            m_items = items;
-            m_error.clear();
-            emit changed();
+            present(page, items, presentation);
         });
 }
 
@@ -100,6 +101,8 @@ void SailplayContentHost::close()
     m_activatedItem.clear();
     m_page.clear();
     m_root.clear();
+    m_rootPresentation.clear();
+    m_layout = QStringLiteral("list");
     m_items.clear();
     m_history.clear();
     m_location = Location();
@@ -114,6 +117,7 @@ void SailplayContentHost::receiveState()
     if (!m_session.revision()) {
         m_request = 0;
         m_root.clear();
+        m_rootPresentation.clear();
         m_page.clear();
         m_items.clear();
     } else {
@@ -123,8 +127,11 @@ void SailplayContentHost::receiveState()
             fail(translated("Content provider returned an invalid page"));
             return;
         }
-        const bool contentChanged = root != m_root;
+        const QVariantMap presentation = SailplayContent::cleanPresentation(
+            m_session.state().value(QStringLiteral("contentPresentation")), root);
+        const bool contentChanged = root != m_root || presentation != m_rootPresentation;
         m_root = root;
+        m_rootPresentation = presentation;
         // A pending action remains pending across its own state publication.
         if (contentChanged && !busy()) refresh();
     }
@@ -146,15 +153,78 @@ void SailplayContentHost::requestPage(uint offset)
     emit changed();
 }
 
+void SailplayContentHost::present(const QVariantMap &page, const QVariantList &items, const QVariantMap &presentation)
+{
+    m_page = page;
+    m_items = items;
+    m_layout = presentation.value(QStringLiteral("layout"), QStringLiteral("list")).toString();
+    m_error.clear();
+    emit changed();
+}
+
+// A tabbed page lists folders only. Its folders become a tab bar and the host
+// shows the selected folder beneath it, without adding to the browsing history.
+bool SailplayContentHost::enterTabs(const QVariantMap &page, const QVariantList &items, const QVariantMap &presentation)
+{
+    if (!presentation.value(QStringLiteral("tabs")).toBool() || !m_location.tabs.isEmpty()
+        || !m_location.query.isEmpty() || page.value("hasMore").toBool() || items.isEmpty() || items.size() > 12)
+        return false;
+    QString first;
+    for (const QVariant &entry : items) {
+        const QVariantMap item = entry.toMap();
+        if (item.value("kind") != QStringLiteral("folder")) return false;
+        if (first.isEmpty() && item.value("enabled").toBool()) first = item.value("id").toString();
+    }
+    if (first.isEmpty()) return false;
+    m_location.tabs = items;
+    m_location.tabsOwner = page.value("id").toString();
+    m_location.id = first;
+    m_page.clear();
+    m_items.clear();
+    requestPage();
+    return true;
+}
+
 void SailplayContentHost::refresh()
 {
     m_request = 0;
+    if (m_location.tabsOwner == QStringLiteral("root") && m_location.query.isEmpty() && !m_root.isEmpty()) {
+        // The root's folders may have changed: rebuild its tab bar, keeping the selected tab when it remains.
+        const QString selected = m_location.id;
+        m_location = Location();
+        const QVariantList items = SailplayContent::presentedItems(m_root.value("items").toList(), m_rootPresentation);
+        if (enterTabs(m_root, items, m_rootPresentation)) {
+            for (const QVariant &entry : m_location.tabs) {
+                const QVariantMap item = entry.toMap();
+                if (item.value("id").toString() == selected && item.value("enabled").toBool()
+                    && m_location.id != selected) {
+                    m_location.id = selected;
+                    requestPage();
+                }
+            }
+            return;
+        }
+    }
     if (m_location.id == QStringLiteral("root") && m_location.query.isEmpty() && !m_root.isEmpty()) {
-        m_page = m_root;
-        m_items = m_root.value("items").toList();
-        m_error.clear();
-        emit changed();
+        const QVariantList items = SailplayContent::presentedItems(m_root.value("items").toList(), m_rootPresentation);
+        if (enterTabs(m_root, items, m_rootPresentation)) return;
+        present(m_root, items, m_rootPresentation);
     } else requestPage();
+}
+
+void SailplayContentHost::selectTab(const QString &id)
+{
+    if (!ready() || busy() || id == m_location.id) return;
+    for (const QVariant &entry : m_location.tabs) {
+        const QVariantMap item = entry.toMap();
+        if (item.value("id").toString() != id || !item.value("enabled").toBool()) continue;
+        m_location.id = id;
+        m_location.query.clear();
+        m_page.clear();
+        m_items.clear();
+        requestPage();
+        return;
+    }
 }
 
 void SailplayContentHost::invokeItem(const QVariantMap &item, bool listItem)
@@ -163,8 +233,8 @@ void SailplayContentHost::invokeItem(const QVariantMap &item, bool listItem)
     if (item.value("kind") == QStringLiteral("folder")) {
         if (m_history.size() >= 32) { fail(translated("Content history limit reached")); return; }
         m_history.append(m_location);
+        m_location = Location();
         m_location.id = item.value("id").toString();
-        m_location.query.clear();
         m_page.clear();
         m_items.clear();
         requestPage();

@@ -493,6 +493,51 @@ selection. Its normal MPRIS interface continues to handle playback controls.
 Selecting a queue row checks the index and song identity against the current
 queue before using the native player's existing selection operation.
 
+### Presentation hints
+
+A provider may describe how a page is best shown in the car. The hints are
+optional and travel beside the page, never inside it: a query completes with
+`{"content": page, "presentation": hints}` and the root page's hints are
+published in the state under `contentPresentation`. Content1 pages keep their
+exact fields, so a host that predates the hints shows the plain list, and a
+provider that sends none is shown as before. A host keeps the hints it can use
+and never rejects a page because of them.
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `layout` | string | `list` (default), `grid` for square cards or `wide` for rectangular cards |
+| `tabs` | boolean | Show this page's folders as a tab bar above the selected folder |
+| `items` | dictionary | Per-row hints, keyed by row identity |
+
+Each entry of `items` may contain these keys.
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `image` | string | An absolute file path, a `file:///` address or an `http(s)://` address, up to 2048 characters |
+| `playback` | string | `unplayed`, `started`, `playing` or `finished` |
+
+Cards have one size per page whatever their text, and the whole card is the
+touch target. A card shows its image, or the initial of its title when it has
+none, a title of at most two lines and, on wide cards, a one-line subtitle.
+The playback status is drawn as a badge; the row being played is outlined.
+Images are read by the host, outside the provider's sandbox: a file must be
+readable by the session user.
+
+A tabbed page lists one to twelve folders and nothing else, in a single reply.
+The host shows them as tabs of a fixed size on one line, then a second, opens
+the first enabled one and displays its page beneath, laid out by that page's
+own hints. Choosing another tab replaces the displayed folder without adding
+to the browsing history. A folder opened from a card starts a new history
+entry. A page that asks for tabs without meeting these rules is shown
+according to its layout.
+
+Python providers pass `image=` and `playback=` to `content_item`, `layout=`
+and `tabs=` to `content_page`, complete queries with `content_result(page)`
+and publish the root page as before. `split_content` and `merge_content`
+convert between the rich page and the wire form. Qt providers build the
+dictionary with `SailplayContent::presentation` and `SailplayContent::hint`
+and add it to their results and state themselves.
+
 Content1 remains experimental while dedicated map rendering and physical
 phone/car acceptance continue.
 
