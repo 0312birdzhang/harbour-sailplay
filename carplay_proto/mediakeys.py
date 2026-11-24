@@ -69,7 +69,9 @@ class MediaKeys:
                 'exec env XDG_RUNTIME_DIR=/run/user/100000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100000/dbus/user_bus_socket python3 /opt/sailplay/scripts/media-control.py '+action],
                 stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=4,universal_newlines=True)
             print('Media control {} exit={} {}'.format(action,result.returncode,result.stdout.strip()[:500]),flush=True)
+            return result.returncode == 0 and ' delivered to ' in result.stdout
         except Exception as error:print('Media control failed {} {}'.format(action,type(error).__name__),flush=True)
+        return False
     def command(self,value):
         key=str(value.get('uuid'))
         if value.get('type')!='hidSendReport' or key not in self.layouts:return False
@@ -85,10 +87,19 @@ class MediaKeys:
         while not self.stop.is_set():
             try:action=self.pending.get(timeout=.1)
             except queue.Empty:continue
-            if not self.stop.is_set():self.call(action)
+            if self.stop.is_set():continue
+            if action == 'ResumePreferred':
+                # The background player can register after the audio channel.
+                # Retry only until a player accepts Play, never toggle playback.
+                for _ in range(15):
+                    if self.stop.is_set() or self.call(action):break
+                    if self.stop.wait(.5):break
+            else:self.call(action)
     def started(self):
+        if self.active:return
         self.active=True
         fd=os.open(MARKER,os.O_CREAT|os.O_WRONLY|os.O_TRUNC|os.O_NOFOLLOW,0o600);os.close(fd)
+        self.pending.put_nowait('ResumePreferred')
     def close(self):
         self.stop.set();self.thread.join(4.5)
         if self.active:

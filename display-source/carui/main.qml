@@ -198,12 +198,14 @@ Window {
         }
         Rectangle {
             id: musicCard
+            objectName: "musicCard"
             x: carController.musicActive ? 16 : parent.mapWidth + 32
             y: carController.musicActive ? parent.verticalGap : weatherCard.y + weatherCard.height + parent.verticalGap
             width: carController.musicActive ? parent.width - 32 : parent.width - parent.mapWidth - 48
             height: parent.height - y - parent.verticalGap
             radius: 22; color: carPalette.card
             property var player: lockscreenMusic.mprisController
+            property bool splitMusic: carController.musicActive && width > 1000
             property string artworkKey: player ? String(player.metaData.artUrl || player.metaData.url || "") : ""
             property url artwork: ""
             onArtworkKeyChanged: refreshArtwork()
@@ -227,10 +229,12 @@ Window {
             }
             MusicPlayer {
                 id: lockscreenMusic
+                objectName: "musicControls"
                 compact: !carController.musicActive
-                width: Math.min(parent.width - 64, compact ? parent.width : 1000)
-                x: (parent.width - width) / 2
-                y: Math.max(12, (musicCard.height - height - musicProgress.height - lyricsArea.height - 12) / 2)
+                width: compact || !musicCard.splitMusic ? parent.width - 64 : Math.min(820, parent.width * .48 - 48)
+                x: compact ? (parent.width - width) / 2 : 32
+                y: Math.max(carController.musicActive ? 86 : 12,
+                    musicCard.splitMusic || compact ? (musicCard.height - height - musicProgress.height - (compact ? 60 : 0) - 12) / 2 : 90)
                 albumArtSource: musicCard.artwork
                 onClicked: musicCard.openMusic()
             }
@@ -244,9 +248,13 @@ Window {
                 // Amber metadata duration is milliseconds; queried MPRIS Position is microseconds.
                 property real durationSeconds: player ? Math.max(0, Number(player.metaData.duration || 0) / 1000) : 0
                 property real positionSeconds: 0
-                property string trackKey: player ? [player.currentService || "", String(player.metaData.trackId || ""),
+                property real sampledPosition: 0
+                property double sampledAt: 0
+                property bool sampledPlaying: false
+                property real sampledRate: 1
+                property string trackKey: player ? [player.currentService || "", carController.playerTrackId(player.metaData.trackId),
                     player.metaData.url || "", player.metaData.title || ""].join("|") : ""
-                onTrackKeyChanged: { positionSeconds = 0; refresh() }
+                onTrackKeyChanged: { sampledAt = 0; positionSeconds = 0; refresh() }
                 property var seekTrackId
                 property string seekService
                 function timeText(seconds) {
@@ -260,20 +268,38 @@ Window {
                     else positionSeconds = 0
                 }
                 function applyPosition(seconds) {
-                    positionSeconds = Math.max(0, seconds)
+                    sampledPosition = Math.max(0, seconds)
+                    sampledAt = Date.now()
+                    sampledPlaying = lockscreenMusic.playing
+                    sampledRate = player && player.rate > 0 ? player.rate : 1
+                    advance()
+                }
+                function advance() {
+                    var elapsed = sampledAt && sampledPlaying ? Math.max(0, Date.now() - sampledAt) / 1000 : 0
+                    positionSeconds = Math.max(0, sampledPosition + elapsed * sampledRate)
+                    if (durationSeconds > 0) positionSeconds = Math.min(durationSeconds, positionSeconds)
                     if (!seekSlider.pressed)
                         seekSlider.value = Math.min(durationSeconds || positionSeconds, positionSeconds)
                 }
                 Timer {
-                    interval: 1000; repeat: true; triggeredOnStart: true
+                    interval: 5000; repeat: true; triggeredOnStart: true
                     running: musicProgress.visible && !!musicProgress.player
                     onTriggered: musicProgress.refresh()
                 }
+                Timer {
+                    interval: 200; repeat: true
+                    running: musicProgress.visible && lockscreenMusic.playing && musicProgress.sampledAt > 0
+                    onTriggered: musicProgress.advance()
+                }
                 Connections {
                     target: musicProgress.player
-                    onPositionChanged: musicProgress.refresh()
-                    onPlaybackStatusChanged: musicProgress.refresh()
+                    onPlaybackStatusChanged: {
+                        musicProgress.advance()
+                        musicProgress.applyPosition(musicProgress.positionSeconds)
+                        musicProgress.refresh()
+                    }
                     onSeeked: musicProgress.refresh()
+                    onRateChanged: { musicProgress.advance(); musicProgress.applyPosition(musicProgress.positionSeconds); musicProgress.refresh() }
                 }
                 Connections {
                     target: carController
@@ -311,8 +337,10 @@ Window {
                         if (pressed) {
                             musicProgress.seekTrackId = musicProgress.player.metaData.trackId
                             musicProgress.seekService = musicProgress.player.currentService
-                        } else if (enabled && musicProgress.seekService === musicProgress.player.currentService)
+                        } else if (enabled && musicProgress.seekService === musicProgress.player.currentService) {
                             carController.seekPlayer(musicProgress.seekService, musicProgress.seekTrackId, value)
+                            musicProgress.applyPosition(value)
+                        }
                     }
                 }
                 Text {
@@ -325,52 +353,17 @@ Window {
                     text: musicProgress.durationSeconds > 0 ? musicProgress.timeText(musicProgress.durationSeconds) : "--:--"
                 }
             }
-            Item {
+            LyricsPanel {
                 id: lyricsArea
-                x: lockscreenMusic.x; width: lockscreenMusic.width
-                y: musicProgress.y + musicProgress.height + 8
-                height: currentLine.text ? (carController.musicActive ? 100 : 54) : 0
-                clip: true
-                property var lines: []
-                property int offsetMs: 0
-                property string identity: musicProgress.trackKey
-                property int currentIndex: -1
-                onIdentityChanged: { lines = []; currentIndex = -1; load() }
-                function load() {
-                    var p = musicProgress.player
-                    if (p && p.currentService && p.metaData.trackId)
-                        carController.requestPlayerLyrics(p.currentService, String(p.metaData.trackId), identity)
-                }
-                function update() {
-                    var seconds = musicProgress.positionSeconds + offsetMs / 1000
-                    var i = -1
-                    while (i + 1 < lines.length && lines[i + 1][0] <= seconds) ++i
-                    currentIndex = i
-                }
-                Timer { interval: 5000; running: musicCard.visible; repeat: true; triggeredOnStart: true; onTriggered: lyricsArea.load() }
-                Connections { target: musicProgress; onPositionSecondsChanged: lyricsArea.update() }
-                Connections {
-                    target: carController
-                    onPlayerLyricsAvailable: {
-                        if (key !== lyricsArea.identity) return
-                        lyricsArea.lines = rows; lyricsArea.offsetMs = offsetMs; lyricsArea.update()
-                    }
-                }
-                Text {
-                    id: currentLine
-                    width: parent.width; horizontalAlignment: Text.AlignHCenter
-                    color: carPalette.text; font.pixelSize: carController.musicActive ? 34 : 26
-                    elide: Text.ElideRight
-                    text: lyricsArea.currentIndex >= 0 && lyricsArea.currentIndex < lyricsArea.lines.length
-                        ? lyricsArea.lines[lyricsArea.currentIndex][1] : ""
-                }
-                Text {
-                    y: 48; width: parent.width; visible: carController.musicActive
-                    horizontalAlignment: Text.AlignHCenter; color: carPalette.secondary; font.pixelSize: 26
-                    elide: Text.ElideRight
-                    text: lyricsArea.currentIndex + 1 < lyricsArea.lines.length && lyricsArea.currentIndex >= 0
-                        ? lyricsArea.lines[lyricsArea.currentIndex + 1][1] : ""
-                }
+                palette: carPalette
+                player: musicProgress.player
+                positionSeconds: musicProgress.positionSeconds
+                trackKey: musicProgress.trackKey
+                expanded: carController.musicActive
+                x: musicCard.splitMusic ? musicCard.width * .52 : lockscreenMusic.x
+                width: musicCard.splitMusic ? musicCard.width - x - 32 : lockscreenMusic.width
+                y: musicCard.splitMusic ? 90 : musicProgress.y + musicProgress.height + 8
+                height: expanded ? Math.max(60, musicCard.height - y - 24) : 60
             }
             Text {
                 anchors.centerIn: parent; width: parent.width - 64; wrapMode: Text.WordWrap

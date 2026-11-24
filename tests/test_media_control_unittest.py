@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
+from unittest.mock import patch
 import queue
 import unittest
 from carplay_proto.mediakeys import consumer_layout,pressed_usages,MediaKeys
@@ -9,6 +10,30 @@ spec=importlib.util.spec_from_file_location('media_control',Path(__file__).resol
 control=importlib.util.module_from_spec(spec);spec.loader.exec_module(control)
 DESCRIPTOR=bytes.fromhex('050c0901a10115002506050c0a00000ab0000ab1000ab5000ab6000ab9000abc00750895018100c0')
 class MediaTests(unittest.TestCase):
+    def test_audio_ready_resumes_only_once(self):
+        m=MediaKeys.__new__(MediaKeys);m.active=False;m.pending=queue.Queue()
+        with patch('carplay_proto.mediakeys.os.open',return_value=9), patch('carplay_proto.mediakeys.os.close'):
+            m.started();m.started()
+        self.assertEqual(m.pending.get_nowait(),'ResumePreferred')
+        self.assertTrue(m.pending.empty())
+
+    def test_remembered_player_receives_resume_and_hardware_keys(self):
+        bus=Mock();bus.list_names.return_value=['org.mpris.MediaPlayer2.other','org.mpris.MediaPlayer2.music']
+        bus.get_object.side_effect=lambda name,path:name
+        players={name:Mock() for name in bus.list_names.return_value}
+        def interface(obj,name):
+            if name=='org.freedesktop.DBus.Properties':
+                return SimpleNamespace(GetAll=lambda iface,**kw:
+                    {'DesktopEntry':'music' if obj.endswith('music') else 'other'} if iface=='org.mpris.MediaPlayer2' else
+                    {'PlaybackStatus':'Paused' if obj.endswith('music') else 'Playing','CanPlay':True,'CanGoNext':True})
+            return players[obj]
+        preferred=('org.mpris.MediaPlayer2.music','music')
+        control.control(bus,'ResumePreferred',interface,preferred)
+        players[preferred[0]].Play.assert_called_once()
+        control.control(bus,'Next',interface,preferred)
+        players[preferred[0]].Next.assert_called_once()
+        players['org.mpris.MediaPlayer2.other'].Play.assert_not_called()
+        self.assertEqual(control.control(bus,'ResumePreferred',interface,('org.mpris.MediaPlayer2.missing','missing')),'no eligible player')
     def test_toyota_array_selector_next_previous(self):
         layout=consumer_layout(DESCRIPTOR)
         self.assertEqual(pressed_usages(layout,b'\x03'),{0xb5})

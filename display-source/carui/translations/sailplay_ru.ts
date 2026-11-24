@@ -655,6 +655,9 @@ Start music on your phone</source>
       <source>Reconnect to apply. iOS 27 uses the experimental build identity 24A1.</source>
       <translation>Переподключитесь для применения. iOS 27 использует экспериментальный идентификатор сборки 24A1.</translation>
     </message>
+    <message><source>Loading lyrics…</source><translation>Загрузка текста…</translation></message>
+    <message><source>No lyrics available</source><translation>Текст недоступен</translation></message>
+    <message><source>Player</source><translation>Проигрыватель</translation></message>
   </context>
   <context>
     <name>CarUiController</name>

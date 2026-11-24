@@ -776,6 +776,9 @@ public:
         return !musicApplicationId(state.value(QStringLiteral("MusicApp")).toString()).isEmpty();
     }
     Q_INVOKABLE QString preferredMusicService(const QStringList &services) const {
+        QSettings state(uiStatePath(), QSettings::IniFormat);
+        const QString selected = state.value(QStringLiteral("MusicService")).toString();
+        if (services.contains(selected)) return selected;
         for (const QString &service : services) {
             if (!service.startsWith(QStringLiteral("org.mpris.MediaPlayer2."))) continue;
             QDBusMessage get = QDBusMessage::createMethodCall(service, QStringLiteral("/org/mpris/MediaPlayer2"),
@@ -800,6 +803,10 @@ public:
     }
     Q_INVOKABLE void rememberMusicPlayer(const QString &service) {
         if (!service.startsWith(QStringLiteral("org.mpris.MediaPlayer2."))) return;
+        // DesktopEntry is optional in MPRIS. Keep the exact selection even
+        // for players that cannot be mapped to a launchable desktop file.
+        QSettings selection(uiStatePath(), QSettings::IniFormat);
+        selection.setValue(QStringLiteral("MusicService"), service); selection.sync();
         QDBusMessage get = QDBusMessage::createMethodCall(service, QStringLiteral("/org/mpris/MediaPlayer2"),
             QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
         get << QStringLiteral("org.mpris.MediaPlayer2") << QStringLiteral("DesktopEntry");
@@ -812,8 +819,10 @@ public:
         attachMusicSession(id);
         QDir().mkpath(QFileInfo(uiStatePath()).absolutePath());
         QSettings state(uiStatePath(), QSettings::IniFormat);
-        if (state.value(QStringLiteral("MusicApp")).toString() == id) return;
-        state.setValue(QStringLiteral("MusicApp"), id); state.sync();
+        if (state.value(QStringLiteral("MusicApp")).toString() == id
+                && state.value(QStringLiteral("MusicService")).toString() == service) return;
+        state.setValue(QStringLiteral("MusicApp"), id);
+        state.setValue(QStringLiteral("MusicService"), service); state.sync();
         emit rememberedMusicChanged();
     }
     Q_INVOKABLE void restoreShellView() {
@@ -959,7 +968,16 @@ public:
         for (int i=64;i<files.size();++i) QFile::remove(files.at(i).absoluteFilePath());
         return QUrl();
     }
-    Q_INVOKABLE void requestPlayerLyrics(const QString &service, const QString &track, const QString &key) {
+    Q_INVOKABLE QString playerTrackId(const QVariant &value) const {
+        // Amber exposes a QDBusObjectPath QVariant to QML. String(value) does
+        // not preserve that path on Qt 5.6; unwrap it before crossing to Python.
+        if (value.userType() == qMetaTypeId<QDBusObjectPath>())
+            return value.value<QDBusObjectPath>().path();
+        return value.toString();
+    }
+    Q_INVOKABLE void requestPlayerLyrics(const QString &service, const QVariant &trackValue, const QString &key) {
+        const QString track = playerTrackId(trackValue);
+        if (!track.startsWith(QLatin1Char('/'))) return;
         if (!service.startsWith(QLatin1String("org.mpris.MediaPlayer2.")) || m_lyricsPending.contains(key)) return;
         m_lyricsPending.insert(key);
         auto *process = new QProcess(this);
@@ -971,7 +989,7 @@ public:
             m_lyricsPending.remove(key);
             if (code == 0 && status == QProcess::NormalExit) {
                 const QJsonObject data = QJsonDocument::fromJson(process->readAllStandardOutput()).object();
-                emit playerLyricsAvailable(key, data.value("lines").toArray().toVariantList(), data.value("offsetMs").toInt());
+                emit playerLyricsAvailable(key, data.value("lines").toArray().toVariantList(), data.value("offsetMs").toInt(), data.value("plainText").toString());
             }
             process->deleteLater();
         });
@@ -1005,7 +1023,7 @@ public:
     Q_INVOKABLE void seekPlayer(const QString &service, const QVariant &track, double seconds) {
         if (!service.startsWith(QLatin1String("org.mpris.MediaPlayer2."))
                 || !(seconds >= 0 && seconds < 86400000)) return;
-        const QDBusObjectPath trackId = track.value<QDBusObjectPath>();
+        const QDBusObjectPath trackId(playerTrackId(track));
         if (trackId.path().isEmpty()) return;
         // Send the standard microsecond request directly; the car UI uses
         // seconds after converting Amber millisecond metadata and positions.
@@ -1360,7 +1378,7 @@ public:
 
 signals:
     void communicationPermissionsFinished(bool successful);
-    void playerLyricsAvailable(const QString &key, const QVariantList &rows, int offsetMs);
+    void playerLyricsAvailable(const QString &key, const QVariantList &rows, int offsetMs, const QString &plainText);
     void playerPositionAvailable(const QString &service, const QString &trackKey, double seconds);
     void themeSettingsChanged();
     void rememberedMusicChanged();
