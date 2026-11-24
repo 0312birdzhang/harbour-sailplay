@@ -1,6 +1,6 @@
 Name: harbour-sailplay
 Version: 0.1.1
-Release: 136
+Release: 140
 Summary: SailfishOS wireless CarPlay and Android Auto phone with virtual display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
@@ -80,6 +80,9 @@ install -m 0644 display-source/carui/MapDestinationPanel.qml %{buildroot}/opt/sa
 install -m 0644 display-source/carui/MapBookmarkIcon.qml %{buildroot}/opt/sailplay/carui/MapBookmarkIcon.qml
 install -m 0644 display-source/carui/ContentPage.qml %{buildroot}/opt/sailplay/carui/ContentPage.qml
 install -m 0644 display-source/carui/MusicPlayer.qml %{buildroot}/opt/sailplay/carui/MusicPlayer.qml
+install -m 0644 display-source/carui/SystemMediaLibrary.qml %{buildroot}/opt/sailplay/carui/SystemMediaLibrary.qml
+install -m 0644 display-source/carui/PlayerQueue.qml %{buildroot}/opt/sailplay/carui/PlayerQueue.qml
+install -D -m 0644 display-source/carui/SystemMediaQueueBridge.qml %{buildroot}/usr/share/jolla-mediaplayer/SailplayQueueBridge.qml
 install -m 0644 display-source/carui/LyricsPanel.qml %{buildroot}/opt/sailplay/carui/LyricsPanel.qml
 install -m 0644 display-source/carui/mobile-settings.qml %{buildroot}/opt/sailplay/carui/mobile-settings.qml
 install -m 0644 display-source/carui/AboutPage.qml %{buildroot}/opt/sailplay/carui/AboutPage.qml
@@ -111,6 +114,7 @@ with os.fdopen(descriptor, 'w') as record:
 PY
 
 %post
+python3 /opt/sailplay/scripts/install-system-media-bridge.py || :
 systemctl daemon-reload || :
 systemctl enable sailplay.service || :
 su defaultuser -s /bin/sh -c 'env XDG_RUNTIME_DIR=/run/user/100000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100000/dbus/user_bus_socket python3 /opt/sailplay/scripts/reload-audio-policy.py' || echo 'Sailplay audio policy activation failed; see PulseAudio logs'
@@ -118,6 +122,7 @@ rm -f /run/sailplay-audio-policy.previous-sha256
 systemctl try-restart sailplay.service || :
 
 %preun
+if [ "$1" = "0" ]; then python3 /opt/sailplay/scripts/install-system-media-bridge.py --restore || :; fi
 if [ "$1" = "0" ]; then systemctl stop sailplay.service || :; fi
 
 %postun
@@ -133,6 +138,7 @@ systemctl daemon-reload || :
 /opt/sailplay/diagnostics
 /opt/sailplay/carui
 /opt/sailplay/communication
+/usr/share/jolla-mediaplayer/SailplayQueueBridge.qml
 /usr/bin/sailplay-communication
 /usr/bin/sailplay-phone-backend
 /usr/bin/sailplay-messages-backend

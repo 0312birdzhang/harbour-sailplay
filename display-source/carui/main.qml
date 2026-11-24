@@ -20,7 +20,7 @@ Window {
     property int gridColumns: Math.max(1, Math.min(6, Math.floor((width - dock.width - 64) / 350)))
     property int gridRows: Math.max(1, Math.min(4, Math.floor((height - 114) / 270)))
     property int pageSize: gridColumns * gridRows
-    property int pageCount: Math.max(1, Math.ceil((apps.length + 1) / pageSize))
+    property int pageCount: Math.max(1, Math.ceil((apps.length + 2) / pageSize))
     onPageCountChanged: if (pages.currentIndex >= pageCount) pages.goToPage(pageCount - 1)
     property int battery: status.battery === undefined ? -1 : status.battery
     property int mobile: status.mobileStrength === undefined ? -1 : status.mobileStrength
@@ -117,11 +117,13 @@ Window {
                 Repeater {
                     model: root.pageSize
                     Item {
-                        property int appIndex: parent.parent.pageIndex * root.pageSize + index - 1
-                        property bool oem: appIndex === -1
+                        property int appIndex: parent.parent.pageIndex * root.pageSize + index - 2
+                        property bool oem: appIndex === -2
+                        property bool nowPlaying: appIndex === -1
+                        objectName: nowPlaying ? "nowPlayingTile" : ""
                         property var entry: appIndex >= 0 && appIndex < root.apps.length ? root.apps[appIndex] : null
-                        opacity: oem || entry !== null ? 1 : 0
-                        enabled: oem || entry !== null
+                        opacity: oem || nowPlaying || entry !== null ? 1 : 0
+                        enabled: oem || nowPlaying || entry !== null
                         width: parent.cellWidth; height: parent.cellHeight
                         property real iconSize: Math.min(156, width * 0.55, height * 0.55)
                         property real labelSize: Math.min(31, iconSize * 0.23)
@@ -129,9 +131,21 @@ Window {
                         property real tileTop: (height - iconSize - labelGap - labelSize * 1.3) / 2
                         Rectangle {
                             y: parent.tileTop; anchors.horizontalCenter: parent.horizontalCenter
-                            width: parent.iconSize; height: width; radius: width * 34 / 156; color: oem ? carPalette.oem : carPalette.tile; opacity: appTouch.pressed ? 0.65 : 1
+                            width: parent.iconSize; height: width; radius: width * 34 / 156; color: oem ? carPalette.oem : nowPlaying ? "#e9553d" : carPalette.tile; opacity: appTouch.pressed ? 0.65 : 1
                             Image { anchors.fill: parent; anchors.margins: 8; fillMode: Image.PreserveAspectFit; source: entry && entry.icon ? "file://" + entry.icon : ""; visible: !oem && source !== "" }
                             Text { anchors.centerIn: parent; visible: !oem && entry && !entry.icon; text: entry ? entry.name.charAt(0) : ""; font.pixelSize: parent.width * 76 / 156; color: carPalette.text }
+                            Canvas {
+                                anchors.centerIn: parent; width: parent.width; height: parent.height
+                                visible: nowPlaying
+                                onPaint: {
+                                    var c=getContext("2d"); c.clearRect(0,0,width,height)
+                                    c.strokeStyle="white"; c.lineWidth=width*.045
+                                    c.beginPath(); c.arc(width*.5,height*.5,width*.32,0,Math.PI*2); c.stroke()
+                                    c.fillStyle="white"; c.beginPath()
+                                    c.moveTo(width*.44,height*.32); c.lineTo(width*.44,height*.68)
+                                    c.lineTo(width*.70,height*.5); c.closePath(); c.fill()
+                                }
+                            }
                             Canvas {
                                 anchors.centerIn: parent; width: 112; height: 98; visible: oem
                                 scale: parent.width / 156
@@ -145,14 +159,16 @@ Window {
                                 }
                             }
                         }
-                        Text { y: parent.tileTop + parent.iconSize + parent.labelGap; width: parent.width - 20; anchors.horizontalCenter: parent.horizontalCenter; text: oem ? qsTranslate("Sailplay", "Return to car") : entry ? entry.name : ""; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; font.pixelSize: parent.labelSize; color: carPalette.text }
+                        Text { y: parent.tileTop + parent.iconSize + parent.labelGap; width: parent.width - 20; anchors.horizontalCenter: parent.horizontalCenter; text: oem ? qsTranslate("Sailplay", "Return to car") : nowPlaying ? qsTranslate("Sailplay", "Now Playing") : entry ? entry.name : ""; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; font.pixelSize: parent.labelSize; color: carPalette.text }
                         MouseArea {
                             id: appTouch; anchors.fill: parent
+                            objectName: nowPlaying ? "nowPlayingButton" : ""
                             onClicked: {
                                 if (oem) {
                                     carController.returnToCar()
 
-                                } else carController.tileClicked(appIndex)
+                                } else if (nowPlaying) carController.openMusic()
+                                else carController.tileClicked(appIndex)
                             }
                         }
                     }
@@ -206,6 +222,7 @@ Window {
             radius: 22; color: carPalette.card
             property var player: lockscreenMusic.mprisController
             property bool splitMusic: carController.musicActive && width > 1000
+            property bool queueOpen: false
             property string artworkKey: player ? String(player.metaData.artUrl || player.metaData.url || "") : ""
             property url artwork: ""
             onArtworkKeyChanged: refreshArtwork()
@@ -215,11 +232,19 @@ Window {
             Connections {
                 target: carController
                 onArtworkAvailable: if (key === musicCard.artworkKey) musicCard.artwork = localUrl
+                onCurrentAppChanged: if(!carController.musicActive)musicCard.queueOpen=false
             }
             function openMusic() {
                 carController.openMusic()
             }
             MouseArea { anchors.fill: parent; onClicked: musicCard.openMusic() }
+            Rectangle {
+                anchors.right:parent.right;anchors.rightMargin:carController.musicContentAvailable ? 196 : 16
+                y:12;z:5;width:164;height:54;radius:12;color:carPalette.button
+                visible:carController.musicActive && !!musicCard.player && !!musicCard.player.currentService
+                Text {anchors.centerIn:parent;text:qsTranslate("Sailplay","Queue");font.pixelSize:24;color:carPalette.text}
+                MouseArea {anchors.fill:parent;onClicked:musicCard.queueOpen=true}
+            }
             Rectangle {
                 anchors.right: parent.right; anchors.rightMargin: 16; y: 12; z: 5
                 width: 164; height: 54; radius: 12; color: carPalette.button
@@ -240,13 +265,17 @@ Window {
             }
             Item {
                 id: musicProgress
+                objectName: "musicProgress"
                 z: 2
                 x: lockscreenMusic.x; width: lockscreenMusic.width; height: carController.musicActive ? 100 : 72
                 y: lockscreenMusic.y + lockscreenMusic.height + 4
                 visible: lockscreenMusic.visible && !lockscreenMusic.idleCard
                 property var player: lockscreenMusic.mprisController
                 // Amber metadata duration is milliseconds; queried MPRIS Position is microseconds.
-                property real durationSeconds: player ? Math.max(0, Number(player.metaData.duration || 0) / 1000) : 0
+                property bool nativeSystemTrack: !!player && carController.playerTrackId(player.metaData.trackId).indexOf("/com/jolla/mediaplayer/track/") === 0
+                // The stock AudioPlayer publishes Grilo's seconds as Amber
+                // milliseconds for its own queue. Other providers use ms.
+                property real durationSeconds: player ? Math.max(0, Number(player.metaData.duration || 0) / (nativeSystemTrack ? 1 : 1000)) : 0
                 property real positionSeconds: 0
                 property real sampledPosition: 0
                 property double sampledAt: 0
@@ -378,6 +407,14 @@ Window {
                 visible: !lockscreenMusic.visible
                 Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Open music app"); font.pixelSize: 24; color: carPalette.text }
                 MouseArea { anchors.fill: parent; onClicked: carController.ensureMusicBackend() }
+            }
+            PlayerQueue {
+                anchors.fill:parent;z:30
+                visible:carController.musicActive && musicCard.queueOpen
+                palette:carPalette
+                playing:lockscreenMusic.playing
+                service:musicCard.player ? musicCard.player.currentService : ""
+                onClosed:musicCard.queueOpen=false
             }
         }
     }

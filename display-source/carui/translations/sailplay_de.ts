@@ -2,6 +2,15 @@
 <TS version="2.1" language="de" sourcelanguage="en">
   <context>
     <name>Sailplay</name>
+    <message><source>Queue</source><translation>Warteschlange</translation></message>
+    <message><source>Play queue (%1)</source><translation>Warteschlange (%1)</translation></message>
+    <message><source>Back</source><translation>Zurück</translation></message>
+    <message><source>Loading…</source><translation>Wird geladen…</translation></message>
+    <message><source>Queue unavailable</source><translation>Warteschlange nicht verfügbar</translation></message>
+    <message><source>Queue is empty</source><translation>Warteschlange ist leer</translation></message>
+    <message><source>No songs found in System Media</source><translation>Keine Titel im System-Medienplayer gefunden</translation></message>
+    <message><source>Now Playing</source><translation>Aktuelle Wiedergabe</translation></message>
+    <message><source>System Media</source><translation>System-Medienplayer</translation></message>
     <message><source>Theme mode</source><translation>Darstellungsmodus</translation></message>
     <message><source>Headlight linked</source><translation>Mit Scheinwerfern verknüpft</translation></message>
     <message><source>Custom</source><translation>Benutzerdefiniert</translation></message>
@@ -685,6 +694,7 @@ Musik auf dem Telefon starten</translation>
       <source>Could not start the background player</source>
       <translation>Hintergrundplayer konnte nicht gestartet werden</translation>
     </message>
+    <message><source>Could not start playback</source><translation>Wiedergabe konnte nicht gestartet werden</translation></message>
     <message>
       <source>Could not save map selection</source>
       <translation>Kartenauswahl konnte nicht gespeichert werden</translation>

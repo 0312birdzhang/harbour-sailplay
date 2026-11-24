@@ -2,6 +2,15 @@
 <TS version="2.1" language="fr" sourcelanguage="en">
   <context>
     <name>Sailplay</name>
+    <message><source>Queue</source><translation>File de lecture</translation></message>
+    <message><source>Play queue (%1)</source><translation>File de lecture (%1)</translation></message>
+    <message><source>Back</source><translation>Retour</translation></message>
+    <message><source>Loading…</source><translation>Chargement…</translation></message>
+    <message><source>Queue unavailable</source><translation>File de lecture indisponible</translation></message>
+    <message><source>Queue is empty</source><translation>La file de lecture est vide</translation></message>
+    <message><source>No songs found in System Media</source><translation>Aucun morceau trouvé dans le lecteur système</translation></message>
+    <message><source>Now Playing</source><translation>Lecture en cours</translation></message>
+    <message><source>System Media</source><translation>Lecteur système</translation></message>
     <message><source>Theme mode</source><translation>Mode du thème</translation></message>
     <message><source>Headlight linked</source><translation>Lié aux phares</translation></message>
     <message><source>Custom</source><translation>Personnalisé</translation></message>
@@ -685,6 +694,7 @@ Lancez la musique sur votre téléphone</translation>
       <source>Could not start the background player</source>
       <translation>Impossible de démarrer le lecteur en arrière-plan</translation>
     </message>
+    <message><source>Could not start playback</source><translation>Impossible de démarrer la lecture</translation></message>
     <message>
       <source>Could not save map selection</source>
       <translation>Impossible d’enregistrer le choix de carte</translation>

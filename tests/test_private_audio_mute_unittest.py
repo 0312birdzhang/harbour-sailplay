@@ -11,6 +11,14 @@ import tempfile
 spec=importlib.util.spec_from_file_location('pulse',Path(__file__).resolve().parents[1]/'scripts/pulse-capture.py')
 pulse=importlib.util.module_from_spec(spec);spec.loader.exec_module(pulse)
 class PrivateMuteTests(unittest.TestCase):
+    def test_temporary_maximum_is_restored_after_background_context_ends(self):
+        props=Mock();props.GetAll.return_value={'StepCount':12,'CurrentStep':11,'CallState':'inactive'}
+        props.Get.return_value=1
+        old={'mainVolume':{'CurrentStep':1,'StepCount':12,'CallState':'background'}}
+        with patch.object(pulse,'main_volume_properties',return_value=props),patch.dict('sys.modules',{'dbus':types.SimpleNamespace(UInt32=int)}):
+            pulse.restore_main_volume(old)
+        props.Set.assert_called_once_with('com.Meego.MainVolume2','CurrentStep',1)
+
     def test_call_streams_keep_their_native_sink_and_volume_control(self):
         text = ('Sink Input #1\n Sink: 9\n Corked: no\n media.role = "music"\n'
                 'Sink Input #2\n Sink: 0\n Corked: no\n policy.group = "call"\n'
@@ -95,8 +103,9 @@ class PrivateMuteTests(unittest.TestCase):
             def restore(state):
                 self.assertTrue(record.exists())
                 calls.append(('restore-system-step',))
-            with patch.object(pulse,'ROUTE_STATE',str(record)),patch.object(pulse,'pactl',side_effect=pactl),patch.object(pulse,'restore_main_volume',side_effect=restore):
+            with patch.object(pulse,'ROUTE_STATE',str(record)),patch.object(pulse,'pactl',side_effect=pactl),patch.object(pulse,'restore_main_volume',side_effect=restore),patch.object(pulse,'pause_cast_players',side_effect=lambda:calls.append(('pause-all',))):
                 pulse.restore_outputs()
+            self.assertLess(calls.index(('pause-all',)),calls.index(('restore-system-step',)))
             self.assertLess(calls.index(('restore-system-step',)),calls.index(('set-sink-mute','sink.primary_output','0')))
             self.assertFalse(record.exists())
 

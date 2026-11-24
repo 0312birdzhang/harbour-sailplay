@@ -779,6 +779,9 @@ public:
         QSettings state(uiStatePath(), QSettings::IniFormat);
         const QString selected = state.value(QStringLiteral("MusicService")).toString();
         if (services.contains(selected)) return selected;
+        return musicServiceForApp(lastMusicApp(), services);
+    }
+    Q_INVOKABLE QString musicServiceForApp(const QString &appId, const QStringList &services) const {
         for (const QString &service : services) {
             if (!service.startsWith(QStringLiteral("org.mpris.MediaPlayer2."))) continue;
             QDBusMessage get = QDBusMessage::createMethodCall(service, QStringLiteral("/org/mpris/MediaPlayer2"),
@@ -788,7 +791,7 @@ public:
             if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) continue;
             QString id = qvariant_cast<QDBusVariant>(reply.arguments().first()).variant().toString();
             if (id.endsWith(QStringLiteral(".desktop"))) id.chop(8);
-            if (musicApplicationId(id) == lastMusicApp()) return service;
+            if (musicApplicationId(id) == appId) return service;
         }
         return QString();
     }
@@ -870,6 +873,7 @@ public:
         m_dashboardActive = false;
         m_musicActive = true;
         emit currentAppChanged();
+        ensureMusicBackend();
     }
     Q_INVOKABLE void browseMusic() {
         const AvailableApp *app = findAvailable(lastMusicApp());
@@ -887,16 +891,20 @@ public:
         m_musicError.clear();
         QSettings state(uiStatePath(), QSettings::IniFormat);
         if (state.value(QStringLiteral("MusicApp")).toString() != id) {
+            state.remove(QStringLiteral("MusicService"));
             state.setValue(QStringLiteral("MusicApp"), id); state.sync();
         }
         emit rememberedMusicChanged();
         attachMusicSession(id);
         if (m_projection && available->sdk.mediaTemplate()) return true;
         const auto names = QDBusConnection::sessionBus().interface()->registeredServiceNames();
-        if (names.isValid() && !preferredMusicService(names.value()).isEmpty()) return true;
+        if (names.isValid() && !musicServiceForApp(id, names.value()).isEmpty()) return true;
         QSettings desktop(QStringLiteral("/usr/share/applications/") + id + QStringLiteral(".desktop"), QSettings::IniFormat);
-        const QString backend = desktop.value(QStringLiteral("Desktop Entry/X-Sailplay-BackgroundService")).toString();
-        if (!backend.startsWith(QStringLiteral("org.")) || backend.contains(QLatin1Char('/'))) {
+        const QString backend = id == QLatin1String("jolla-mediaplayer")
+            ? QStringLiteral("com.jolla.mediaplayer")
+            : desktop.value(QStringLiteral("Desktop Entry/X-Sailplay-BackgroundService")).toString();
+        if ((!backend.startsWith(QStringLiteral("org.")) && backend != QLatin1String("com.jolla.mediaplayer"))
+                || backend.contains(QLatin1Char('/'))) {
             m_musicError = tr("This player needs to be started on the phone once");
             emit rememberedMusicChanged();
             return false;
@@ -917,6 +925,61 @@ public:
         });
         qInfo("carui: activating background music %s without phone window\n", id.toUtf8().constData());
         return true;
+    }
+    Q_INVOKABLE void playMusicPlayer(const QString &service, const QUrl &uri = QUrl()) {
+        QStringList args{QStringLiteral("/opt/sailplay/scripts/media-control.py"), QStringLiteral("PlayExclusive"), service};
+        if (!uri.isEmpty()) args << uri.toString();
+        runPlayerProcess(service,args);
+    }
+    Q_INVOKABLE void playQueueItem(const QString &service, int index, const QString &key, const QString &revision) {
+        if (index < 0 || index >= 10000 || key.size()>16384 || revision.size()!=64) return;
+        runPlayerProcess(service,{QStringLiteral("/opt/sailplay/scripts/player-queue.py"),QStringLiteral("play"),service,
+            QString::number(index),key,revision});
+    }
+    void runPlayerProcess(const QString &service, const QStringList &args) {
+        if (!service.startsWith(QLatin1String("org.mpris.MediaPlayer2.")) || m_playPending.contains(service)) return;
+        m_playPending.insert(service);
+        m_musicError.clear(); emit rememberedMusicChanged();
+        auto *process = new QProcess(this);
+        process->setProcessChannelMode(QProcess::MergedChannels);
+        connect(process, static_cast<void(QProcess::*)(int,QProcess::ExitStatus)>(&QProcess::finished), this,
+                [this,process,service](int code,QProcess::ExitStatus status) {
+            m_playPending.remove(service);
+            const QByteArray output=process->readAllStandardOutput();
+            const bool success = code == 0 && status == QProcess::NormalExit
+                && (output.contains(" delivered to ") || QJsonDocument::fromJson(output).object().value("ok").toBool());
+            if (!success) { m_musicError = tr("Could not start playback"); emit rememberedMusicChanged(); }
+            emit playerPlaybackFinished(service,success);
+            process->deleteLater();
+        });
+        connect(process,&QProcess::errorOccurred,this,[this,process,service](QProcess::ProcessError error) {
+            if (error == QProcess::FailedToStart) {
+                m_playPending.remove(service); emit playerPlaybackFinished(service,false); process->deleteLater();
+            }
+        });
+        process->start(QStringLiteral("python3"),args);
+        QTimer::singleShot(10000,process,[process]() { if (process->state()!=QProcess::NotRunning) process->kill(); });
+    }
+    Q_INVOKABLE void requestPlayerQueue(const QString &service) {
+        if (!service.startsWith(QLatin1String("org.mpris.MediaPlayer2.")) || m_queuePending.contains(service)) return;
+        m_queuePending.insert(service);
+        auto *process = new QProcess(this);
+        connect(process,static_cast<void(QProcess::*)(int,QProcess::ExitStatus)>(&QProcess::finished),this,
+                [this,process,service](int code,QProcess::ExitStatus status) {
+            m_queuePending.remove(service);
+            const QJsonObject data=QJsonDocument::fromJson(process->readAllStandardOutput()).object();
+            const bool error=code!=0 || status!=QProcess::NormalExit || !data.contains("items") || data.value("error").toBool();
+            emit playerQueueAvailable(service,data.value("items").toArray().toVariantList(),data.value("index").toInt(-1),
+                data.value("revision").toString(),data.value("loading").toBool(),error);
+            process->deleteLater();
+        });
+        connect(process,&QProcess::errorOccurred,this,[this,process,service](QProcess::ProcessError error) {
+            if(error==QProcess::FailedToStart) {
+                m_queuePending.remove(service);emit playerQueueAvailable(service,{},-1,QString(),false,true);process->deleteLater();
+            }
+        });
+        process->start(QStringLiteral("python3"),{QStringLiteral("/opt/sailplay/scripts/player-queue.py"),QStringLiteral("read"),service});
+        QTimer::singleShot(6000,process,[process]() {if(process->state()!=QProcess::NotRunning)process->kill();});
     }
     Q_INVOKABLE QUrl artworkSource(const QUrl &remote, const QUrl &track) {
         if (remote.isLocalFile()) return remote;
@@ -1379,6 +1442,8 @@ public:
 signals:
     void communicationPermissionsFinished(bool successful);
     void playerLyricsAvailable(const QString &key, const QVariantList &rows, int offsetMs, const QString &plainText);
+    void playerPlaybackFinished(const QString &service, bool success);
+    void playerQueueAvailable(const QString &service, const QVariantList &items, int index, const QString &revision, bool loading, bool error);
     void playerPositionAvailable(const QString &service, const QString &trackKey, double seconds);
     void themeSettingsChanged();
     void rememberedMusicChanged();
@@ -1441,6 +1506,8 @@ private:
         if (available) m_music->open(available->sdk);
     }
     QSet<QString> m_positionPending;
+    QSet<QString> m_playPending;
+    QSet<QString> m_queuePending;
     QSet<QString> m_lyricsPending;
     QVariantMap m_status;
     void setStatus(const QString &key, const QVariant &value)

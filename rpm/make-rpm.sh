@@ -18,6 +18,7 @@ mkdir -p "$STAGE/scripts" "$STAGE/diagnostics"
 for name in projection-service.py connection-monitor.py android-auto-phone.py restore-projection-network.py stop-projected-apps.py player-lyrics.py keyboard-server.py wireless-probe.py wireless-phone-advertise.py bluetooth-monitor.py wifi-session-probe.py pulse-capture.py media-control.py reload-audio-policy.py reconnect-car.py prepare-media-compat.py prepare-viewport-compat.py extract-artwork.py inspect-accessory-certificate.py; do
     cp "$REPO/scripts/$name" "$STAGE/scripts/"
 done
+cp "$REPO/scripts/player-queue.py" "$REPO/scripts/install-system-media-bridge.py" "$STAGE/scripts/"
 cp -r "$REPO/rpm/payload/"* "$STAGE/rpm/payload/"
 cp -r "$REPO/display-source/carui/translations" "$STAGE/display-source/carui/"
 mkdir -p "$STAGE/display-source/communication"
@@ -32,6 +33,8 @@ cp "$REPO/display-source/carui/MapDestinationPanel.qml" "$STAGE/display-source/c
 cp "$REPO/display-source/carui/MapBookmarkIcon.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/ContentPage.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/MusicPlayer.qml" "$STAGE/display-source/carui/"
+cp "$REPO/display-source/carui/SystemMediaLibrary.qml" "$STAGE/display-source/carui/"
+cp "$REPO/display-source/carui/PlayerQueue.qml" "$REPO/display-source/carui/SystemMediaQueueBridge.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/LyricsPanel.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/AboutPage.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/AppSelectionPage.qml" "$STAGE/display-source/carui/"

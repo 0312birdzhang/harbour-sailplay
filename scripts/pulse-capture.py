@@ -12,6 +12,7 @@ import threading
 import json
 import audioop
 from contextlib import contextmanager
+from pathlib import Path
 
 
 class BufferAttr(C.Structure):
@@ -213,7 +214,11 @@ def restore_main_volume(state):
     import dbus
     props=main_volume_properties()
     current=props.GetAll('com.Meego.MainVolume2')
-    if (int(current['StepCount'])!=old['StepCount'] or str(current['CallState'])!=old['CallState']):
+    same_scale=int(current['StepCount'])==old['StepCount']
+    temporary_maximum=(same_scale and str(current['CallState'])=='inactive'
+                       and int(current['CurrentStep'])==int(current['StepCount'])-1
+                       and 0<=old['CurrentStep']<int(current['CurrentStep']))
+    if (not same_scale or (str(current['CallState'])!=old['CallState'] and not temporary_maximum)):
         # MainVolume steps are route-specific (e.g. Bluetooth 20, speaker 12).
         # An old step cannot be restored into the new scale. Keeping the new
         # route's setting is safe; retaining this record would poison every
@@ -276,10 +281,21 @@ def hardware_sinks(short_sinks):
             if len(fields)>2 and fields[2] in HARDWARE_SINK_MODULES]
 
 
+def pause_cast_players():
+    if not os.path.exists('/run/sailplay-media-active'):return
+    environment=dict(os.environ,DBUS_SESSION_BUS_ADDRESS='unix:path=/run/user/100000/dbus/user_bus_socket')
+    try:
+        subprocess.run([sys.executable,str(Path(__file__).with_name('media-control.py')),'PausePlaying'],
+                       env=environment,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=5)
+    except (OSError,subprocess.SubprocessError):
+        print('Could not pause players before restoring phone audio',file=sys.stderr,flush=True)
+
+
 def restore_outputs():
     try:
         with open(ROUTE_STATE) as source:state=json.load(source)
     except FileNotFoundError:return
+    pause_cast_players()
     for sink in state['mutes']:pactl('set-sink-mute',sink,'1')
     restore_private_inputs(state)
     if state.get('default') and pactl('get-default-sink').strip()==state.get('cast'):

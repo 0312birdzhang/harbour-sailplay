@@ -5,6 +5,39 @@ import sys
 import subprocess
 import configparser
 from pathlib import Path
+import json
+import time
+
+def exclusive_play(bus,interface,target,perform):
+    paused=[]
+    try:
+        for name in bus.list_names():
+            if not str(name).startswith('org.mpris.MediaPlayer2.') or str(name)==target:continue
+            obj=bus.get_object(name,'/org/mpris/MediaPlayer2')
+            props=interface(obj,'org.freedesktop.DBus.Properties').GetAll('org.mpris.MediaPlayer2.Player',timeout=2)
+            if str(props.get('PlaybackStatus'))=='Playing' and props.get('CanPause',False):
+                interface(obj,'org.mpris.MediaPlayer2.Player').Pause(timeout=2)
+                paused.append(obj)
+        return perform()
+    except Exception:
+        for obj in paused:
+            try:interface(obj,'org.mpris.MediaPlayer2.Player').Play(timeout=2)
+            except Exception:pass
+        raise
+
+def system_play(bus,interface,uri=''):
+    api=interface(bus.get_object('com.jolla.mediaplayer','/com/jolla/mediaplayer/sailplay'),'com.jolla.mediaplayer.sailplay')
+    deadline=time.monotonic()+2.5
+    while True:
+        state=json.loads(str(api.snapshot(timeout=2)))
+        if state.get('ready'):break
+        if time.monotonic()>=deadline:raise RuntimeError('system media queue not ready')
+        time.sleep(.1)
+    rows=state.get('items',[])
+    if not rows:raise RuntimeError('empty system media library')
+    index=next((i for i,row in enumerate(rows) if uri and row.get('uri')==uri),int(state.get('index',-1)))
+    index=max(0,index)
+    if not api.playIndex(index,signature='i',timeout=2):raise RuntimeError('system media queue unavailable')
 
 def remembered_player():
     settings=configparser.ConfigParser(interpolation=None)
@@ -14,7 +47,19 @@ def remembered_player():
                 settings.get('General','MusicApp',fallback=''))
     except (OSError,configparser.Error):return '', ''
 
-def control(bus,action,interface,preferred=('', '')):
+def control(bus,action,interface,preferred=('', ''),uri=''):
+    if action=='PausePlaying':
+        paused=[]
+        for name in bus.list_names():
+            if not str(name).startswith('org.mpris.MediaPlayer2.'):continue
+            try:
+                obj=bus.get_object(name,'/org/mpris/MediaPlayer2')
+                props=interface(obj,'org.freedesktop.DBus.Properties').GetAll('org.mpris.MediaPlayer2.Player',timeout=1)
+                if str(props.get('PlaybackStatus'))!='Playing':continue
+                interface(obj,'org.mpris.MediaPlayer2.Player').Pause(timeout=1)
+                paused.append(str(name))
+            except Exception:continue
+        return 'Pause delivered to '+', '.join(paused) if paused else 'no eligible player'
     candidates=[]
     resume=action=='ResumePreferred'
     selected,desktop=preferred
@@ -26,9 +71,10 @@ def control(bus,action,interface,preferred=('', '')):
             if not props.get('CanControl',True):continue
             status=str(props.get('PlaybackStatus','Stopped'))
             if action=='PausePlaying' and status!='Playing':continue
-            method='Pause' if action=='PausePlaying' else 'Play' if resume else action
+            method='Pause' if action=='PausePlaying' else 'Play' if resume or action=='PlayExclusive' else action
             cap={'Next':'CanGoNext','Previous':'CanGoPrevious','Pause':'CanPause','Play':'CanPlay'}.get(method)
-            if cap and not props.get(cap,True):continue
+            stock=str(name).startswith('org.mpris.MediaPlayer2.jolla-mediaplayer')
+            if cap and not props.get(cap,True) and not (method=='Play' and stock) and not (action=='PlayExclusive' and uri):continue
             match=str(name)==selected if selected else False
             if not match and desktop:
                 try:
@@ -37,12 +83,20 @@ def control(bus,action,interface,preferred=('', '')):
                     if entry.endswith('.desktop'):entry=entry[:-8]
                     match=entry==desktop
                 except Exception:pass
-            if resume and (selected or desktop) and not match:continue
-            candidates.append((0 if match else 1,0 if status=='Playing' else 1 if status=='Paused' else 2,str(name),obj,method))
+            if (selected or desktop) and not match:continue
+            candidates.append((0 if match else 1,0 if status=='Playing' else 1 if status=='Paused' else 2,str(name),obj,method,status,bool(props.get('CanPlay',True))))
         except Exception:continue
     if not candidates:return 'no eligible player'
-    _,_,name,obj,method=sorted(candidates,key=lambda c:c[:3])[0]
-    getattr(interface(obj,'org.mpris.MediaPlayer2.Player'),method)(timeout=2)
+    _,_,name,obj,method,status,can_play=sorted(candidates,key=lambda c:c[:3])[0]
+    def perform():
+        if method=='Play' and name.startswith('org.mpris.MediaPlayer2.jolla-mediaplayer') and (uri or not can_play):
+            system_play(bus,interface,uri)
+        elif action=='PlayExclusive' and uri:
+            interface(obj,'org.mpris.MediaPlayer2.Player').OpenUri(uri,timeout=2)
+        else:getattr(interface(obj,'org.mpris.MediaPlayer2.Player'),method)(timeout=2)
+    if method=='Play' or (method=='PlayPause' and status!='Playing'):
+        exclusive_play(bus,interface,name,perform)
+    else:perform()
     return method+' delivered to '+name
 
 def main():
@@ -54,7 +108,19 @@ def main():
         subprocess.run(['su','defaultuser','-s','/bin/sh','-c',
             'exec env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100000/dbus/user_bus_socket python3 /opt/sailplay/scripts/media-control.py PausePlaying'],timeout=4)
         return
-    if action not in ('Play','Pause','PlayPause','Next','Previous','PausePlaying','ResumePreferred'):raise ValueError('invalid media action')
+    if action not in ('Play','Pause','PlayPause','Next','Previous','PausePlaying','ResumePreferred','PlayExclusive'):raise ValueError('invalid media action')
     import dbus
-    print(control(dbus.SessionBus(),action,dbus.Interface,remembered_player()),flush=True)
+    preferred=remembered_player()
+    uri=''
+    if action=='PlayExclusive':
+        service=sys.argv[2]
+        if not service.startswith('org.mpris.MediaPlayer2.'):raise ValueError('invalid player')
+        preferred=(service,'')
+        uri=sys.argv[3] if len(sys.argv)>3 else ''
+        if uri:
+            from urllib.parse import urlparse,unquote
+            parsed=urlparse(uri)
+            if parsed.scheme!='file' or parsed.netloc not in ('','localhost') or not Path(unquote(parsed.path)).is_file():
+                raise ValueError('invalid media file')
+    print(control(dbus.SessionBus(),action,dbus.Interface,preferred,uri),flush=True)
 if __name__=='__main__':main()

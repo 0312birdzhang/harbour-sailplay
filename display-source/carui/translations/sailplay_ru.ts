@@ -2,6 +2,15 @@
 <TS version="2.1" language="ru" sourcelanguage="en">
   <context>
     <name>Sailplay</name>
+    <message><source>Queue</source><translation>Очередь</translation></message>
+    <message><source>Play queue (%1)</source><translation>Очередь (%1)</translation></message>
+    <message><source>Back</source><translation>Назад</translation></message>
+    <message><source>Loading…</source><translation>Загрузка…</translation></message>
+    <message><source>Queue unavailable</source><translation>Очередь недоступна</translation></message>
+    <message><source>Queue is empty</source><translation>Очередь пуста</translation></message>
+    <message><source>No songs found in System Media</source><translation>В системном проигрывателе нет композиций</translation></message>
+    <message><source>Now Playing</source><translation>Сейчас играет</translation></message>
+    <message><source>System Media</source><translation>Системный проигрыватель</translation></message>
     <message><source>Theme mode</source><translation>Режим темы</translation></message>
     <message><source>Headlight linked</source><translation>Связь с фарами</translation></message>
     <message><source>Custom</source><translation>Настраиваемый</translation></message>
@@ -685,6 +694,7 @@ Start music on your phone</source>
       <source>Could not start the background player</source>
       <translation>Не удалось запустить фоновый плеер</translation>
     </message>
+    <message><source>Could not start playback</source><translation>Не удалось начать воспроизведение</translation></message>
     <message>
       <source>Could not save map selection</source>
       <translation>Не удалось сохранить выбор карты</translation>

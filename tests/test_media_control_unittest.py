@@ -10,6 +10,61 @@ spec=importlib.util.spec_from_file_location('media_control',Path(__file__).resol
 control=importlib.util.module_from_spec(spec);spec.loader.exec_module(control)
 DESCRIPTOR=bytes.fromhex('050c0901a10115002506050c0a00000ab0000ab1000ab5000ab6000ab9000abc00750895018100c0')
 class MediaTests(unittest.TestCase):
+    def test_disconnect_pauses_all_playing_players_despite_stale_selection(self):
+        names=['org.mpris.MediaPlayer2.music','org.mpris.MediaPlayer2.system','org.mpris.MediaPlayer2.paused']
+        bus=Mock();bus.list_names.return_value=names;bus.get_object.side_effect=lambda name,path:name
+        players={name:Mock() for name in names}
+        def interface(obj,name):
+            if name=='org.freedesktop.DBus.Properties':
+                return SimpleNamespace(GetAll=lambda *a,**k:{'PlaybackStatus':'Paused' if obj.endswith('paused') else 'Playing'})
+            return players[obj]
+        result=control.control(bus,'PausePlaying',interface,('org.mpris.MediaPlayer2.gone','missing'))
+        self.assertIn(names[0],result);self.assertIn(names[1],result)
+        players[names[0]].Pause.assert_called_once();players[names[1]].Pause.assert_called_once()
+        players[names[2]].Pause.assert_not_called()
+    def test_empty_stock_player_loads_complete_queue_and_pauses_previous(self):
+        old='org.mpris.MediaPlayer2.old';native='org.mpris.MediaPlayer2.jolla-mediaplayer.instance42'
+        bus=Mock();bus.list_names.return_value=[old,native]
+        bus.get_object.side_effect=lambda name,path:name
+        players={old:Mock(),native:Mock(),'com.jolla.mediaplayer':Mock()}
+        players['com.jolla.mediaplayer'].snapshot.return_value='{"ready":true,"index":-1,"items":[{"uri":"file:///music/first.mp3"},{"uri":"file:///music/second.mp3"}]}'
+        players['com.jolla.mediaplayer'].playIndex.return_value=True
+        def interface(obj,name):
+            if name=='org.freedesktop.DBus.Properties':
+                return SimpleNamespace(GetAll=lambda *a,**k:{'CanControl':True,'CanPause':True,'CanPlay':obj==old,
+                                                           'PlaybackStatus':'Playing' if obj==old else 'Stopped'})
+            return players[obj]
+        uri='file:///music/first.mp3'
+        control.control(bus,'PlayExclusive',interface,(native,''),uri)
+        players[old].Pause.assert_called_once()
+        players['com.jolla.mediaplayer'].playIndex.assert_called_once_with(0,signature='i',timeout=2)
+        players[native].Play.assert_not_called()
+    def test_exclusive_play_pauses_other_player_and_restores_on_failure(self):
+        bus=Mock();bus.list_names.return_value=['org.mpris.MediaPlayer2.old','org.mpris.MediaPlayer2.target']
+        bus.get_object.side_effect=lambda name,path:name
+        players={name:Mock() for name in bus.list_names.return_value}
+        def interface(obj,name):
+            if name=='org.freedesktop.DBus.Properties':
+                return SimpleNamespace(GetAll=lambda *a,**k:{'PlaybackStatus':'Playing' if obj.endswith('old') else 'Paused',
+                                                           'CanPlay':True,'CanPause':True})
+            return players[obj]
+        target='org.mpris.MediaPlayer2.target';old='org.mpris.MediaPlayer2.old'
+        control.control(bus,'PlayExclusive',interface,(target,''))
+        players[old].Pause.assert_called_once();players[target].Play.assert_called_once()
+        players[target].Play.side_effect=RuntimeError('target failed')
+        with self.assertRaises(RuntimeError):control.control(bus,'PlayExclusive',interface,(target,''))
+        players[old].Play.assert_called_once()
+
+    def test_selected_player_without_capability_does_not_control_another_player(self):
+        bus=Mock();bus.list_names.return_value=['org.mpris.MediaPlayer2.old','org.mpris.MediaPlayer2.target']
+        bus.get_object.side_effect=lambda name,path:name
+        calls=[]
+        def interface(obj,name):
+            if name=='org.freedesktop.DBus.Properties':
+                return SimpleNamespace(GetAll=lambda *a,**k:{'CanPlay':obj.endswith('old'),'PlaybackStatus':'Playing'})
+            calls.append(obj);return Mock()
+        self.assertEqual(control.control(bus,'Play',interface,('org.mpris.MediaPlayer2.target','')),'no eligible player')
+        self.assertEqual(calls,[])
     def test_audio_ready_resumes_only_once(self):
         m=MediaKeys.__new__(MediaKeys);m.active=False;m.pending=queue.Queue()
         with patch('carplay_proto.mediakeys.os.open',return_value=9), patch('carplay_proto.mediakeys.os.close'):

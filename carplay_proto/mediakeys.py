@@ -103,6 +103,6 @@ class MediaKeys:
     def close(self):
         self.stop.set();self.thread.join(4.5)
         if self.active:
+            self.call('PausePlaying')
             try:os.unlink(MARKER)
             except FileNotFoundError:pass
-            self.call('PausePlaying')

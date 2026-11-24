@@ -19,14 +19,26 @@ Item {
     visible: true
     property string pendingApp: ""
     property int pendingTicks: 0
+    property bool pendingPlayback: true
+    readonly property bool systemPlayerInstalled: {
+        var apps = carController.availableApps(true)
+        for (var i=0; i<apps.length; ++i) if (apps[i].id === "jolla-mediaplayer") return true
+        return false
+    }
+    readonly property bool systemPlayerRunning: !!carController.musicServiceForApp("jolla-mediaplayer", player.availableServices)
     property string selectedService: ""
     property bool playerMenuOpen: false
-    function choosePlayer(service) {
+    property bool playRequestPending: false
+    property string playbackError: ""
+    function choosePlayer(service, resumePlaying) {
+        var resume = resumePlaying === true && controls.playing && player.currentService !== service
         selectedService = service
         player.singleService = true
         player.currentService = service
         carController.rememberMusicPlayer(service)
         playerMenuOpen = false
+        playbackError = ""
+        if (resume) resumeMusic()
     }
     Timer {
         id: rememberTimer; interval: 150
@@ -36,12 +48,18 @@ Item {
     function resumeMusic() {
         var service = selectedService || player.currentService || carController.preferredMusicService(player.availableServices)
         if (service) player.currentService = service
-        if (service && player.canPlay) {
-            player.play()
+        if (service && (player.canPlay || carController.musicServiceForApp("jolla-mediaplayer",player.availableServices) === service)) {
+            controls.playRequestPending = true
+            carController.playMusicPlayer(service)
             return
         }
-        controls.pendingApp = carController.lastMusicApp
+        selectPlayerApp(carController.lastMusicApp, true)
+    }
+    function selectPlayerApp(appId, play) {
+        controls.pendingApp = appId
+        controls.pendingPlayback = play
         controls.pendingTicks = 0
+        controls.playerMenuOpen = false
         if (carController.ensureMusicBackend(controls.pendingApp))
             pendingPlay.restart()
     }
@@ -49,11 +67,11 @@ Item {
         id: pendingPlay; interval: 250; repeat: true
         onTriggered: {
             if (++controls.pendingTicks > 60) { stop(); controls.pendingApp = ""; return }
-            var service = carController.preferredMusicService(player.availableServices)
+            var service = carController.musicServiceForApp(controls.pendingApp, player.availableServices)
             if (service) player.currentService = service
-            var desktop = String(player.desktopEntry || "").replace(/\.desktop$/, "")
-            if (desktop === controls.pendingApp && player.canPlay) {
-                stop(); controls.pendingApp = ""; player.play()
+            if (service) {
+                stop(); controls.pendingApp = ""; controls.choosePlayer(service)
+                if (controls.pendingPlayback) controls.resumeMusic()
             }
         }
     }
@@ -62,7 +80,6 @@ Item {
         onTriggered: {
             if (controls.selectedService && player.availableServices.indexOf(controls.selectedService) >= 0) return
             controls.selectedService = ""
-            player.singleService = false
             var service = carController.preferredMusicService(player.availableServices)
             if (service) { player.currentService = service; return }
             var clients = player.availableClients
@@ -79,10 +96,19 @@ Item {
     }
     MprisController {
         id: player
+        // Amber can dereference a removed client when switching back to
+        // automatic selection. Keep explicit selection throughout its life.
+        singleService: true
         onAvailableServicesChanged: selectPreferred.restart()
         onCurrentServiceChanged: rememberTimer.restart()
         onDesktopEntryChanged: rememberTimer.restart()
         onPlaybackStatusChanged: if (playbackStatus === Mpris.Playing) rememberTimer.restart()
+    }
+    Connections {
+        target: carController
+        onPlayerPlaybackFinished: {
+            if (service === player.currentService) controls.playRequestPending = false
+        }
     }
     Rectangle {
         width: controls.coverSize; height: width; radius: 16; color: carPalette.button
@@ -107,7 +133,7 @@ Item {
         Text {
             width: parent.width; color: carPalette.secondary; font.pixelSize: 26
             elide: Text.ElideRight
-            text: controls.idleCard ? (carController.musicError || carController.lastMusicName) : (player.metaData.contributingArtist || "").toString()
+            text: controls.playbackError || carController.musicError || (controls.idleCard ? carController.lastMusicName : (player.metaData.contributingArtist || "").toString())
             textFormat: Text.PlainText
         }
         Text {
@@ -132,7 +158,7 @@ Item {
                 Silica.IconButton {
                     anchors.centerIn: parent; width: controls._squareSize; height: width
                     enabled: index === 0 ? (!controls.idleCard && player.canGoPrevious) : index === 2 ? (!controls.idleCard && player.canGoNext)
-                              : player.playbackStatus === Mpris.Playing ? player.canPause : !pendingPlay.running
+                              : player.playbackStatus === Mpris.Playing ? player.canPause : !pendingPlay.running && !controls.playRequestPending
                     opacity: enabled ? 1 : 0.35
                     icon.color: carPalette.text
                     icon.source: index === 0 ? "image://theme/icon-m-simple-previous"
@@ -171,6 +197,19 @@ Item {
                 id: playerChoices
                 anchors.fill: parent; clip: true
                 model: player.availableClients
+                footer: Rectangle {
+                    objectName: "systemPlayerChoice"
+                    width: playerChoices.width
+                    height: controls.systemPlayerInstalled && !controls.systemPlayerRunning ? 64 : 0
+                    visible: height > 0
+                    color: "transparent"
+                    Text {
+                        anchors.fill: parent; anchors.margins: 12
+                        text: qsTranslate("Sailplay", "System Media")
+                        color: carPalette.text; font.pixelSize: 24; verticalAlignment: Text.AlignVCenter
+                    }
+                    MouseArea { anchors.fill: parent; onClicked: controls.selectPlayerApp("jolla-mediaplayer", controls.playing) }
+                }
                 delegate: Rectangle {
                     width: playerChoices.width; height: 64
                     color: modelData.service === player.currentService ? carPalette.button : "transparent"
@@ -180,7 +219,7 @@ Item {
                         textFormat: Text.PlainText; elide: Text.ElideRight
                         verticalAlignment: Text.AlignVCenter; color: carPalette.text; font.pixelSize: 24
                     }
-                    MouseArea { anchors.fill: parent; onClicked: controls.choosePlayer(modelData.service) }
+                    MouseArea { anchors.fill: parent; enabled: !controls.playRequestPending; onClicked: controls.choosePlayer(modelData.service,true) }
                 }
             }
         }

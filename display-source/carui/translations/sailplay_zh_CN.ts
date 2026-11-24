@@ -2,6 +2,15 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en">
   <context>
     <name>Sailplay</name>
+    <message><source>Queue</source><translation>播放列表</translation></message>
+    <message><source>Play queue (%1)</source><translation>播放列表（%1 首）</translation></message>
+    <message><source>Back</source><translation>返回</translation></message>
+    <message><source>Loading…</source><translation>正在加载…</translation></message>
+    <message><source>Queue unavailable</source><translation>暂时无法读取播放列表</translation></message>
+    <message><source>Queue is empty</source><translation>播放列表为空</translation></message>
+    <message><source>No songs found in System Media</source><translation>系统媒体中没有找到歌曲</translation></message>
+    <message><source>Now Playing</source><translation>正在播放</translation></message>
+    <message><source>System Media</source><translation>系统媒体</translation></message>
     <message><source>Theme mode</source><translation>主题模式</translation></message>
     <message><source>Headlight linked</source><translation>大灯联动</translation></message>
     <message><source>Custom</source><translation>自定义</translation></message>
@@ -685,6 +694,7 @@ Start music on your phone</source>
       <source>Could not start the background player</source>
       <translation>无法启动后台播放器</translation>
     </message>
+    <message><source>Could not start playback</source><translation>无法开始播放</translation></message>
     <message>
       <source>Could not save map selection</source>
       <translation>无法保存地图选择</translation>
