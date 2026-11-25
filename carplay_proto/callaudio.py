@@ -15,8 +15,17 @@ BLUETOOTH_OVERRIDE = 'bluetooth_override'
 
 
 class CallAudioRouter:
-    def __init__(self, device, log=print):
+    def __init__(self, device, log=print, keep_connected=False):
         self.device = device
+        # Hold the hands-free profile for the whole projection, so that it is
+        # already up when an outgoing call is dialled.
+        self.keep_connected = keep_connected
+        self.standby_device = None
+        self.standby_owner = None
+        # Whether this router made the standby connection: one that existed
+        # before the projection is used but never disconnected.
+        self.standby_established = False
+        self.standby_retry_at = 0
         self.log = log
         self.stop = threading.Event()
         self.thread = None
@@ -39,10 +48,49 @@ class CallAudioRouter:
     def call_properties(self):
         return self.voice.GetAll(VOICE_MANAGER)
 
-    def release(self):
+    def standby(self):
+        now = time.monotonic()
+        if now < self.standby_retry_at:
+            return
+        self.standby_retry_at = now + 5
+        objects = self.devices.GetManagedObjects()
+        target = resolve_device(objects, self.device)
+        properties = objects.get(target, {}).get('org.bluez.Device1', {})
+        if not properties.get('Connected'):
+            self.standby_device = self.standby_owner = None
+            self.standby_established = False
+            return
+        owner = self.system.get_name_owner('org.bluez')
+        if self.standby_device == target and self.standby_owner == owner:
+            return
+        if not properties.get('Paired') or HFP_HEADSET not in properties.get('UUIDs', []):
+            return
+        self.standby_retry_at = now + 15
+        device = network_interface(network_object(self.system, 'org.bluez', target), 'org.bluez.Device1')
+        established = True
+        try:
+            device.ConnectProfile(HFP_HEADSET, timeout=6)
+        except Exception as error:
+            name = getattr(error, 'get_dbus_name', lambda: type(error).__name__)()
+            if name != 'org.bluez.Error.AlreadyConnected':
+                self.report('Call audio HFP standby target={} error={}'.format(target, name))
+                return
+            # Available, but someone else's connection to end.
+            established = False
+        self.standby_retry_at = now + 5
+        self.standby_device, self.standby_owner = target, owner
+        self.standby_established = established
+        self.report('Call audio HFP standby ready target={} established={}'.format(target, established))
+
+    def release(self, final=False):
         # Wi-Fi/video teardown must allow an ongoing native HFP call to finish.
         if self.call_properties().get('voiceCalls'):
             return False
+        if self.keep_connected and final and not self.profile_device and self.standby_established:
+            self.profile_device, self.profile_owner = self.standby_device, self.standby_owner
+        if self.keep_connected and final:
+            self.standby_device = self.standby_owner = None
+            self.standby_established = False
         if self.owns_override:
             features = self.routes.GetAll()[4]
             if self.call_properties().get('voiceCalls'):
@@ -51,6 +99,11 @@ class CallAudioRouter:
                    for name, allowed, enabled in features):
                 self.routes.Enable(BLUETOOTH_OVERRIDE)
             self.owns_override = False
+        if self.profile_device and self.keep_connected and not final:
+            # Ours to disconnect, but only once the projection ends.
+            self.standby_device, self.standby_owner = self.profile_device, self.profile_owner
+            self.standby_established = True
+            self.profile_device = self.profile_owner = None
         if self.profile_device:
             if self.call_properties().get('voiceCalls'):
                 return False
@@ -80,6 +133,8 @@ class CallAudioRouter:
         if not calls:
             if self.call_ids and self.release():
                 self.report('Call audio session ended; temporary HFP routing released')
+            if self.keep_connected:
+                self.standby()
             return
         if not set(calls).intersection(self.call_ids):
             self.applied = False
@@ -178,8 +233,8 @@ class CallAudioRouter:
             self.report('Call audio monitor initialization error=' + name)
         finally:
             try:
-                if self.call_ids or self.profile_device or self.owns_override:
-                    self.release()
+                if self.call_ids or self.profile_device or self.owns_override or self.standby_device:
+                    self.release(final=True)
             except Exception as error:
                 name = getattr(error, 'get_dbus_name', lambda: type(error).__name__)()
                 self.report('Call audio cleanup error=' + name)

@@ -1,7 +1,7 @@
 import plistlib
 import unittest
 from unittest.mock import Mock
-from carplay_proto.videodemo import disable_bluetooth
+from carplay_proto.videodemo import disable_bluetooth, keep_bluetooth
 
 class HandoffTests(unittest.TestCase):
     def test_actual_local_address_and_command(self):
@@ -17,3 +17,13 @@ class HandoffTests(unittest.TestCase):
     def test_protocol_rejection_is_not_success(self):
         client=Mock();client.request.return_value=(200,{},plistlib.dumps({'status':-1}))
         with self.assertRaises(RuntimeError):disable_bluetooth(client,'AB:CD:EF:01:23:45')
+
+
+class KeepBluetoothTests(unittest.TestCase):
+    def test_honda_and_marelli_carline_keep_their_bluetooth_link(self):
+        self.assertTrue(keep_bluetooth({'model':'Honda CIVIC'}))
+        self.assertTrue(keep_bluetooth({'model':'Fiat CARLINE_13'}))
+
+    def test_other_head_units_are_still_asked_to_disable_bluetooth(self):
+        for info in ({}, {'model':None}, {'model':'WILDLANDER'}, {'manufacturer':'Marelli','model':'Other'}):
+            self.assertFalse(keep_bluetooth(info))

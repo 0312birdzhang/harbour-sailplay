@@ -55,6 +55,21 @@ def screen_packet_profile(info):
     return 'legacy' if 'desay' in identity or model == 'WILDLANDER' else 'ios'
 
 
+def marelli_carline(info):
+    """Fiat/Stellantis head units built on Marelli's CARLINE platform."""
+    return 'carline' in str(info.get('model','')).lower()
+
+
+def keep_bluetooth(info):
+    """Whether the head unit keeps its Bluetooth link during projection.
+
+    Honda needs it for iAP2. A Marelli CARLINE unit takes native calls over
+    hands-free itself, and refuses the profile once asked to disable
+    Bluetooth, which leaves call audio on the phone.
+    """
+    return 'honda' in str(info.get('model','')).lower() or marelli_carline(info)
+
+
 class ScreenEncoder:
     def __init__(self, shared, stream_id, packet_profile='ios'):
         if packet_profile not in ('ios', 'legacy'):
@@ -238,9 +253,13 @@ class UiCommands:
             os.unlink(self.path)
 
 
+# Waits before retrying a refused audio reopen; then the session is ended.
+REOPEN_RETRY_SECONDS=(1,3,6)
+
+
 class ScreenFeedback:
     """Keep control requests away from the video producer's critical path."""
-    def __init__(self,client,commands=None,modes=None,resume=None,screen=None,resource_changed=None,audio=None,duck=None,mode_lock=None,mode_revision=None):
+    def __init__(self,client,commands=None,modes=None,resume=None,screen=None,resource_changed=None,audio=None,duck=None,mode_lock=None,mode_revision=None,reopen_audio=False):
         self.client=client
         self.commands=commands
         self.modes=modes
@@ -248,6 +267,10 @@ class ScreenFeedback:
         self.screen=screen
         self.resource_changed=resource_changed
         self.audio=audio
+        self.audio_entity=1
+        self.reopen_audio=reopen_audio
+        self.reopen_attempts=0
+        self.reopen_at=None
         self.duck=duck if duck is not None else [1.0]
         self.mode_lock=mode_lock or threading.RLock()
         self.mode_revision=mode_revision if mode_revision is not None else [0]
@@ -288,6 +311,7 @@ class ScreenFeedback:
                     command_status=plistlib.loads(body).get('status',0) if body else 0
                     accepted=status==200 and command_status==0
                     if accepted:
+                        reopen=False
                         with self.mode_lock:
                             current=self.mode_revision[0]==revision
                             if current:
@@ -297,11 +321,23 @@ class ScreenFeedback:
                                     entity=next(r['entity'] for r in self.modes['resources'] if r['resourceID']==2)
                                     self.audio.gain=self.duck[0] if entity==1 else 0.0
                                     print('Audio resource reconciled entity={} senderGain={}'.format(entity,self.audio.gain),flush=True)
+                                    returned=entity==1 and self.audio_entity==2
+                                    self.audio_entity=entity
+                                    reopen=returned and self.reopen_audio
+                        if self.audio and self.audio_entity!=1:
+                            # The head unit took audio again: a pending retry is moot.
+                            self.reopen_at=None
+                        if reopen:
+                            # Outside the mode lock: this is two requests to the receiver.
+                            self.reopen_attempts=0
+                            self.try_reopen()
                         if current and self.screen:self.screen.ownership(owner)
                         elif not current and self.resource_changed is not None:self.resource_changed.set()
                     elif changed:
                         raise RuntimeError('HU resource notification rejected')
                     print('Screen ownership response owner={} status={} command_status={} accepted={}'.format(owner,status,command_status,accepted),flush=True)
+                if self.reopen_at is not None and time.monotonic()>=self.reopen_at:
+                    self.try_reopen()
                 if time.monotonic()<next_feedback:
                     continue
                 status,_,body=self.client.request('POST','/feedback',headers={'User-Agent':'AirPlay/566.25.21'})
@@ -311,6 +347,29 @@ class ScreenFeedback:
                 print('Screen feedback failed: {}: {}'.format(type(error).__name__,error),flush=True)
                 self.stop.set()
                 return
+
+    def try_reopen(self):
+        """Reopen main audio; retry a refusal a few times, then end the session.
+
+        A refused SETUP after a successful TEARDOWN leaves the receiver without
+        an audio stream. Nothing else would bring one back before the next
+        ownership change, so after the last retry the media session is ended
+        and the handover reconnects with a fresh one.
+        """
+        self.reopen_at=None
+        self.reopen_attempts+=1
+        try:
+            if self.audio.reopen(self.client,self.client.sock.sock.getpeername()):
+                self.reopen_attempts=0
+                return
+            failure='SETUP refused'
+        except Exception as error:
+            failure='{}: {}'.format(type(error).__name__,error)
+        if self.reopen_attempts>len(REOPEN_RETRY_SECONDS):
+            raise RuntimeError('audio stream could not be reopened ({})'.format(failure))
+        delay=REOPEN_RETRY_SECONDS[self.reopen_attempts-1]
+        self.reopen_at=time.monotonic()+delay
+        print('Audio reopen failed attempt={} retrySeconds={} detail={}'.format(self.reopen_attempts,delay,failure),flush=True)
 
     def close(self):
         self.stop.set()
@@ -497,7 +556,7 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         if live:
             from .audio import AudioSender
             audio=AudioSender(client,shared,info)
-            if bluetooth_address and 'honda' not in str(info.get('model','')).lower():
+            if bluetooth_address and not keep_bluetooth(info):
                 phase = 'bluetooth-handoff'
                 before = time.monotonic()
                 checkpoint(phase + '-start')
@@ -507,11 +566,13 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
                 # The HU needs its Bluetooth link for iAP2 call/media control.
                 # Asking a Honda to disable it ends CarPlay after the next
                 # accessory timeout and removes the wireless CarPlay record.
+                # A Marelli CARLINE unit needs it for hands-free call audio.
                 print('Keeping accessory Bluetooth enabled for {}'.format(
                     info.get('model')),flush=True)
             from .bluezadapter import previous_head_unit
             from .callaudio import CallAudioRouter
-            call_audio = CallAudioRouter(bluetooth_device or previous_head_unit())
+            call_audio = CallAudioRouter(bluetooth_device or previous_head_unit(),
+                                         keep_connected=marelli_carline(info))
             call_audio.start()
         phase = 'screen-setup'
         before = time.monotonic()
@@ -570,7 +631,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
             from .screenstream import ScreenStream
             screen=ScreenStream(client,address,interface,shared,display,video,stream_id,width,height,
                                 request_keyframe=pipeline.request_keyframe,packet_profile=packet_profile)
-            feedback=ScreenFeedback(client,commands,modes,resume,screen,resource_changed,audio,duck,mode_lock,mode_revision)
+            feedback=ScreenFeedback(client,commands,modes,resume,screen,resource_changed,audio,duck,mode_lock,mode_revision,
+                                    reopen_audio=marelli_carline(info))
         if live:
             import itertools
             source = itertools.chain([first_live_frame],source)
