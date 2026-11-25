@@ -37,6 +37,15 @@ void waitFor(const std::function<bool()> &ready, int timeout = 5000)
     }
     check(ready(), "event deadline exceeded");
 }
+
+QQuickItem *findItem(QQuickItem *root, const QString &name)
+{
+    if (root->objectName() == name) return root;
+    for (auto *child : root->childItems()) {
+        if (auto *found = findItem(child, name)) return found;
+    }
+    return nullptr;
+}
 }
 
 int main(int argc, char **argv)
@@ -74,6 +83,8 @@ int main(int argc, char **argv)
     qulonglong heldBrowse = 0;
     QVector<QVariantMap> touches;
     QVector<QVariantMap> browseActions;
+    QVector<QVariantMap> controlActions;
+    int stops = 0;
     QVariantMap browser{{QStringLiteral("page"), QString()}, {QStringLiteral("query"), QString()},
         {QStringLiteral("rows"), QVariantList{QVariantMap{{QStringLiteral("id"), QStringLiteral("1/0")},
             {QStringLiteral("title"), QString::fromUtf8("测试目的地 🌍")}, {QStringLiteral("subtitle"), QStringLiteral("Address")},
@@ -86,13 +97,19 @@ int main(int argc, char **argv)
         provider.complete(request, {{QStringLiteral("image"), malformed ? QByteArray("bad JPEG") : jpeg},
             {QStringLiteral("width"), 320}, {QStringLiteral("height"), 160},
             {QStringLiteral("state"), QVariantMap{{QStringLiteral("place"), QStringLiteral("Test place")},
-                {QStringLiteral("bookmarked"), bookmarked}, {QStringLiteral("browser"), browser}}}});
+                {QStringLiteral("canStart"), true}, {QStringLiteral("bookmarked"), bookmarked},
+                {QStringLiteral("browser"), browser}}}});
     });
     provider.setActionHandler(QStringLiteral("navigation.map.touch"), [&](qulonglong request, const QVariantMap &parameters) {
         touches.append(parameters);
         provider.complete(request);
     });
     provider.setActionHandler(QStringLiteral("navigation.stop"), [&](qulonglong request, const QVariantMap &) {
+        ++stops;
+        provider.complete(request);
+    });
+    provider.setActionHandler(QStringLiteral("navigation.map.control"), [&](qulonglong request, const QVariantMap &parameters) {
+        controlActions.append(parameters);
         provider.complete(request);
     });
     provider.setActionHandler(QStringLiteral("navigation.map.browse"), [&](qulonglong request, const QVariantMap &parameters) {
@@ -166,23 +183,51 @@ int main(int argc, char **argv)
         auto *item = qobject_cast<QQuickItem *>(card.get());
         auto *map = card->findChild<SailplayMapCanvas *>(QStringLiteral("navigationMapCanvas"));
         check(item && map && map->provider() == &host, "navigation QML did not bind the map provider");
-        for (const QSize &size : {QSize(1920, 720), QSize(1280, 720), QSize(720, 1280), QSize(960, 1920)}) {
+        const auto bounds = [&](QQuickItem *target) {
+            check(target, "layout target is missing");
+            return target->mapRectToItem(item, QRectF(0, 0, target->width(), target->height()));
+        };
+        const auto contained = [&](QQuickItem *target) {
+            check(QRectF(0, 0, item->width(), item->height()).adjusted(-0.1, -0.1, 0.1, 0.1).contains(bounds(target)),
+                "map control exceeded the viewport");
+        };
+        for (const QSize &size : {QSize(1920, 720), QSize(1748, 688), QSize(1106, 656), QSize(1280, 720),
+                                 QSize(800, 480), QSize(640, 360), QSize(720, 1280), QSize(960, 1920)}) {
             item->setSize(size);
             check(map->width() == item->width() && map->height() == item->height(), "map canvas did not fill the card");
             card->setProperty("panelOpen", true);
             auto *panel = card->findChild<QQuickItem *>(QStringLiteral("navigationDestinationPanel"));
-            check(panel && panel->width() > 0 && panel->height() > 0
-                && panel->x() + panel->width() <= item->width() && panel->y() + panel->height() <= item->height(),
-                "destination panel exceeded its map viewport");
+            contained(panel);
             auto *input = card->findChild<QQuickItem *>(QStringLiteral("navigationSearchInput"));
             check(input && input->width() > 0, "destination search input has no width");
+            contained(card->findChild<QQuickItem *>(QStringLiteral("navigationDestinationBackButton")));
+            contained(card->findChild<QQuickItem *>(QStringLiteral("navigationDestinationCloseButton")));
             card->setProperty("panelOpen", false);
             auto *toolbar = card->findChild<QQuickItem *>(QStringLiteral("navigationMapToolbar"));
             auto *preview = card->findChild<QQuickItem *>(QStringLiteral("navigationRoutePreview"));
-            check(toolbar && toolbar->width() <= 328 && preview && preview->width() <= 560,
-                "map controls expanded across the viewport");
-            check(preview->y() >= 0 && preview->x() + preview->width() <= item->width()
-                && preview->y() + preview->height() <= item->height(), "place preview exceeded the viewport");
+            auto *settings = card->findChild<QQuickItem *>(QStringLiteral("navigationSettingsButton"));
+            contained(toolbar);
+            contained(preview);
+            contained(settings);
+            check(bounds(toolbar).right() < bounds(settings).left(), "toolbar overlaps settings");
+            check(bounds(preview).width() <= item->width() * 0.5, "route preview consumes too much map space");
+            for (const QString &name : {QStringLiteral("navigationDestinationButton"),
+                                       QStringLiteral("navigationBookmarksButton"),
+                                       QStringLiteral("navigationRouteActionButton"),
+                                       QStringLiteral("navigationPreviewCloseButton"),
+                                       QStringLiteral("navigationMapControl_position"),
+                                       QStringLiteral("navigationMapControl_zoom-in"),
+                                       QStringLiteral("navigationMapControl_zoom-out")}) {
+                auto *button = findItem(item, name);
+                contained(button);
+                if (size == QSize(1748, 688)) check(bounds(button).height() >= 100, "full map touch target is too small");
+                if (size == QSize(1106, 656)) check(bounds(button).height() >= 80, "split map touch target is too small");
+            }
+            auto *controls = card->findChild<QQuickItem *>(QStringLiteral("navigationMapControls"));
+            check(!bounds(controls).intersects(bounds(preview)), "map buttons overlap the route preview");
+            printf("NAVIGATION_CONTROL_LAYOUT_PASS %dx%d destination=%.1f position=%.1f\n", size.width(), size.height(),
+                bounds(card->findChild<QQuickItem *>(QStringLiteral("navigationDestinationButton"))).height(),
+                bounds(findItem(item, QStringLiteral("navigationMapControl_position"))).height());
         }
 
         configuredSize = QSize(1280, 720);
@@ -246,11 +291,29 @@ int main(int argc, char **argv)
         holdBrowse = false;
         provider.complete(heldBrowse, browser);
         waitFor([&] { return !host.mapBrowseBusy(); });
+        for (const QString &command : {QStringLiteral("position"), QStringLiteral("zoom-in"), QStringLiteral("zoom-out")}) {
+            auto *button = findItem(item, QStringLiteral("navigationMapControl_") + command);
+            click(button, QPointF(button->width() - 2, button->height() - 2));
+            check(!controlActions.isEmpty() && controlActions.last().value(QStringLiteral("command")) == command,
+                "scaled map button edge did not invoke its command");
+        }
+        auto *start = card->findChild<QQuickItem *>(QStringLiteral("navigationRouteActionButton"));
+        click(start, QPointF(start->width() - 2, start->height() - 2));
+        check(controlActions.last().value(QStringLiteral("command")) == QStringLiteral("start")
+            && touches.size() == beforeOverlay, "scaled start button edge reached the map or missed its action");
+        check(provider.publish({{QStringLiteral("navigation"), SailplayProvider::navigationGuidance(QStringLiteral("active"))}}),
+            "active guidance was rejected");
+        waitFor([&] { return card->property("navigating").toBool(); });
+        check(!bookmarks->isVisible() && !start->isVisible(), "planning buttons remained visible during navigation");
+        click(settings, QPointF(settings->width() - 2, settings->height() - 2));
+        check(stops == 1 && touches.size() == beforeOverlay, "scaled stop button edge did not stop navigation");
+        check(provider.publish({{QStringLiteral("navigation"), SailplayProvider::navigationGuidance()}}), "idle guidance was rejected");
+        waitFor([&] { return !card->property("navigating").toBool(); });
         click(item, QPointF(900, 400));
         waitFor([&] { return touches.size() >= beforeOverlay + 2; });
         check(touches.last().value(QStringLiteral("phase")) == QStringLiteral("release"),
             "uncovered map input did not finish its gesture");
-        puts("NAVIGATION_MAP_OVERLAY_PASS preview-text padding toolbar-gap destination-bottom bookmark-entry bookmark-toggle disabled-controls uncovered-map");
+        puts("NAVIGATION_MAP_OVERLAY_PASS preview-text padding toolbar-gap destination-bottom bookmark-entry bookmark-toggle disabled-controls scaled-button-edges start-stop uncovered-map");
         window.hide();
         host.setActive(false);
         card->setProperty("compact", true);

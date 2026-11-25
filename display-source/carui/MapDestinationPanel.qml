@@ -36,9 +36,10 @@ Rectangle {
 
     Row {
         id: heading
-        x: 12; y: 12; width: parent.width - 24; height: 58; spacing: 10
+        x: 12; y: 12; width: parent.width - 24; height: 76; spacing: 10
         Rectangle {
-            width: 54; height: parent.height; radius: 12; color: palette.button
+            objectName: "navigationDestinationBackButton"
+            width: 76; height: parent.height; radius: 12; color: palette.button
             Text { anchors.centerIn: parent; text: "‹"; color: palette.text; font.pixelSize: 40 }
             MouseArea {
                 anchors.fill: parent
@@ -51,7 +52,7 @@ Rectangle {
             }
         }
         Text {
-            width: heading.width - 118; height: parent.height
+            width: heading.width - 172; height: parent.height
             verticalAlignment: Text.AlignVCenter; color: palette.text; font.pixelSize: 28
             textFormat: Text.PlainText; elide: Text.ElideRight
             text: page === "bookmarks" ? browser.title || qsTranslate("Sailplay", "Bookmarks")
@@ -62,7 +63,8 @@ Rectangle {
                 : qsTranslate("Sailplay", "Choose destination")
         }
         Rectangle {
-            width: 54; height: parent.height; radius: 12; color: palette.button
+            objectName: "navigationDestinationCloseButton"
+            width: 76; height: parent.height; radius: 12; color: palette.button
             Text { anchors.centerIn: parent; text: "×"; color: palette.text; font.pixelSize: 36 }
             MouseArea { anchors.fill: parent; onClicked: panel.closePanel() }
         }
@@ -70,7 +72,7 @@ Rectangle {
     Row {
         id: tabs
         x: 12; y: heading.y + heading.height + 10; width: parent.width - 24
-        height: visible ? 56 : 0; spacing: 8; visible: page !== "settings"
+        height: visible ? 76 : 0; spacing: 8; visible: page !== "settings"
         Repeater {
             model: [
                 {label: qsTranslate("Sailplay", "Recent"), command: "history"},
@@ -90,12 +92,12 @@ Rectangle {
     Rectangle {
         id: searchBox
         x: 12; y: tabs.y + tabs.height + 10; width: parent.width - 24
-        height: visible ? 58 : 0; radius: 12; color: palette.button
+        height: visible ? 76 : 0; radius: 12; color: palette.button
         visible: page === "search" || page === "categories"
         TextInput {
             id: searchInput
             objectName: "navigationSearchInput"
-            x: 14; width: parent.width - 82; height: parent.height
+            x: 14; width: parent.width - 96; height: parent.height
             color: palette.text; font.pixelSize: 26; verticalAlignment: TextInput.AlignVCenter
             maximumLength: 256; selectByMouse: true; clip: true
             onActiveFocusChanged: if (activeFocus && panel.visible) Qt.inputMethod.show()
@@ -108,7 +110,7 @@ Rectangle {
             }
         }
         Rectangle {
-            anchors.right: parent.right; width: 62; height: parent.height; radius: 12; color: palette.button
+            anchors.right: parent.right; width: 76; height: parent.height; radius: 12; color: palette.button
             Text { anchors.centerIn: parent; text: "⌕"; color: palette.text; font.pixelSize: 34 }
             MouseArea { anchors.fill: parent; onClicked: { searchDelay.stop(); panel.search(); searchInput.focus = false; Qt.inputMethod.hide() } }
         }
@@ -152,7 +154,7 @@ Rectangle {
     Row {
         id: pagination
         x: 12; y: panel.height - height - 12; width: panel.width - 24; spacing: 8
-        height: visible ? 54 : 0; visible: !!browser.previous || !!browser.next
+        height: visible ? 76 : 0; visible: !!browser.previous || !!browser.next
         Repeater {
             model: [{label: qsTranslate("Sailplay", "Previous"), command: "previous"}, {label: qsTranslate("Sailplay", "Next"), command: "next"}]
             Rectangle {
@@ -174,14 +176,14 @@ Rectangle {
         Repeater {
             model: [{label: qsTranslate("Sailplay", "Driving"), command: "vehicle"}, {label: qsTranslate("Sailplay", "Walking"), command: "walking"}, {label: qsTranslate("Sailplay", "Cycling"), command: "cycling"}]
             Rectangle {
-                width: parent.width; height: 58; radius: 12; color: browser.routerType === index ? palette.notice : palette.button
+                width: parent.width; height: 76; radius: 12; color: browser.routerType === index ? palette.notice : palette.button
                 opacity: navigating ? 0.5 : 1
                 Text { anchors.centerIn: parent; text: modelData.label; color: palette.text; font.pixelSize: 26 }
                 MouseArea { anchors.fill: parent; enabled: !busy && !navigating; onClicked: provider.mapBrowse(modelData.command) }
             }
         }
         Rectangle {
-            width: parent.width; height: 58; radius: 12; color: palette.button; opacity: browser.voiceAvailable ? 1 : 0.5
+            width: parent.width; height: 76; radius: 12; color: palette.button; opacity: browser.voiceAvailable ? 1 : 0.5
             Text { anchors.centerIn: parent; text: browser.voiceEnabled ? qsTranslate("Sailplay", "Mute guidance") : qsTranslate("Sailplay", "Enable guidance voice"); color: palette.text; font.pixelSize: 24 }
             MouseArea { anchors.fill: parent; enabled: !busy && !!browser.voiceAvailable; onClicked: provider.mapBrowse("mute") }
         }
