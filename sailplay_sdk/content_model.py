@@ -11,6 +11,12 @@ PAGE_FIELDS = frozenset(('id', 'title', 'version', 'items', 'actions', 'searchEn
                          'messageKind', 'offset', 'hasMore'))
 ITEM_FIELDS = frozenset(('id', 'title', 'subtitle', 'kind', 'action', 'parameters', 'enabled'))
 MAX_ITEMS = 50
+# Optional presentation hints. They travel beside the page, never inside it,
+# so that a host or a provider which predates them keeps working unchanged.
+PLAYBACK = ('unplayed', 'started', 'playing', 'finished')
+LAYOUTS = ('list', 'grid', 'wide', 'split')
+HINT_FIELDS = ('image', 'playback')
+MAX_IMAGE = 2048
 MAX_OFFSET = (1 << 32) - 1
 
 
@@ -22,9 +28,35 @@ def _integer(value, maximum=MAX_OFFSET):
     return isinstance(value, int) and not isinstance(value, (bool, Boolean)) and 0 <= value <= maximum
 
 
-def content_item(identity, title, subtitle='', kind='folder', action='', parameters=None, enabled=True):
-    return validate_item(dict(id=identity, title=title, subtitle=subtitle, kind=kind, action=action,
-                              parameters={} if parameters is None else parameters, enabled=enabled))
+def _image(value):
+    """An absolute local file, or an http(s) address the host may fetch."""
+    return (_text(value, MAX_IMAGE, True) and not any(ord(character) < 32 for character in value)
+            and (value.startswith('/') or value.startswith(('file:///', 'https://', 'http://'))))
+
+
+def validate_hints(value):
+    """Check the hints of one row; empty values mean the hint is absent."""
+    if not isinstance(value, dict) or not set(value).issubset(HINT_FIELDS):
+        raise Fault('InvalidArgument', 'unknown content presentation hint')
+    image, playback = value.get('image', ''), value.get('playback', '')
+    if (image != '' and not _image(image)) or (playback != '' and playback not in PLAYBACK):
+        raise Fault('InvalidArgument', 'invalid content presentation hint')
+    return {key: str(entry) for key, entry in (('image', image), ('playback', playback)) if entry != ''}
+
+
+def _split_item(value):
+    if not isinstance(value, dict):
+        raise Fault('InvalidArgument', 'content item fields do not match Content1')
+    hints = validate_hints({key: value[key] for key in HINT_FIELDS if key in value})
+    return validate_item({key: entry for key, entry in value.items() if key not in HINT_FIELDS}), hints
+
+
+def content_item(identity, title, subtitle='', kind='folder', action='', parameters=None, enabled=True,
+                 image='', playback=''):
+    """A row; `image` and `playback` are optional presentation hints."""
+    item, hints = _split_item(dict(id=identity, title=title, subtitle=subtitle, kind=kind, action=action,
+        parameters={} if parameters is None else parameters, enabled=enabled, image=image, playback=playback))
+    return dict(item, **hints)
 
 
 def validate_item(value):
@@ -42,9 +74,95 @@ def validate_item(value):
 
 
 def content_page(identity='root', title='', items=(), actions=(), search_enabled=False,
-                 message='', message_kind='none', offset=0, has_more=False, version=1):
-    return validate_content(dict(id=identity, title=title, version=version, items=list(items), actions=list(actions),
-        searchEnabled=search_enabled, message=message, messageKind=message_kind, offset=offset, hasMore=has_more))
+                 message='', message_kind='none', offset=0, has_more=False, version=1, layout='', tabs=False,
+                 side=''):
+    """A page; rows may carry hints, `layout` selects a standard arrangement,
+    `tabs` shows the page's folders as a tab bar above the selected one and,
+    on the root page, `side` names a folder the host keeps in a side panel."""
+    page = dict(id=identity, title=title, version=version, items=list(items), actions=list(actions),
+        searchEnabled=search_enabled, message=message, messageKind=message_kind, offset=offset, hasMore=has_more)
+    if layout != '':
+        page['layout'] = layout
+    if tabs is not False:
+        page['tabs'] = tabs
+    if side != '':
+        page['side'] = side
+    return merge_content(*split_content(page))
+
+
+def split_content(value):
+    """Separate a page from its hints: a strict Content1 page and a presentation."""
+    if not isinstance(value, dict):
+        raise Fault('InvalidArgument', 'content page fields do not match Content1')
+    page = {key: entry for key, entry in value.items() if key not in ('layout', 'tabs', 'side')}
+    layout, tabs, side = value.get('layout', ''), value.get('tabs', False), value.get('side', '')
+    if side != '' and not _text(side, 256, True):
+        raise Fault('InvalidArgument', 'invalid content side folder')
+    if layout != '' and layout not in LAYOUTS:
+        raise Fault('InvalidArgument', 'unknown content layout')
+    if not isinstance(tabs, (bool, Boolean)):
+        raise Fault('InvalidArgument', 'content tabs must be a boolean')
+    hints = {}
+    for key in ('items', 'actions'):
+        entries = page.get(key)
+        if not isinstance(entries, (list, tuple)):
+            continue
+        pairs = [_split_item(entry) for entry in entries]
+        page[key] = [item for item, _ in pairs]
+        if key == 'items':
+            hints = {item['id']: entry for item, entry in pairs if entry}
+        elif any(entry for _, entry in pairs):
+            raise Fault('InvalidArgument', 'page controls take no presentation hints')
+    presentation = {}
+    if layout != '':
+        presentation['layout'] = str(layout)
+    if tabs:
+        presentation['tabs'] = True
+    if side != '':
+        presentation['side'] = str(side)
+    if hints:
+        presentation['items'] = hints
+    return validate_content(page), presentation
+
+
+def clean_presentation(value, page):
+    """Keep what a host can use of a received presentation; never reject the page."""
+    result = {}
+    if not isinstance(value, dict):
+        return result
+    if isinstance(value.get('layout'), str) and value['layout'] in LAYOUTS:
+        result['layout'] = str(value['layout'])
+    if isinstance(value.get('tabs'), (bool, Boolean)) and value['tabs']:
+        result['tabs'] = True
+    if _text(value.get('side'), 256, True):
+        result['side'] = str(value['side'])
+    identities = {item['id'] for item in page['items']}
+    hints = {}
+    entries = value.get('items')
+    for identity, entry in (entries.items() if isinstance(entries, dict) else ()):
+        if str(identity) not in identities or not isinstance(entry, dict):
+            continue
+        kept = {}
+        if _image(entry.get('image')):
+            kept['image'] = str(entry['image'])
+        if isinstance(entry.get('playback'), str) and entry['playback'] in PLAYBACK:
+            kept['playback'] = str(entry['playback'])
+        if kept:
+            hints[str(identity)] = kept
+    if hints:
+        result['items'] = hints
+    return result
+
+
+def merge_content(page, presentation=None):
+    """Attach the usable hints of a presentation to a validated page."""
+    presentation = clean_presentation(presentation, page)
+    hints = presentation.get('items', {})
+    result = dict(page, items=[dict(item, **hints.get(item['id'], {})) for item in page['items']])
+    for key in ('layout', 'tabs', 'side'):
+        if key in presentation:
+            result[key] = presentation[key]
+    return result
 
 
 def validate_content(value):

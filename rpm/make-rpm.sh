@@ -33,6 +33,7 @@ cp "$REPO/display-source/carui/NavigationCard.qml" "$STAGE/display-source/carui/
 cp "$REPO/display-source/carui/MapDestinationPanel.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/MapBookmarkIcon.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/ContentPage.qml" "$STAGE/display-source/carui/"
+cp "$REPO/display-source/carui/ContentPane.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/MusicPlayer.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/SystemMediaLibrary.qml" "$STAGE/display-source/carui/"
 cp "$REPO/display-source/carui/PlayerQueue.qml" "$REPO/display-source/carui/SystemMediaQueueBridge.qml" "$STAGE/display-source/carui/"

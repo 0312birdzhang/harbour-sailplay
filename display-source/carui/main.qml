@@ -1,6 +1,7 @@
 import QtQuick 2.0
 import QtQuick.Window 2.0
 import Sailfish.Silica 1.0 as Silica
+import Amber.Mpris 1.0
 
 Window {
     id: projectionWindow
@@ -86,6 +87,15 @@ Window {
                 x: 25; y: 207 + index * 121; width: 90; height: 90; radius: 21; color: dockTouch.pressed ? carPalette.pressed : carPalette.card
                 Image { anchors.centerIn: parent; width: 78; height: 78; fillMode: Image.PreserveAspectFit; source: modelData.icon ? "file://" + modelData.icon : ""; visible: source !== "" }
                 Text { anchors.centerIn: parent; text: modelData.icon ? "" : modelData.name.charAt(0); color: carPalette.text; font.pixelSize: 38 }
+                // The ambience glow marks the application on screen.
+                Silica.GlassItem {
+                    objectName: "dockActiveGlow"
+                    visible: modelData.appId !== "" && (carController.currentApp === modelData.appId
+                        || (carController.musicActive && carController.lastMusicApp === modelData.appId))
+                    anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height / 2 + 6
+                    width: 52; height: 52
+                    color: carPalette.highlightColor; falloffRadius: 0.2; radius: 0.2; cache: false
+                }
                 MouseArea { id: dockTouch; anchors.fill: parent; onClicked: carController.dockClicked(modelData.appId) }
             }
         }
@@ -429,7 +439,40 @@ Window {
         width: root.width - x - 16; height: root.height - 32
         provider: carController.content
         palette: carPalette
+        player: contentPlayer
     }
+    // The player of the application being browsed, for the transport of its
+    // side panel. It stays on that application's player whatever else plays.
+    MprisController {
+        id: contentMpris
+        singleService: true
+        onAvailableServicesChanged: contentPlayer.pin()
+        onCurrentServiceChanged: if (contentPlayer.service && currentService !== contentPlayer.service) contentPlayer.pin()
+    }
+    QtObject {
+        id: contentPlayer
+        property string service: ""
+        readonly property bool available: service !== "" && contentMpris.currentService === service
+        readonly property bool playing: available && contentMpris.playbackStatus === Mpris.Playing
+        readonly property string title: available ? String(contentMpris.metaData.title || "") : ""
+        readonly property string artist: available ? String(contentMpris.metaData.contributingArtist || "") : ""
+        readonly property bool canGoNext: available && contentMpris.canGoNext
+        readonly property bool canGoPrevious: available && contentMpris.canGoPrevious
+        function pin() {
+            var wanted = carController.contentActive
+                ? carController.musicServiceForApp(carController.currentApp, contentMpris.availableServices) : ""
+            service = wanted
+            if (wanted && contentMpris.currentService !== wanted) contentMpris.currentService = wanted
+        }
+        function playPause() {
+            if (!available) return
+            if (playing) { if (contentMpris.canPause) contentMpris.pause() }
+            else if (contentMpris.canPlay) contentMpris.play()
+        }
+        function next() { if (canGoNext) contentMpris.next() }
+        function previous() { if (canGoPrevious) contentMpris.previous() }
+    }
+    Connections { target: carController; onCurrentAppChanged: contentPlayer.pin() }
     NavigationCard {
         visible: carController.navigationActive
         x: dock.width + 16
