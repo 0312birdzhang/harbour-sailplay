@@ -6,6 +6,19 @@ import struct
 import threading
 import uuid
 
+from carplay_proto.runtime_logging import RepeatGate
+
+# bluetoothd rewrites the inquiry response on every service-record change.
+eir_repeats = RepeatGate()
+
+
+def repeat_note(kind):
+    """None when this repeat is not logged, else a suffix counting the dropped ones."""
+    skipped = eir_repeats.admit(kind)
+    if skipped is None:
+        return None
+    return ' similarEventsNotLogged={}'.format(skipped) if skipped else ''
+
 
 def disconnect_reason(reason):
     return {0x05: 'authentication failure', 0x08: 'connection timeout',
@@ -37,7 +50,10 @@ def public_hci_metadata(opcode, data):
     if opcode == 2 and len(data) >= 4:
         command, length = struct.unpack('<HB', data[:3])
         if command == 0x0c52 and length == 241 and len(data) == 244:
-            logging.info('HCI EIR write fec=%d summary=%s', data[3], eir_summary(data[4:]))
+            summary = eir_summary(data[4:])
+            note = repeat_note(('write', data[3], str(summary)))
+            if note is not None:
+                logging.info('HCI EIR write fec=%d summary=%s%s', data[3], summary, note)
         elif command == 0x0406 and length == 3 and len(data) == 6:
             handle, reason = struct.unpack('<HB', data[3:])
             logging.info('HCI local Disconnect command handle=%d reason=0x%02x reasonName=%s',
@@ -48,7 +64,9 @@ def public_hci_metadata(opcode, data):
     if event == 0x0e and size >= 4:
         command = struct.unpack('<H', data[3:5])[0]
         if command == 0x0c52:
-            logging.info('HCI EIR write complete status=0x%02x', data[5])
+            note = repeat_note(('complete', data[5]))
+            if note is not None:
+                logging.info('HCI EIR write complete status=0x%02x%s', data[5], note)
     elif event == 0x36 and size == 7:
         logging.info('HCI simple pairing complete status=0x%02x', data[2])
     elif event == 0x06 and size == 3:

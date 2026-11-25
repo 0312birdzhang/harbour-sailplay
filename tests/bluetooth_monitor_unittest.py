@@ -54,4 +54,16 @@ class PublicHciTests(unittest.TestCase):
             monitor.process(5, acl)
         self.assertEqual(log.call_args.args[1:3], ('rx', 'DISC'))
         self.assertNotIn('secret', str(log.call_args))
+    def test_endless_eir_rewrites_are_bounded_and_counted(self):
+        now = [0.0]
+        write = struct.pack('<HB', 0x0c52, 241) + bytes(241)
+        with patch.object(m, 'eir_repeats', m.RepeatGate(burst=3, clock=lambda: now[0])), \
+                patch.object(m.logging, 'info') as log:
+            for _ in range(40):
+                m.public_hci_metadata(2, write)
+                m.public_hci_metadata(3, bytes.fromhex('0e0401520c00'))
+            self.assertEqual(log.call_count, 6)
+            now[0] = 61
+            m.public_hci_metadata(2, write)
+        self.assertEqual(log.call_args.args[-1], ' similarEventsNotLogged=37')
 if __name__=='__main__':unittest.main()

@@ -24,6 +24,23 @@ class ProbeTests(unittest.TestCase):
         self.assertFalse(module.bluez_restarted('org.bluez', ''))
         self.assertFalse(module.bluez_restarted('org.ofono', ':1.12'))
 
+    def test_only_adapter_service_list_changes_are_bounded_in_the_log(self):
+        self.assertTrue(module.adapter_service_churn('org.bluez.Adapter1', {'UUIDs': '[...]'}))
+        self.assertTrue(module.adapter_service_churn('org.bluez.Adapter1', {'UUIDs': '[...]', 'Class': '1'}))
+        self.assertFalse(module.adapter_service_churn('org.bluez.Adapter1', {'UUIDs': '[...]', 'Powered': '1'}))
+        self.assertFalse(module.adapter_service_churn('org.bluez.Adapter1', {}))
+        # A device's services stay in the log however often they change.
+        self.assertFalse(module.adapter_service_churn('org.bluez.Device1', {'UUIDs': '[...]'}))
+        gate = module.RepeatGate(burst=2, clock=lambda: 0.0)
+        logged = 0
+        for _ in range(20):
+            for interface in ('org.bluez.Adapter1', 'org.bluez.Device1'):
+                values = {'UUIDs': '[...]'}
+                churn = module.adapter_service_churn(interface, values)
+                if not churn or gate.admit(('/org/bluez/hci0', tuple(sorted(values)))) is not None:
+                    logged += 1
+        self.assertEqual(logged, 2 + 20)
+
     def test_retiring_stale_channel_unblocks_reader_and_allows_replacement(self):
         phone, car = socket.socketpair()
         stop = threading.Event()

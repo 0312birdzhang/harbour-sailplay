@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from carplay_proto.runtime_logging import (PersistentStream, ProcessOutput, collection_enabled,
+from carplay_proto.runtime_logging import (PersistentStream, ProcessOutput, RepeatGate, collection_enabled,
                                           configure, persist_output, private_handler, socket_endpoint)
 
 
@@ -246,6 +246,25 @@ class LoggingTests(unittest.TestCase):
             for current in root.handlers:
                 current.close()
             root.handlers, root.level = original_handlers, original_level
+
+
+class RepeatGateTests(unittest.TestCase):
+    def test_burst_passes_then_repeats_are_counted_until_the_window_ends(self):
+        now = [100.0]
+        gate = RepeatGate(burst=2, window=60, clock=lambda: now[0])
+        self.assertEqual([gate.admit('a'), gate.admit('a')], [0, 0])
+        self.assertEqual([gate.admit('a') for _ in range(5)], [None] * 5)
+        self.assertEqual(gate.admit('b'), 0)
+        now[0] += 60
+        self.assertEqual(gate.admit('a'), 5)
+        self.assertEqual(gate.admit('a'), 0)
+        self.assertIsNone(gate.admit('a'))
+
+    def test_kinds_are_bounded(self):
+        gate = RepeatGate(limit=4, clock=lambda: 0.0)
+        for kind in range(50):
+            gate.admit(kind)
+        self.assertEqual(len(gate.kinds), 4)
 
 
 if __name__ == '__main__':

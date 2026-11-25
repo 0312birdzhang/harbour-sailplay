@@ -28,6 +28,32 @@ def socket_endpoint(sock, method):
         return 'unavailable'
 
 
+class RepeatGate:
+    """Bound a diagnostic line that another process can make repeat forever.
+
+    The first ``burst`` events of a kind in each ``window`` seconds pass. The
+    rest are counted, and the count is handed to the next event that passes,
+    so the log still says how often the event happened.
+    """
+    def __init__(self, burst=6, window=60, limit=64, clock=time.monotonic):
+        self.burst, self.window, self.limit, self.clock = burst, window, limit, clock
+        self.kinds = OrderedDict()
+
+    def admit(self, kind):
+        """Return None to drop the event, else how many were dropped before it."""
+        now = self.clock()
+        start, passed, dropped = self.kinds.pop(kind, (now, 0, 0))
+        if now - start >= self.window:
+            start, passed = now, 0
+        if passed >= self.burst:
+            self.kinds[kind] = (start, passed, dropped + 1)
+            return None
+        self.kinds[kind] = (start, passed + 1, 0)
+        while len(self.kinds) > self.limit:
+            self.kinds.popitem(last=False)
+        return dropped
+
+
 class _Settings:
     def __init__(self, path):
         self.path = path
