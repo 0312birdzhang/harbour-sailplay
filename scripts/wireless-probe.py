@@ -618,6 +618,15 @@ def airplay_link(sock, stop, local_name='SailfishOS', local_address=None,
           paired_pin_path=pin_path, transport='airplay')
 
 
+def adapter_service_churn(interface, values):
+    """An adapter change limited to its service list and class of device.
+
+    Device changes are never churn: their UUIDs matter to a handover.
+    """
+    return (str(interface) == 'org.bluez.Adapter1' and bool(values)
+            and set(values) <= {'UUIDs', 'Class'})
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--channel', type=int, default=19)
@@ -771,7 +780,7 @@ def main():
                     ('Powered', 'Connectable', 'Discoverable', 'Pairable', 'Alias', 'Class', 'UUIDs', 'Paired', 'Connected', 'ServicesResolved')}
             # Another service re-registering its profiles in a loop changes only
             # the adapter's service list and class, several times a second.
-            churn = bool(safe) and set(safe) <= {'UUIDs', 'Class'}
+            churn = adapter_service_churn(interface, safe)
             skipped = service_churn.admit((str(path), tuple(sorted(safe)))) if churn else 0
             if safe and skipped is not None:
                 logging.info('BlueZ state change path=%s interface=%s values=%s%s', path, interface, safe,
