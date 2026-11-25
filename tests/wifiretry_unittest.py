@@ -41,10 +41,29 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(launches, [10, 30, 70, 130])
         self.assertEqual(retry.delay(), 60)
 
-    def test_active_media_resets_the_backoff(self):
+    def test_a_worker_that_holds_the_lease_and_then_fails_keeps_the_backoff(self):
+        # Each unsuccessful worker stays alive 25 s, through a retry deadline.
+        now, launches, worker_until = [0], [], [0]
+        def launch():
+            launches.append(now[0])
+            worker_until[0] = now[0] + 25
+        retry = HandoverRetry(lambda: now[0] < worker_until[0], launch, clock=lambda: now[0],
+                              established=lambda: False)
+        launch()
+        retry.arm()
+        for now[0] in range(1, 400):
+            retry.poll()
+        gaps = [later - earlier for earlier, later in zip(launches, launches[1:])]
+        # Without the separation every gap stayed at 30 s.
+        self.assertEqual(gaps[:4], [30, 40, 40, 60])
+        self.assertTrue(gaps[4:] and all(gap == 60 for gap in gaps[4:]))
+        self.assertEqual(retry.delay(), 60)
+
+    def test_established_media_resets_the_backoff(self):
         now = [0]
         active, launch = Mock(return_value=False), Mock()
-        retry = HandoverRetry(active, launch, clock=lambda: now[0])
+        established = Mock(side_effect=lambda: active.return_value)
+        retry = HandoverRetry(active, launch, clock=lambda: now[0], established=established)
         retry.arm()
         for now[0] in (10, 30):
             self.assertTrue(retry.poll())

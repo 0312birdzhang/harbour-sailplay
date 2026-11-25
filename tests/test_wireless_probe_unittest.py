@@ -39,6 +39,32 @@ class ProbeTests(unittest.TestCase):
         finally:
             car.close()
 
+    def test_media_is_established_only_once_the_lease_holder_has_streamed(self):
+        from carplay_proto.session import SessionLease
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'media.lock')
+            self.assertFalse(module.media_established(path))
+            lease = SessionLease('carplay', lock_path=path, status_path=None)
+            lease.acquire()
+            try:
+                # Held from worker start-up: active, but nothing has succeeded yet.
+                self.assertTrue(module.media_active(path))
+                self.assertFalse(module.media_established(path))
+                lease.phase('projecting')
+                self.assertFalse(module.media_established(path))
+                lease.streaming()
+                self.assertTrue(module.media_established(path))
+            finally:
+                lease.close()
+            # The record of a finished worker is not a running success.
+            self.assertFalse(module.media_established(path))
+            again = SessionLease('carplay', lock_path=path, status_path=None)
+            again.acquire()
+            try:
+                self.assertFalse(module.media_established(path))
+            finally:
+                again.close()
+
     def test_active_media_lock_prevents_unnecessary_bluetooth_reconnect(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, 'media.lock')

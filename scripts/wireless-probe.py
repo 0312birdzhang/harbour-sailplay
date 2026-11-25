@@ -139,6 +139,15 @@ def media_active(path='/run/sailplay-media.lock'):
 HANDOVER_HEARTBEAT = '/tmp/sailplay-handover-heartbeat'
 
 
+def media_established(path='/run/sailplay-media.lock'):
+    """True once the worker holding the media lease has streamed a frame."""
+    from carplay_proto.session import current_owner
+    try:
+        return media_active(path) and bool(current_owner(path).get('streaming'))
+    except (OSError, ValueError):
+        return False
+
+
 def touch_handover_heartbeat():
     """Keep the independent restore worker from reviving the old network."""
     try:
@@ -171,7 +180,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
         except (subprocess.SubprocessError, OSError):
             logging.exception('Wi-Fi/AirPlay handover retry launch failed')
     from carplay_proto.wifiretry import HandoverRetry
-    handover_retry = HandoverRetry(media_active, retry_handover)
+    handover_retry = HandoverRetry(media_active, retry_handover, established=media_established)
 
     def write_session(start):
         descriptor = os.open(session_out, os.O_WRONLY | os.O_CREAT |
