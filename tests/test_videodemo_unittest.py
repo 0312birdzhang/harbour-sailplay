@@ -69,6 +69,7 @@ class VideoDemoTests(unittest.TestCase):
              patch('carplay_proto.projectionpower.ProjectionPower'), \
              patch('carplay_proto.display.DisplayPipeline') as pipeline, \
              patch('carplay_proto.audio.AudioSender'), \
+             patch('carplay_proto.mobiledata.MobileDataKeeper') as mobile_data, \
              patch('carplay_proto.callaudio.CallAudioRouter') as router:
             pipeline.return_value.frames.return_value = iter([(b'config', [b'frame'])])
             with self.assertRaisesRegex(RuntimeError, 'stop after starting call routing'):
@@ -77,6 +78,8 @@ class VideoDemoTests(unittest.TestCase):
         router.assert_called_once_with('/org/bluez/hci1/dev_CURRENT_HU', keep_connected=False)
         router.return_value.start.assert_called_once()
         router.return_value.close.assert_called_once()
+        mobile_data.return_value.start.assert_called_once()
+        mobile_data.return_value.close.assert_called_once()
         theme.return_value.start.assert_called_once()
         theme.return_value.close.assert_called_once()
 
