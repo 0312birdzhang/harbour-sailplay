@@ -1,4 +1,4 @@
-"""Bring mobile data back when it drops during a projection.
+"""Bring mobile data up when it is down during a projection.
 
 The phone stays associated with the head unit's Wi-Fi, which has no route
 to the Internet, so everything else relies on the cellular connection made
@@ -7,6 +7,12 @@ context; ConnMan then leaves the cellular service idle for as long as the
 head unit's Wi-Fi is connected, and refuses Connect requests coming from
 applications. Radio and streaming players stay silent until the projection
 ends. Ask for the connection again ourselves.
+
+The same happens when mobile data was already down as the projection began,
+for instance because the phone was on the home Wi-Fi just before: nothing
+brings it up while the head unit's Wi-Fi is connected. The user's wish is the
+service's AutoConnect property, which is what the Sailfish "Mobile data"
+switch sets; a service without it is never connected.
 """
 import threading
 import time
@@ -24,7 +30,6 @@ class MobileDataKeeper:
         self.log = log
         self.stop = threading.Event()
         self.thread = None
-        self.wanted = set()
         self.retry_at = {}
         self.last_message = None
 
@@ -42,15 +47,12 @@ class MobileDataKeeper:
             if state in CONNECTED:
                 if path in self.retry_at:
                     self.report('Mobile data restored service={} state={}'.format(path, state))
-                self.wanted.add(path)
                 self.retry_at.pop(path, None)
                 continue
-            # Only restore what was up during this projection and what the
-            # user still wants: switching mobile data off clears AutoConnect.
-            if path not in self.wanted or state not in ('idle', 'failure'):
+            if state not in ('idle', 'failure'):
                 continue
+            # Only what the user wants: switching mobile data off clears AutoConnect.
             if not properties.get('AutoConnect'):
-                self.wanted.discard(path)
                 self.retry_at.pop(path, None)
                 continue
             if now < self.retry_at.get(path, 0):

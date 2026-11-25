@@ -58,16 +58,25 @@ class MobileDataTests(unittest.TestCase):
         self.keeper.poll()
         self.assertEqual(self.service.Connect.call_count, 2)
 
-    def test_mobile_data_that_was_never_up_is_not_connected(self):
+    def test_mobile_data_already_down_when_the_projection_starts_is_connected(self):
         self.cell['State'] = 'idle'
         self.keeper.poll()
+        self.service.Connect.assert_called_once_with(timeout=RETRY_SECONDS)
+        self.cell['State'] = 'ready'
+        self.keeper.poll()
+        self.assertIn('Mobile data restored service={} state=ready'.format(CELL), self.logged())
+
+    def test_mobile_data_switched_off_before_the_projection_is_never_connected(self):
+        self.cell.update(State='idle', AutoConnect=False)
+        for _ in range(3):
+            self.keeper.poll()
+            self.now += RETRY_SECONDS
         self.service.Connect.assert_not_called()
 
     def test_mobile_data_switched_off_by_the_user_stays_off(self):
         self.keeper.poll()
         self.cell.update(State='idle', AutoConnect=False)
         self.keeper.poll()
-        self.cell['AutoConnect'] = True
         self.now += RETRY_SECONDS
         self.keeper.poll()
         self.service.Connect.assert_not_called()
