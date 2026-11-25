@@ -177,20 +177,25 @@ Window {
         }
     }
     Item {
+        id: dashboard
+        objectName: "dashboard"
         visible: carController.dashboardActive || carController.musicActive
         x: dock.width; width: root.width - x; height: root.height
         // Horizontal design units scale with width; vertical spacing follows height.
         property real verticalGap: height * 16 / 720
         property real mapWidth: (width - 48) * 0.65
-        Loader {
-            id: weatherCard
+        DashboardInfoCard {
+            id: dashboardInfoCard
+            objectName: "dashboardInfoCard"
             visible: !carController.musicActive
             x: parent.mapWidth + 32; y: parent.verticalGap
             width: parent.width - parent.mapWidth - 48
-            height: (parent.height - 3 * parent.verticalGap) * 0.35
-            source: "WeatherCard.qml"
+            height: (parent.height - 3 * parent.verticalGap) * 0.27
+            provider: carController.dashboardNavigationTemplate ? carController.navigation : null
+            palette: carPalette
         }
         Rectangle {
+            objectName: "dashboardMapCard"
             visible: !carController.musicActive
             x: 0; y: parent.verticalGap; width: parent.mapWidth + 16; height: parent.height - 2 * parent.verticalGap
             radius: 22; color: carPalette.card
@@ -216,7 +221,7 @@ Window {
             id: musicCard
             objectName: "musicCard"
             x: carController.musicActive ? 16 : parent.mapWidth + 32
-            y: carController.musicActive ? parent.verticalGap : weatherCard.y + weatherCard.height + parent.verticalGap
+            y: carController.musicActive ? parent.verticalGap : dashboardInfoCard.y + dashboardInfoCard.height + parent.verticalGap
             width: carController.musicActive ? parent.width - 32 : parent.width - parent.mapWidth - 48
             height: parent.height - y - parent.verticalGap
             radius: 22; color: carPalette.card
@@ -258,8 +263,8 @@ Window {
                 compact: !carController.musicActive
                 width: compact || !musicCard.splitMusic ? parent.width - 64 : Math.min(820, parent.width * .48 - 48)
                 x: compact ? (parent.width - width) / 2 : 32
-                y: Math.max(carController.musicActive ? 86 : 12,
-                    musicCard.splitMusic || compact ? (musicCard.height - height - musicProgress.height - (compact ? 60 : 0) - 12) / 2 : 90)
+                y: compact ? 20 : Math.max(86,
+                    musicCard.splitMusic ? (musicCard.height - height - musicProgress.height - 12) / 2 : 90)
                 albumArtSource: musicCard.artwork
                 onClicked: musicCard.openMusic()
             }
@@ -392,7 +397,7 @@ Window {
                 x: musicCard.splitMusic ? musicCard.width * .52 : lockscreenMusic.x
                 width: musicCard.splitMusic ? musicCard.width - x - 32 : lockscreenMusic.width
                 y: musicCard.splitMusic ? 90 : musicProgress.y + musicProgress.height + 8
-                height: expanded ? Math.max(60, musicCard.height - y - 24) : 60
+                height: Math.max(0, musicCard.height - y - 24)
             }
             Text {
                 anchors.centerIn: parent; width: parent.width - 64; wrapMode: Text.WordWrap

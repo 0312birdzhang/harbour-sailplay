@@ -44,6 +44,9 @@ class TranslationCatalogTests(unittest.TestCase):
                     self.assertNotIn(translation.get("type"), ("unfinished", "vanished", "obsolete"))
                     text = "".join(translation.itertext())
                     self.assertTrue(text.strip())
+                    self.assertNotIn("\ufffd", text)
+                    if "?" not in key[1]:
+                        self.assertNotRegex(text, r"\?{2,}")
                     self.assertEqual(sorted(re.findall(r"%\d+", key[1])),
                                      sorted(re.findall(r"%\d+", text)))
 

@@ -54,11 +54,12 @@ Item {
         currentIndex: panel.currentIndex
         interactive: false
         spacing: panel.expanded ? 18 : 8
-        preferredHighlightBegin: panel.expanded ? height * .40 : 0
+        preferredHighlightBegin: panel.expanded ? height * .40 : Math.min(44, height * .30)
         preferredHighlightEnd: preferredHighlightBegin
         highlightRangeMode: ListView.StrictlyEnforceRange
         highlightMoveDuration: 180
         delegate: Text {
+            objectName: "lyricLine_" + index
             width: timedLines.width
             text: modelData[1]
             textFormat: Text.PlainText

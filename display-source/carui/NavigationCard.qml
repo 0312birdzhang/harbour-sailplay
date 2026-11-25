@@ -1,5 +1,6 @@
 import QtQuick 2.0
 import Sailplay 1.0
+import "NavigationGuidance.js" as Guidance
 
 Rectangle {
     id: card
@@ -271,20 +272,10 @@ Rectangle {
     }
 
     function distance(meters) {
-        return meters >= 1000 ? (meters / 1000).toFixed(1) + " km" : Math.round(meters) + " m"
+        return Guidance.distance(meters)
     }
     function symbol(maneuver) {
-        var symbols = {
-            "continue": "↑", "slight-left": "↖", "slight-right": "↗",
-            "turn-left": "←", "turn-right": "→", "sharp-left": "↙", "sharp-right": "↘",
-            "exit-left": "↙", "exit-right": "↘", "uturn": "↶",
-            "roundabout-enter": "⟳", "roundabout-exit": "⟳", "roundabout-continue": "⟳", "arrive": "⚑"
-        }
-        var result = symbols[maneuver] || ""
-        if (maneuver === "uturn" && guidance.drivingSide === "left") result = "↷"
-        if (maneuver.indexOf("roundabout-") === 0 && guidance.drivingSide === "left") result = "⟲"
-        if (maneuver === "roundabout-exit" && guidance.exitNumber > 0) result += " " + guidance.exitNumber
-        return result
+        return Guidance.symbol(maneuver, guidance.drivingSide, guidance.exitNumber)
     }
     function statusText() {
         if (provider && provider.error) return provider.error

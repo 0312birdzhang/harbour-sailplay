@@ -2,6 +2,13 @@
 <TS version="2.1" language="de" sourcelanguage="en">
   <context>
     <name>Sailplay</name>
+    <message><source>Dashboard weather</source><translation>Wetter im Dashboard</translation></message>
+    <message><source>Could not save weather selection</source><translation>Wetterauswahl konnte nicht gespeichert werden</translation></message>
+    <message><source>Choose a saved Weather location. Add locations in the Weather app; Sailplay uses their cached conditions.</source><translation>Wählen Sie einen gespeicherten Wetterort. Fügen Sie Orte in der Wetter-App hinzu; Sailplay verwendet die zwischengespeicherten Wetterdaten.</translation></message>
+    <message><source>Not set</source><translation>Nicht festgelegt</translation></message>
+    <message><source>No saved weather locations</source><translation>Keine gespeicherten Wetterorte</translation></message>
+    <message><source>Weather location unavailable</source><translation>Wetterort nicht verfügbar</translation></message>
+    <message><source>Set dashboard weather in Sailplay</source><translation>Dashboard-Wetter in Sailplay festlegen</translation></message>
     <message><source>Queue</source><translation>Warteschlange</translation></message>
     <message><source>Play queue (%1)</source><translation>Warteschlange (%1)</translation></message>
     <message><source>Back</source><translation>Zurück</translation></message>

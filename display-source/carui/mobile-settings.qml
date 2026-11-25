@@ -166,6 +166,13 @@ ApplicationWindow {
                         visible: carController.themeMode === 2
                     }
                     SectionHeader { text: qsTranslate("Sailplay", "Dashboard") }
+                    ValueButton {
+                        objectName: "dashboardWeatherButton"
+                        label: qsTranslate("Sailplay", "Dashboard weather")
+                        value: carController.dashboardWeather.city || (carController.dashboardWeatherLocation
+                            ? qsTranslate("Sailplay", "Weather location unavailable") : qsTranslate("Sailplay", "Not set"))
+                        onClicked: pageStack.push(Qt.resolvedUrl("WeatherLocationPage.qml"))
+                    }
                     Label {
                         x: Theme.horizontalPageMargin
                         width: parent.width - 2 * Theme.horizontalPageMargin

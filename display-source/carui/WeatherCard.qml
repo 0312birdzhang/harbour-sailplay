@@ -6,25 +6,16 @@ Rectangle {
     CarPalette { id: carPalette }
     id: card
     radius: 22; color: carPalette.card
-    // Reuse the Events View weather cache; never require Internet on vehicle Wi-Fi.
-    Weather.SavedWeathersModel {
-        id: saved
-        autoRefresh: true
-        provider: Weather.WeatherProvider.currentProvider()
-    }
-    Weather.WeatherModel {
-        weather: card.weather
-        savedWeathers: saved
-        active: card.visible && !!card.weather
-    }
-    property var weather: saved.currentWeather
-    readonly property bool populated: !!weather && weather.populated
+    property var weather: carController.dashboardWeather
+    readonly property bool configured: !!weather && !!weather.city
+    readonly property bool populated: configured && weather.populated === true
     Row {
         anchors.centerIn: parent; spacing: 22
         width: parent.width - 48
+        visible: card.configured
         Weather.WeatherImage {
             id: weatherIcon
-            width: Math.min(132, card.height - 40); height: width
+            width: Math.max(0, Math.min(132, card.height - 40, (card.width - 70) * 0.34)); height: width
             anchors.verticalCenter: parent.verticalCenter
             weatherType: card.populated ? card.weather.weatherType : ""
             source: weatherType.length ? "image://theme/graphic-weather-" + weatherType + (carPalette.day ? "?" + carPalette.text : "") : ""
@@ -33,15 +24,27 @@ Rectangle {
             width: parent.width - weatherIcon.width - parent.spacing
             anchors.verticalCenter: parent.verticalCenter; spacing: 8
             Text {
-                width: parent.width; color: carPalette.text; font.pixelSize: 62
+                objectName: "dashboardWeatherTemperature"
+                width: parent.width; color: carPalette.text; font.pixelSize: Math.min(62, card.height * 0.32, (card.width - 70) * 0.32)
                 font.family: Silica.Theme.fontFamilyHeading
                 text: card.populated ? Weather.TemperatureConverter.format(card.weather.temperature) : "—°"
             }
             Text {
+                objectName: "dashboardWeatherCity"
                 width: parent.width; color: carPalette.text; font.pixelSize: 28
                 elide: Text.ElideRight
-                text: card.weather ? card.weather.city : qsTranslate("Sailplay", "Set a location in Weather")
+                text: card.weather.city || ""
+                textFormat: Text.PlainText
             }
         }
+    }
+    Text {
+        objectName: "dashboardWeatherPlaceholder"
+        anchors.centerIn: parent; width: parent.width - 48
+        visible: !card.configured
+        text: carController.dashboardWeatherLocation ? qsTranslate("Sailplay", "Weather location unavailable")
+                                                    : qsTranslate("Sailplay", "Set dashboard weather in Sailplay")
+        color: carPalette.secondary; font.pixelSize: 24
+        horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
     }
 }

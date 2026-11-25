@@ -2,6 +2,13 @@
 <TS version="2.1" language="ru" sourcelanguage="en">
   <context>
     <name>Sailplay</name>
+    <message><source>Dashboard weather</source><translation>Погода на главном экране</translation></message>
+    <message><source>Could not save weather selection</source><translation>Не удалось сохранить выбор погоды</translation></message>
+    <message><source>Choose a saved Weather location. Add locations in the Weather app; Sailplay uses their cached conditions.</source><translation>Выберите сохранённое место в приложении «Погода». Добавляйте места в этом приложении; Sailplay использует сохранённые погодные данные.</translation></message>
+    <message><source>Not set</source><translation>Не задано</translation></message>
+    <message><source>No saved weather locations</source><translation>Нет сохранённых мест для погоды</translation></message>
+    <message><source>Weather location unavailable</source><translation>Место для погоды недоступно</translation></message>
+    <message><source>Set dashboard weather in Sailplay</source><translation>Настройте погоду главного экрана в Sailplay</translation></message>
     <message><source>Queue</source><translation>Очередь</translation></message>
     <message><source>Play queue (%1)</source><translation>Очередь (%1)</translation></message>
     <message><source>Back</source><translation>Назад</translation></message>

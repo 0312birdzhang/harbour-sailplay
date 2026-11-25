@@ -4,6 +4,8 @@
 
 #include <QCryptographicHash>
 #include <QQuickItem>
+#include <QQmlExpression>
+#include <QQmlProperty>
 #include <QTemporaryDir>
 #include <QtTest/QTest>
 #include <memory>
@@ -22,6 +24,40 @@ static void writeFile(const QString &path, const QByteArray &data)
     QFile file(path);
     require(file.open(QIODevice::WriteOnly), "test file could not be opened");
     require(file.write(data) == data.size(), "test file write failed");
+}
+
+static void verifyWeatherState(const QString &directory)
+{
+    const QString cache = directory + QStringLiteral("/.local/share/org.sailfishos/weather/");
+    const QByteArray primary = R"({"currentLocation":{"locationId":1,"city":"苏州","country":"中国","weather":{"populated":true,"temperature":0,"weatherType":"d000"}},"savedLocations":[{"locationId":2,"city":"上海","country":"中国","weather":{"populated":true,"temperature":18,"weatherType":"d100"}},{"locationId":1,"city":"duplicate"},{"locationId":3,"city":"Missing temperature","weather":{"populated":true}}]})";
+    writeFile(cache + "met_norway.json", primary);
+    writeFile(cache + "other.json", R"({"currentLocation":{"locationId":1,"city":"Other provider","weather":{"populated":true,"temperature":10}},"savedLocations":[]})");
+    writeFile(cache + "broken.json", "not JSON");
+    CarUiController controller(nullptr, false);
+    require(controller.weatherLocations().size() == 4, "cached weather locations or deduplication failed");
+    require(controller.dashboardWeatherLocation().isEmpty() && controller.dashboardWeather().isEmpty(), "weather must start unset");
+    const QByteArray original = QCryptographicHash::hash(primary, QCryptographicHash::Sha256);
+    require(!controller.setDashboardWeather("met_norway:999"), "missing weather selection accepted");
+    require(controller.setDashboardWeather("met_norway:1"), "current weather selection failed");
+    require(controller.dashboardWeather().value("temperature").toDouble() == 0
+        && controller.dashboardWeather().value("populated").toBool(), "zero temperature became a placeholder");
+    require(controller.setDashboardWeather("other:1") && controller.dashboardWeather().value("city") == "Other provider",
+        "location IDs collided between providers");
+    CarUiController restored(nullptr, false);
+    require(restored.dashboardWeatherLocation() == "other:1", "weather selection did not persist");
+    require(controller.setDashboardWeather("met_norway:3") && !controller.dashboardWeather().value("populated").toBool(),
+        "missing temperature became fabricated conditions");
+    require(controller.setDashboardWeather("met_norway:2"), "saved weather selection failed");
+    writeFile(cache + "met_norway.json", "{}");
+    QTest::qWait(1200);
+    require(controller.dashboardWeather().isEmpty() && controller.dashboardWeatherLocation() == "met_norway:2",
+        "removed weather location fell back to another city");
+    require(controller.setDashboardWeather("") && controller.dashboardWeather().isEmpty(), "weather clear failed");
+    writeFile(cache + "met_norway.json", primary);
+    QFile file(cache + "met_norway.json");
+    require(file.open(QIODevice::ReadOnly) && QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256) == original,
+        "weather selection changed the Weather cache");
+    std::puts("DASHBOARD_WEATHER_STATE_PASS unset current saved provider-identity zero-temperature persistence missing clear cache-preserved");
 }
 
 static void verifyThemeState(const QString &directory)
@@ -132,7 +168,146 @@ static void verifySettingsUi()
     require(!controller.setThemeTime(false, "08:45"), "equal theme times accepted");
     CarUiController restored(nullptr, false);
     require(restored.themeMode() == 1 && restored.dayStart() == "08:45" && restored.nightStart() == "20:30", "saved settings did not survive controller recreation");
+    QQuickItem *weather = page->findChild<QQuickItem *>(QStringLiteral("dashboardWeatherButton"));
+    std::fprintf(stderr, "WEATHER_SETTINGS_ENTRY exists=%d value=%s selection=%s\n", weather != nullptr,
+        weather ? qPrintable(weather->property("value").toString()) : "", qPrintable(controller.dashboardWeatherLocation()));
+    require(weather && weather->property("value").toString() == QString::fromUtf8("未设置"), "weather settings entry missing");
+    QQmlExpression click(QQmlEngine::contextForObject(weather), weather, QStringLiteral("clicked(null)"));
+    click.evaluate();
+    require(!click.hasError(), "weather settings click failed");
+    QTest::qWait(100);
+    require(QMetaObject::invokeMethod(stack, "completeAnimation", Qt::DirectConnection), "weather page transition failed");
+    QObject *weatherPage = stack->property("currentPage").value<QObject *>();
+    require(weatherPage && weatherPage != page, "weather chooser did not open");
+    require(QMetaObject::invokeMethod(weatherPage, "selectLocation", Q_ARG(QVariant, QVariant("met_norway:1"))),
+        "weather chooser selection failed");
+    QTest::qWait(100);
+    require(QMetaObject::invokeMethod(stack, "completeAnimation", Qt::DirectConnection), "weather chooser did not close");
+    require(controller.dashboardWeatherLocation() == "met_norway:1"
+        && weather->property("value").toString() == QString::fromUtf8("苏州"), "weather selection did not update settings");
+    require(controller.setDashboardWeather(""), "weather clear failed");
+    std::puts("DASHBOARD_WEATHER_SETTINGS_UI_PASS entry chooser selection live-binding clear");
     QCoreApplication::removeTranslator(&translator);
+}
+
+static QQuickItem *findItem(QQuickItem *root, const QString &name)
+{
+    if (root->objectName() == name) return root;
+    for (auto *child : root->childItems()) if (auto *found = findItem(child, name)) return found;
+    return nullptr;
+}
+
+static void verifyDashboardUi()
+{
+    const QString directory = QString::fromLocal8Bit(qgetenv("SAILPLAY_THEME_UI_DIR"));
+    std::unique_ptr<QQuickView> view(SailfishApp::createView());
+    QQmlEngine *engine = view->engine();
+    QQmlComponent fixture(engine, QUrl::fromLocalFile(QString::fromLocal8Bit(qgetenv("SAILPLAY_DASHBOARD_FIXTURE"))));
+    std::unique_ptr<QObject> controller(fixture.create());
+    require(controller.get(), "dashboard controller fixture failed");
+    engine->rootContext()->setContextProperty("carController", controller.get());
+    QFile file(directory + "/main.qml");
+    require(file.open(QIODevice::ReadOnly), "dashboard source missing");
+    QByteArray source = file.readAll();
+    source.replace("visible: true; width:", "visible: false; width:");
+    QQmlComponent component(engine);
+    component.setData(source, QUrl::fromLocalFile(directory + "/main.qml"));
+    std::unique_ptr<QObject> object(component.create());
+    for (const QQmlError &error : component.errors()) std::fprintf(stderr, "%s\n", qPrintable(error.toString()));
+    require(object.get(), "dashboard QML failed to load");
+    auto *window = qobject_cast<QQuickWindow *>(object.get());
+    require(window, "dashboard window missing");
+    auto *dashboard = findItem(window->contentItem(), "dashboard");
+    auto *info = findItem(window->contentItem(), "dashboardInfoCard");
+    auto *music = findItem(window->contentItem(), "musicCard");
+    auto *map = findItem(window->contentItem(), "dashboardMapCard");
+    auto *summary = findItem(window->contentItem(), "dashboardNavigationSummary");
+    auto *placeholder = findItem(window->contentItem(), "dashboardWeatherPlaceholder");
+    auto *lyrics = findItem(window->contentItem(), "musicLyrics");
+    auto *timedLyrics = findItem(window->contentItem(), "timedLyrics");
+    auto *controls = findItem(window->contentItem(), "musicControls");
+    require(dashboard && info && music && map && summary && placeholder && lyrics && timedLyrics && controls,
+        "dashboard slots missing");
+    // Keep live phone player metadata from replacing the fixture's timed lyrics.
+    require(QQmlProperty(lyrics, "player").write(QVariant::fromValue<QObject *>(nullptr))
+        && QQmlProperty(lyrics, "trackKey").write(QStringLiteral("dashboard-lyrics-test")),
+        "lyrics fixture bindings could not be isolated");
+    const auto bounds = [&](QQuickItem *item) {
+        return item->mapRectToItem(dashboard, QRectF(0, 0, item->width(), item->height()));
+    };
+    const auto verifyLayout = [&]() {
+        const double gap = dashboard->property("verticalGap").toDouble();
+        const double available = dashboard->height() - 3 * gap;
+        require(std::abs(info->height() / available - 0.27) < 0.0001
+            && std::abs(music->height() / available - 0.73) < 0.0001, "dashboard height allocation incorrect");
+        require(music->y() == info->y() + info->height() + gap, "dashboard card gap changed");
+        require(!bounds(info).intersects(bounds(music)) && !bounds(map).intersects(bounds(music)), "dashboard cards overlap");
+        require(bounds(music).bottom() <= dashboard->height(), "music card exceeds dashboard");
+    };
+    QObject *navigation = controller->property("navigation").value<QObject *>();
+    require(navigation, "navigation fixture missing");
+    for (const QSize &size : {QSize(1920, 720), QSize(1280, 720), QSize(720, 1280)}) {
+        window->resize(size);
+        QTest::qWait(30);
+        verifyLayout();
+        QVariantList lines;
+        for (int index = 0; index < 10; ++index)
+            lines.append(QVariant(QVariantList{index * 4, QString::fromUtf8("歌词第%1句").arg(index + 1)}));
+        lyrics->setProperty("lines", lines);
+        require(QQmlProperty(lyrics, "positionSeconds").write(12.0), "lyrics test position could not be set");
+        require(QMetaObject::invokeMethod(timedLyrics, "forceLayout"), "lyrics layout could not be updated");
+        QTest::qWait(250);
+        require(controls->y() <= 24 && lyrics->height() >= 140, "dashboard did not allocate space to lyrics");
+        require(bounds(music).contains(bounds(lyrics)), "lyrics panel exceeds music card");
+        require(!bounds(controls).intersects(bounds(lyrics)), "lyrics overlap playback controls");
+        int completeLines = 0;
+        for (int index = 0; index < 10; ++index) {
+            auto *line = findItem(window->contentItem(), QStringLiteral("lyricLine_%1").arg(index));
+            if (line && bounds(lyrics).adjusted(-0.1, -0.1, 0.1, 0.1).contains(bounds(line))) ++completeLines;
+        }
+        std::printf("DASHBOARD_LYRICS_GEOMETRY %dx%d height=%.1f count=%d current=%d contentY=%.1f\n",
+            size.width(), size.height(), lyrics->height(), completeLines,
+            lyrics->property("currentIndex").toInt(), timedLyrics->property("contentY").toDouble());
+        require(completeLines >= 3, "dashboard lyrics display fewer than three complete lines");
+        std::printf("DASHBOARD_LYRICS_PASS %dx%d height=%.1f completeLines=%d\n",
+            size.width(), size.height(), lyrics->height(), completeLines);
+        const QRectF reserve = bounds(info);
+        require(placeholder->isVisible() && !summary->isVisible(), "unset weather did not retain placeholder");
+        controller->setProperty("dashboardWeatherLocation", "met_norway:1");
+        controller->setProperty("dashboardWeather", QVariantMap{{"city", QString::fromUtf8("苏州")},
+            {"populated", true}, {"temperature", 0}, {"weatherType", "d000"}});
+        require(!placeholder->isVisible() && bounds(info) == reserve, "weather moved reserved space");
+        for (const QString &name : {QStringLiteral("dashboardWeatherTemperature"), QStringLiteral("dashboardWeatherCity")}) {
+            auto *label = findItem(window->contentItem(), name);
+            require(label && bounds(info).contains(bounds(label)), "weather label exceeds info card");
+        }
+        controller->setProperty("dashboardMapApp", "test-map");
+        controller->setProperty("dashboardNavigationTemplate", true);
+        navigation->setProperty("guidance", QVariantMap{{"state", "active"}, {"maneuver", "roundabout-exit"},
+            {"drivingSide", "left"}, {"exitNumber", 3}, {"nextDistanceMeters", 370},
+            {"nextRoad", QString::fromUtf8("测试道路名称很长时仍保持在卡片内")},
+            {"remainingSeconds", 61}, {"remainingDistanceMeters", 2400}});
+        require(summary->isVisible() && bounds(info) == reserve, "navigation did not replace weather in its slot");
+        for (const QString &name : {QStringLiteral("dashboardManeuver"), QStringLiteral("dashboardNextDistance"),
+                                    QStringLiteral("dashboardNextRoad"), QStringLiteral("dashboardRemainingRoute")}) {
+            auto *label = findItem(window->contentItem(), name);
+            require(label && bounds(info).contains(bounds(label)), "guidance label exceeds info card");
+        }
+        require(findItem(window->contentItem(), "dashboardManeuver")->property("text").toString() == QString::fromUtf8("⟲ 3"),
+            "dashboard lost left-driving roundabout mapping");
+        require(findItem(window->contentItem(), "dashboardNextDistance")->property("text").toString() == "370 m",
+            "dashboard maneuver distance incorrect");
+        navigation->setProperty("guidance", QVariantMap{{"state", "stopped"}});
+        require(!summary->isVisible() && !placeholder->isVisible(), "navigation stop did not restore weather");
+        controller->setProperty("dashboardMapApp", "");
+        controller->setProperty("dashboardNavigationTemplate", false);
+        controller->setProperty("dashboardWeatherLocation", "");
+        controller->setProperty("dashboardWeather", QVariantMap());
+        require(placeholder->isVisible() && bounds(info) == reserve, "missing weather/map collapsed the slot");
+        std::printf("DASHBOARD_LAYOUT_PASS %dx%d info=27%% music=73%% placeholder weather navigation stop\n", size.width(), size.height());
+    }
+    // Release the Window's QML instances before tearing down the engine.
+    object.reset();
 }
 
 int main(int argc, char **argv)
@@ -160,10 +335,14 @@ int main(int argc, char **argv)
         require(directory.isValid(), "isolated test directory unavailable");
         qputenv("HOME", directory.path().toUtf8());
         qputenv("XDG_CONFIG_HOME", (directory.path() + "/.config").toUtf8());
+        qputenv("XDG_DATA_HOME", (directory.path() + "/.local/share").toUtf8());
         qputenv("SAILPLAY_DIAGNOSTICS_CONFIG", (directory.path() + "/diagnostics.ini").toUtf8());
         QGuiApplication app(argc, argv);
+        qmlRegisterType<SailplayMapCanvas>("Sailplay", 1, 0, "MapCanvas");
+        verifyWeatherState(directory.path());
         verifyThemeState(directory.path());
         verifySettingsUi();
+        if (!qgetenv("SAILPLAY_DASHBOARD_FIXTURE").isEmpty()) verifyDashboardUi();
         return 0;
     } catch (const std::exception &error) {
         std::fprintf(stderr, "THEME_SETTINGS_FAILED %s\n", error.what());

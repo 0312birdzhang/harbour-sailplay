@@ -2,6 +2,13 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en">
   <context>
     <name>Sailplay</name>
+    <message><source>Dashboard weather</source><translation>首页天气</translation></message>
+    <message><source>Could not save weather selection</source><translation>无法保存天气选项</translation></message>
+    <message><source>Choose a saved Weather location. Add locations in the Weather app; Sailplay uses their cached conditions.</source><translation>选择天气应用中已保存的地点。请在天气应用中添加地点，Sailplay 会显示缓存的天气。</translation></message>
+    <message><source>Not set</source><translation>未设置</translation></message>
+    <message><source>No saved weather locations</source><translation>没有已保存的天气地点</translation></message>
+    <message><source>Weather location unavailable</source><translation>天气地点不可用</translation></message>
+    <message><source>Set dashboard weather in Sailplay</source><translation>请在 Sailplay 中设置首页天气</translation></message>
     <message><source>Queue</source><translation>播放列表</translation></message>
     <message><source>Play queue (%1)</source><translation>播放列表（%1 首）</translation></message>
     <message><source>Back</source><translation>返回</translation></message>

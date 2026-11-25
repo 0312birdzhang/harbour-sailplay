@@ -50,6 +50,7 @@
 #include <cstdio>
 #include <sailfishapp.h>
 #include "navigationhost.h"
+#include "dashboardweather.h"
 #include "mapcanvas.h"
 #include "contenthost.h"
 #include "musichost.h"
@@ -531,6 +532,9 @@ class CarUiController : public QObject
     Q_PROPERTY(QString lastMusicName READ lastMusicName NOTIFY rememberedMusicChanged)
     Q_PROPERTY(bool musicContentAvailable READ musicContentAvailable NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString dashboardMapApp READ dashboardMapApp NOTIFY dashboardSettingsChanged)
+    Q_PROPERTY(QVariantList weatherLocations READ weatherLocations NOTIFY weatherSettingsChanged)
+    Q_PROPERTY(QString dashboardWeatherLocation READ dashboardWeatherLocation NOTIFY weatherSettingsChanged)
+    Q_PROPERTY(QVariantMap dashboardWeather READ dashboardWeather NOTIFY weatherSettingsChanged)
     Q_PROPERTY(QObject *navigation READ navigation CONSTANT)
     Q_PROPERTY(QObject *content READ content CONSTANT)
     Q_PROPERTY(bool contentActive READ contentActive NOTIFY currentAppChanged)
@@ -543,6 +547,8 @@ public:
           m_content(new SailplayContentHost(this)), m_music(new SailplayMusicHost(this))
     {
         m_loggingEnabled = diagnosticLoggingEnabled();
+        m_dashboardMapSetting = QSettings(dashboardConfigPath(), QSettings::IniFormat).value("Dashboard/map").toString();
+        m_weatherLocations = dashboardWeatherLocations();
         connect(this, &CarUiController::currentAppChanged, this, [this]() {
             m_music->setActive(m_musicActive || m_dashboardActive);
             m_content->setActive(contentActive());
@@ -571,8 +577,17 @@ public:
             const QDateTime dashStamp = QFileInfo(dashboardConfigPath()).lastModified();
             if (dashStamp != m_dashboardStamp) {
                 m_dashboardStamp = dashStamp;
+                const QString mapSetting = QSettings(dashboardConfigPath(), QSettings::IniFormat).value("Dashboard/map").toString();
+                const bool mapChanged = mapSetting != m_dashboardMapSetting;
+                m_dashboardMapSetting = mapSetting;
                 emit dashboardSettingsChanged();
-                if (m_dashboardActive) openDashboard();
+                emit weatherSettingsChanged();
+                if (m_dashboardActive && mapChanged) openDashboard();
+            }
+            const QVariantList locations = dashboardWeatherLocations();
+            if (locations != m_weatherLocations) {
+                m_weatherLocations = locations;
+                emit weatherSettingsChanged();
             }
             const QDateTime displayStamp = QFileInfo(QStringLiteral("/run/sailplay-display.ini")).lastModified();
             if (displayStamp != m_displayStamp) {
@@ -659,6 +674,30 @@ public:
     static QString dashboardConfigPath() {
         return QDir::homePath() + QStringLiteral("/.config/sailplay/dashboard.ini");
     }
+    QVariantList weatherLocations() const { return m_weatherLocations; }
+    QString dashboardWeatherLocation() const {
+        return QSettings(dashboardConfigPath(), QSettings::IniFormat).value("Dashboard/weatherLocation").toString();
+    }
+    QVariantMap dashboardWeather() const {
+        const QString selected = dashboardWeatherLocation();
+        for (const QVariant &value : m_weatherLocations) {
+            const QVariantMap row = value.toMap();
+            if (row.value("key").toString() == selected) return row;
+        }
+        return QVariantMap();
+    }
+    Q_INVOKABLE bool setDashboardWeather(const QString &key) {
+        if (!key.isEmpty() && std::none_of(m_weatherLocations.constBegin(), m_weatherLocations.constEnd(),
+                [&key](const QVariant &row) { return row.toMap().value("key").toString() == key; })) return false;
+        QDir().mkpath(QFileInfo(dashboardConfigPath()).absolutePath());
+        QSettings settings(dashboardConfigPath(), QSettings::IniFormat);
+        settings.setValue("Dashboard/weatherLocation", key);
+        settings.sync();
+        if (settings.status() != QSettings::NoError) return false;
+        m_dashboardStamp = QFileInfo(dashboardConfigPath()).lastModified();
+        emit weatherSettingsChanged();
+        return true;
+    }
     QString dashboardMapApp() const {
         QSettings s(dashboardConfigPath(), QSettings::IniFormat);
         const QString remembered = s.value(QStringLiteral("Dashboard/map")).toString();
@@ -723,6 +762,7 @@ public:
             return false;
         }
         m_dashboardStamp = QFileInfo(dashboardConfigPath()).lastModified();
+        m_dashboardMapSetting = id;
         emit dashboardSettingsChanged();
         return true;
     }
@@ -1448,6 +1488,7 @@ signals:
     void themeSettingsChanged();
     void rememberedMusicChanged();
     void dashboardSettingsChanged();
+    void weatherSettingsChanged();
     void artworkAvailable(const QString &key, const QUrl &localUrl);
     void projectionSettingsChanged();
     void projectionProtocolChanged();
@@ -1646,6 +1687,8 @@ private:
     QMap<QString, qint64> m_appPids;
     QMap<QString, QProcess *> m_renderers;
     QDateTime m_dashboardStamp;
+    QString m_dashboardMapSetting;
+    QVariantList m_weatherLocations;
     QSet<QString> m_hiddenApps;
     QString m_lastHiddenApp;
     QDateTime m_configStamp;

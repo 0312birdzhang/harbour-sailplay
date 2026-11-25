@@ -1,6 +1,6 @@
 Name: harbour-sailplay
 Version: 0.1.1
-Release: 141
+Release: 143
 Summary: SailfishOS wireless CarPlay and Android Auto phone with virtual display
 License: GPL-3.0-or-later
 Source0: %{name}-%{version}.tar.bz2
@@ -75,6 +75,9 @@ done
 install -m 0644 display-source/carui/main.qml %{buildroot}/opt/sailplay/carui/main.qml
 install -m 0644 display-source/carui/CarPalette.qml %{buildroot}/opt/sailplay/carui/CarPalette.qml
 install -m 0644 display-source/carui/WeatherCard.qml %{buildroot}/opt/sailplay/carui/WeatherCard.qml
+install -m 0644 display-source/carui/WeatherLocationPage.qml %{buildroot}/opt/sailplay/carui/WeatherLocationPage.qml
+install -m 0644 display-source/carui/DashboardInfoCard.qml %{buildroot}/opt/sailplay/carui/DashboardInfoCard.qml
+install -m 0644 display-source/carui/NavigationGuidance.js %{buildroot}/opt/sailplay/carui/NavigationGuidance.js
 install -m 0644 display-source/carui/NavigationCard.qml %{buildroot}/opt/sailplay/carui/NavigationCard.qml
 install -m 0644 display-source/carui/MapDestinationPanel.qml %{buildroot}/opt/sailplay/carui/MapDestinationPanel.qml
 install -m 0644 display-source/carui/MapBookmarkIcon.qml %{buildroot}/opt/sailplay/carui/MapBookmarkIcon.qml
