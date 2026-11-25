@@ -19,6 +19,11 @@ spec.loader.exec_module(module)
 
 
 class ProbeTests(unittest.TestCase):
+    def test_only_a_new_bluetoothd_asks_for_a_rebuild(self):
+        self.assertTrue(module.bluez_restarted('org.bluez', ':1.3658'))
+        self.assertFalse(module.bluez_restarted('org.bluez', ''))
+        self.assertFalse(module.bluez_restarted('org.ofono', ':1.12'))
+
     def test_retiring_stale_channel_unblocks_reader_and_allows_replacement(self):
         phone, car = socket.socketpair()
         stop = threading.Event()
