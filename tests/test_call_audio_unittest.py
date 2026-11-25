@@ -68,6 +68,22 @@ class CallAudioTests(unittest.TestCase):
         self.assertTrue(self.router.release(final=True))
         self.device.DisconnectProfile.assert_called_once_with(HFP_HEADSET, timeout=5)
 
+    def test_standby_never_disconnects_hfp_that_was_connected_before_the_projection(self):
+        self.router.keep_connected = True
+        self.target_properties['Connected'] = True
+        self.properties['voiceCalls'] = []
+        self.device.ConnectProfile.side_effect = BluezError('org.bluez.Error.AlreadyConnected')
+        self.poll()
+        self.assertEqual(self.router.standby_device, '/org/bluez/hci1/dev_HU')
+        self.assertFalse(self.router.standby_established)
+        # A call that finds the profile connected does not make it ours either.
+        self.properties['voiceCalls'] = ['/call/1']
+        self.poll()
+        self.properties['voiceCalls'] = []
+        self.poll()
+        self.assertTrue(self.router.release(final=True))
+        self.device.DisconnectProfile.assert_not_called()
+
     def test_standby_waits_for_the_head_unit_and_reconnects_after_a_drop(self):
         self.router.keep_connected = True
         self.properties['voiceCalls'] = []

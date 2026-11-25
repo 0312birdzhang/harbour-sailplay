@@ -22,6 +22,9 @@ class CallAudioRouter:
         self.keep_connected = keep_connected
         self.standby_device = None
         self.standby_owner = None
+        # Whether this router made the standby connection: one that existed
+        # before the projection is used but never disconnected.
+        self.standby_established = False
         self.standby_retry_at = 0
         self.log = log
         self.stop = threading.Event()
@@ -55,6 +58,7 @@ class CallAudioRouter:
         properties = objects.get(target, {}).get('org.bluez.Device1', {})
         if not properties.get('Connected'):
             self.standby_device = self.standby_owner = None
+            self.standby_established = False
             return
         owner = self.system.get_name_owner('org.bluez')
         if self.standby_device == target and self.standby_owner == owner:
@@ -63,6 +67,7 @@ class CallAudioRouter:
             return
         self.standby_retry_at = now + 15
         device = network_interface(network_object(self.system, 'org.bluez', target), 'org.bluez.Device1')
+        established = True
         try:
             device.ConnectProfile(HFP_HEADSET, timeout=6)
         except Exception as error:
@@ -70,18 +75,22 @@ class CallAudioRouter:
             if name != 'org.bluez.Error.AlreadyConnected':
                 self.report('Call audio HFP standby target={} error={}'.format(target, name))
                 return
+            # Available, but someone else's connection to end.
+            established = False
         self.standby_retry_at = now + 5
         self.standby_device, self.standby_owner = target, owner
-        self.report('Call audio HFP standby ready target={}'.format(target))
+        self.standby_established = established
+        self.report('Call audio HFP standby ready target={} established={}'.format(target, established))
 
     def release(self, final=False):
         # Wi-Fi/video teardown must allow an ongoing native HFP call to finish.
         if self.call_properties().get('voiceCalls'):
             return False
-        if self.keep_connected and final and not self.profile_device:
+        if self.keep_connected and final and not self.profile_device and self.standby_established:
             self.profile_device, self.profile_owner = self.standby_device, self.standby_owner
         if self.keep_connected and final:
             self.standby_device = self.standby_owner = None
+            self.standby_established = False
         if self.owns_override:
             features = self.routes.GetAll()[4]
             if self.call_properties().get('voiceCalls'):
@@ -93,6 +102,7 @@ class CallAudioRouter:
         if self.profile_device and self.keep_connected and not final:
             # Ours to disconnect, but only once the projection ends.
             self.standby_device, self.standby_owner = self.profile_device, self.profile_owner
+            self.standby_established = True
             self.profile_device = self.profile_owner = None
         if self.profile_device:
             if self.call_properties().get('voiceCalls'):
