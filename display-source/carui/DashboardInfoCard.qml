@@ -12,7 +12,7 @@ Rectangle {
     readonly property bool showGuidance: guidanceAvailable || (navigating && !!lastGuidance && lastGuidance.state === "active")
     readonly property var displayGuidance: guidanceAvailable ? guidance : (showGuidance ? lastGuidance : ({}))
     readonly property var lastRoute: provider ? provider.lastRouteOverview : ({})
-    radius: 22; color: palette.card
+    radius: 22; color: palette.surface
     clip: true
 
     WeatherCard {

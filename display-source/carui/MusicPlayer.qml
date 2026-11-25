@@ -236,7 +236,7 @@ Item {
                     Silica.Icon {
                         anchors.centerIn: parent
                         width: Math.min(controls._squareSize * .65, controls.centered ? 60 : controls.compact ? 44 : 52); height: width
-                        color: carPalette.text
+                        color: transportTouch.pressed ? carPalette.highlightColor : carPalette.text
                         source: index === 0 ? "image://theme/icon-m-simple-previous"
                               : index === 2 ? "image://theme/icon-m-simple-next"
                               : controls.playing ? "image://theme/icon-m-simple-pause"
@@ -399,11 +399,12 @@ Item {
                         x: choiceIcon.visible ? 88 : 20; width: parent.width - x - 72; height: parent.height
                         text: modelData.identity
                         textFormat: Text.PlainText; elide: Text.ElideRight
-                        verticalAlignment: Text.AlignVCenter; color: carPalette.text; font.pixelSize: 30
+                        verticalAlignment: Text.AlignVCenter; font.pixelSize: 30
+                        color: modelData.service === player.currentService ? carPalette.highlightColor : carPalette.text
                     }
                     Silica.Icon {
                         anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
-                        width: 40; height: 40; color: carPalette.text
+                        width: 40; height: 40; color: carPalette.highlightColor
                         source: "image://theme/icon-m-simple-play"
                         visible: modelData.playbackStatus === Mpris.Playing
                     }
