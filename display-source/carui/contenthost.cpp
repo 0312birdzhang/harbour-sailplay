@@ -29,13 +29,19 @@ SailplayContentHost::SailplayContentHost(QObject *parent) : QObject(parent), m_s
         emit changed();
     });
     connect(&m_session, &SailplaySession::errorOccurred, this,
-        [this](const QString &, const QString &message) { m_request = 0; fail(message); });
+        [this](const QString &, const QString &message) { m_request = 0; m_activatedItem.clear(); fail(message); });
     connect(&m_session, &SailplaySession::requestFinished, this,
         [this](qulonglong id, qulonglong, const QVariantMap &result, const QString &error, const QString &message) {
             if (id != m_request) return;
             m_request = 0;
+            const QString activated = m_activatedItem;
+            m_activatedItem.clear();
             if (!error.isEmpty()) { fail(message); return; }
-            if (!m_pageRequest) { refresh(); return; }
+            if (!m_pageRequest) {
+                refresh();
+                if (!activated.isEmpty()) emit itemActivated(activated);
+                return;
+            }
             const QVariantMap page = SailplayContent::decode(result.value(QStringLiteral("content"))).toMap();
             if (!SailplayContent::validPage(page) || page.value("id").toString() != m_location.id
                 || page.value("offset").toUInt() != m_offset) {
@@ -91,6 +97,7 @@ void SailplayContentHost::close()
     const QSignalBlocker blocker(&m_session);
     m_session.close();
     m_request = 0;
+    m_activatedItem.clear();
     m_page.clear();
     m_root.clear();
     m_items.clear();
@@ -150,7 +157,7 @@ void SailplayContentHost::refresh()
     } else requestPage();
 }
 
-void SailplayContentHost::invokeItem(const QVariantMap &item)
+void SailplayContentHost::invokeItem(const QVariantMap &item, bool listItem)
 {
     if (!ready() || busy() || !item.value("enabled").toBool()) return;
     if (item.value("kind") == QStringLiteral("folder")) {
@@ -163,6 +170,7 @@ void SailplayContentHost::invokeItem(const QVariantMap &item)
         requestPage();
     } else {
         m_pageRequest = false;
+        m_activatedItem = listItem ? item.value("id").toString() : QString();
         m_request = m_session.invoke(item.value("action").toString(), item.value("parameters").toMap(), m_session.revision());
         emit changed();
     }
@@ -171,7 +179,7 @@ void SailplayContentHost::invokeItem(const QVariantMap &item)
 void SailplayContentHost::select(const QString &id)
 {
     for (const QVariant &item : m_items) {
-        if (item.toMap().value("id").toString() == id) { invokeItem(item.toMap()); return; }
+        if (item.toMap().value("id").toString() == id) { invokeItem(item.toMap(), true); return; }
     }
 }
 

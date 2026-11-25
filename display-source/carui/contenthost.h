@@ -39,6 +39,8 @@ public:
 
 signals:
     void changed();
+    // A list item's own action (not a folder or a page control) succeeded.
+    void itemActivated(const QString &id);
 
 private:
     struct Location {
@@ -47,7 +49,7 @@ private:
     };
     void receiveState();
     void requestPage(uint offset = 0);
-    void invokeItem(const QVariantMap &item);
+    void invokeItem(const QVariantMap &item, bool listItem = false);
     void fail(const QString &message);
     SailplaySession m_session;
     SailplayApplication m_declaration;
@@ -62,6 +64,7 @@ private:
     qulonglong m_requestedVersion = 0;
     uint m_offset = 0;
     bool m_pageRequest = false;
+    QString m_activatedItem;
     bool m_active = true;
 };
 

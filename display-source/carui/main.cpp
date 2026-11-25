@@ -557,6 +557,11 @@ public:
                 it.value()->write(active ? "active\n" : "inactive\n");
             }
         });
+        // Choosing a track in a music app's browse page returns to the split
+        // dashboard, where the player card shows what was just started.
+        connect(m_content, &SailplayContentHost::itemActivated, this, [this]() {
+            if (contentActive() && isMusicApp(m_currentApp)) openDashboard();
+        });
         connect(m_music, &SailplayMusicHost::errorOccurred, this, [this](const QString &message) {
             m_musicError = message;
             emit rememberedMusicChanged();
