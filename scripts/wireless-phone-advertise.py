@@ -44,24 +44,90 @@ def command(sock, opcode, payload, adapter_index=0):
     raise TimeoutError('Bluetooth MGMT command did not complete')
 
 
-def run_probe(probe):
+def run_probe(probe, ensure=None, launch=subprocess.call, sleep=time.sleep, rounds=None):
     """Keep the profile registered across iAP2 link resets.
 
     The head unit drops the Bluetooth/iAP2 link as part of the Wi-Fi
     handover.  Exiting here makes systemd restart this unit, and its
     ExecStopPost would then stop the handover worker that is actively
     projecting.  Relaunch the probe in place instead.
+
+    The probe also exits when bluetoothd was restarted. A new bluetoothd
+    clears the adapter's service UUIDs, so the markers found at start-up may
+    be gone: ensure() puts back what is missing before every relaunch.
     """
     delay = 1
-    while True:
-        result = subprocess.call([sys.executable, probe] + sys.argv[1:])
+    while rounds is None or rounds > 0:
+        if rounds is not None:
+            rounds -= 1
+        result = launch([sys.executable, probe] + sys.argv[1:])
         logging.info('CarPlay profile process exited status=%d', result)
         if result == 0:
             delay = 1
-            time.sleep(1)
+            sleep(1)
         else:
-            time.sleep(delay)
+            sleep(delay)
             delay = min(10, delay * 2)
+        if ensure is not None:
+            try:
+                ensure()
+            except Exception as error:
+                # bluetoothd may still be starting; the next round tries again.
+                logging.warning('phone advertisement check failed: %s', type(error).__name__)
+
+
+class Advertisement:
+    """The EIR service markers this process added, and their removal."""
+    def __init__(self, read_uuids, open_control, send=None):
+        self.read_uuids, self.open_control = read_uuids, open_control
+        self.send = send or command
+        self.sock = None
+        self.added = []
+
+    def ensure(self):
+        """Add the markers that are missing; return their identifiers."""
+        adapter, adapter_index, existing = self.read_uuids()
+        missing = missing_advertisements(existing)
+        for identifier in missing:
+            if self.sock is None:
+                self.sock = self.open_control()
+            value = uuid.UUID(identifier).bytes[::-1]
+            self.send(self.sock, 0x0010, value + b'\x00', adapter_index)
+            if (value, adapter_index) not in self.added:
+                self.added.append((value, adapter_index))
+            logging.info('temporary phone service EIR added on %s uuid=%s', adapter, identifier)
+        return missing
+
+    def close(self):
+        try:
+            for value, adapter_index in reversed(self.added):
+                try:
+                    self.send(self.sock, 0x0011, value, adapter_index)
+                    logging.info('temporary phone service EIR removed uuid=%s', uuid.UUID(bytes=value[::-1]))
+                except (OSError, TimeoutError):
+                    logging.exception('temporary phone service EIR removal failed')
+        finally:
+            self.added = []
+            if self.sock is not None:
+                self.sock.close()
+                self.sock = None
+
+
+def control_socket():
+    # Sailfish Python omits AF_BLUETOOTH even though the Linux kernel supports it.
+    bluetooth_family = getattr(socket, 'AF_BLUETOOTH', 31)
+    sock = socket.socket(bluetooth_family, socket.SOCK_RAW, 1)
+    sock.settimeout(3)
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.bind.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint]
+    libc.bind.restype = ctypes.c_int
+    # sockaddr_hci: family, HCI_DEV_NONE, HCI_CHANNEL_CONTROL.
+    address = ctypes.create_string_buffer(struct.pack('=HHH', bluetooth_family, 65535, 3))
+    if libc.bind(sock.fileno(), address, 6):
+        error = ctypes.get_errno()
+        sock.close()
+        raise OSError(error, os.strerror(error))
+    return sock
 
 
 def main():
@@ -85,44 +151,31 @@ def main():
                  adapter, props.Get('org.bluez.Adapter1', 'Alias'),
                  props.Get('org.bluez.Adapter1', 'Powered'), existing)
     probe = os.path.join(os.path.dirname(__file__), 'wireless-probe.py')
-    missing = missing_advertisements(existing)
-    if not missing:
-        logging.info('CarPlay and iAP2 EIR already present; preserving existing registrations')
-        run_probe(probe)
-        return 0
-    # Sailfish Python omits AF_BLUETOOTH even though the Linux kernel supports it.
-    bluetooth_family = getattr(socket, 'AF_BLUETOOTH', 31)
-    sock = socket.socket(bluetooth_family, socket.SOCK_RAW, 1)
-    sock.settimeout(3)
-    libc = ctypes.CDLL(None, use_errno=True)
-    libc.bind.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint]
-    libc.bind.restype = ctypes.c_int
-    # sockaddr_hci: family, HCI_DEV_NONE, HCI_CHANNEL_CONTROL.
-    address = ctypes.create_string_buffer(struct.pack('=HHH', bluetooth_family, 65535, 3))
-    if libc.bind(sock.fileno(), address, 6):
-        error = ctypes.get_errno()
-        sock.close()
-        raise OSError(error, os.strerror(error))
-    added = []
+
+    def read_uuids():
+        # Resolved again each time: a restarted bluetoothd is a new owner.
+        system = dbus.SystemBus(private=True)
+        try:
+            objects = dbus.Interface(system.get_object('org.bluez', '/'),
+                                     'org.freedesktop.DBus.ObjectManager').GetManagedObjects()
+            path, _ = select_adapter(objects, options.device)
+            values = objects[path]['org.bluez.Adapter1'].get('UUIDs', [])
+            return path, int(path.rsplit('/hci', 1)[1]), [str(value).lower() for value in values]
+        finally:
+            system.close()
+
+    advertisement = Advertisement(read_uuids, control_socket)
     try:
-        for identifier in missing:
-            value = uuid.UUID(identifier).bytes[::-1]
-            command(sock, 0x0010, value + b'\x00', adapter_index)
-            added.append(value)
-            logging.info('temporary phone service EIR added on %s uuid=%s', adapter, identifier)
+        if not missing_advertisements(existing):
+            logging.info('CarPlay and iAP2 EIR already present; preserving existing registrations')
+            run_probe(probe, ensure=advertisement.ensure)
+            return 0
+        advertisement.ensure()
         result = subprocess.call([sys.executable, probe] + sys.argv[1:])
         logging.info('CarPlay profile process exited status=%d', result)
         return result
     finally:
-        try:
-            for value in reversed(added):
-                try:
-                    command(sock, 0x0011, value, adapter_index)
-                    logging.info('temporary phone service EIR removed uuid=%s', uuid.UUID(bytes=value[::-1]))
-                except (OSError, TimeoutError):
-                    logging.exception('temporary phone service EIR removal failed')
-        finally:
-            sock.close()
+        advertisement.close()
 
 
 if __name__ == '__main__':
