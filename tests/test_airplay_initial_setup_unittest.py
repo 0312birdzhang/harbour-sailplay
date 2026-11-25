@@ -37,7 +37,8 @@ class InitialSetupTests(unittest.TestCase):
                 self.assertEqual(session, {'ssid': 'HU', 'passphrase': 'initial'})
 
     def run_attempts(self, setup_statuses, public_status=455, media_error=None,
-                     peer_addresses=None, network_props=None, discovered_endpoints=None):
+                     peer_addresses=None, network_props=None, discovered_endpoints=None,
+                     connect_errors=()):
         info = plistlib.dumps({'model': 'Fiat CARLINE_13'}, fmt=plistlib.FMT_BINARY)
         setup = plistlib.dumps({'eventPort': 7001, 'timingPort': 7002}, fmt=plistlib.FMT_BINARY)
         clients = []
@@ -68,8 +69,10 @@ class InitialSetupTests(unittest.TestCase):
                          })
         exec(callback_code, namespace)
         identity = json.dumps({'id': 'fixture-identity', 'private_key': '00' * 32})
-        with patch.object(rtspclient, 'connect', side_effect=clients) as connections, \
+        lease = (network_props or {}).get('IPv4', {}).get('Address')
+        with patch.object(rtspclient, 'connect', side_effect=list(connect_errors) + clients) as connections, \
                 patch.object(airplaydiscovery, 'discover', return_value=discovered_endpoints or []), \
+                patch.object(airplaydiscovery, 'interface_address', return_value=lease), \
                 patch.object(airplaypair, 'pair_setup'), \
                 patch.object(airplaypair, 'pair_verify', return_value=SimpleNamespace(shared=b'shared')), \
                 patch.object(airplaytiming, 'TimingServer', side_effect=timings), \
@@ -108,14 +111,26 @@ class InitialSetupTests(unittest.TestCase):
         self.assertIn('Encrypted initial SETUP rejected status=400', output)
         self.assertNotIn('UnboundLocalError', output)
 
-    def test_no_iap2_address_or_dhcp_gateway_reaches_airplay_and_media_through_discovery(self):
+    def test_no_iap2_address_or_dhcp_gateway_reaches_airplay_and_media_on_the_first_host(self):
+        media, output, connections = self.run_attempts([200], peer_addresses=[],
+            network_props={'IPv4': {'Address': '192.168.3.100', 'Netmask': '255.255.255.0'}},
+            discovered_endpoints=[('192.168.3.2', 12345)])
+        connections.assert_called_once_with('192.168.3.1', 7000, 'wlan0', bind_device=True, source_address_wait=5,
+                                            refused_wait=15)
+        media.assert_called_once()
+        self.assertIn('trying first host of leased network address=192.168.3.1', output)
+        self.assertNotIn('discovering on interface', output)
+
+    def test_unreachable_first_host_reaches_airplay_and_media_through_discovery(self):
         media, output, connections = self.run_attempts([200], peer_addresses=[],
             network_props={'IPv4': {'Address': '192.168.50.102', 'Netmask': '255.255.255.0'}},
-            discovered_endpoints=[('192.168.50.2', 12345)])
-        connections.assert_called_once_with('192.168.50.2', 12345, 'wlan0', bind_device=True, source_address_wait=5)
+            discovered_endpoints=[('192.168.50.2', 12345)],
+            connect_errors=[OSError(113, 'fixture: no route to host')])
+        self.assertEqual([call.args[:2] for call in connections.call_args_list],
+                         [('192.168.50.1', 7000), ('192.168.50.2', 12345)])
         media.assert_called_once()
-        self.assertIn('AirPlay peer address absent from iAP2 and DHCP', output)
-        self.assertIn('AirPlay attempt started address=192.168.50.2 port=12345', output)
+        self.assertIn('AirPlay probe failed stage=control-connect', output)
+        self.assertIn('AirPlay peer address absent from iAP2 and DHCP; discovering on interface=wlan0', output)
 
     def test_no_discovered_endpoint_retires_the_worker_with_discovery_context(self):
         media, output, connections = self.run_attempts([], peer_addresses=[])

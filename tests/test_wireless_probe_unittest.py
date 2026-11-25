@@ -2,6 +2,7 @@
 import importlib.util
 import os
 import socket
+import struct
 import threading
 import unittest
 import tempfile
@@ -37,6 +38,32 @@ class ProbeTests(unittest.TestCase):
             self.assertFalse(worker.is_alive())
         finally:
             car.close()
+
+    def test_media_is_established_only_once_the_lease_holder_has_streamed(self):
+        from carplay_proto.session import SessionLease
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'media.lock')
+            self.assertFalse(module.media_established(path))
+            lease = SessionLease('carplay', lock_path=path, status_path=None)
+            lease.acquire()
+            try:
+                # Held from worker start-up: active, but nothing has succeeded yet.
+                self.assertTrue(module.media_active(path))
+                self.assertFalse(module.media_established(path))
+                lease.phase('projecting')
+                self.assertFalse(module.media_established(path))
+                lease.streaming()
+                self.assertTrue(module.media_established(path))
+            finally:
+                lease.close()
+            # The record of a finished worker is not a running success.
+            self.assertFalse(module.media_established(path))
+            again = SessionLease('carplay', lock_path=path, status_path=None)
+            again.acquire()
+            try:
+                self.assertFalse(module.media_established(path))
+            finally:
+                again.close()
 
     def test_active_media_lock_prevents_unnecessary_bluetooth_reconnect(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -111,6 +138,68 @@ class ProbeTests(unittest.TestCase):
             worker.join(2)
             car.close()
         self.assertFalse(worker.is_alive())
+
+
+class UnsupportedAccessoryTests(unittest.TestCase):
+    def identify(self, body):
+        """Run the probe against an accessory that identifies with body."""
+        phone, accessory = socket.socketpair()
+        stop = threading.Event()
+        unsupported = []
+        worker = threading.Thread(target=module.probe, args=(phone, stop, 10), kwargs={
+            'bluetooth_device': '/org/bluez/hci0/dev_fixture', 'on_unsupported': lambda: unsupported.append(True)})
+        decoder = Decoder()
+        queue = []
+        accessory.settimeout(2)
+        worker.start()
+
+        def receive():
+            while not queue:
+                queue.extend(decoder.feed(accessory.recv(4096)))
+            return queue.pop(0)
+
+        after = []
+        try:
+            accessory.sendall(DETECT)
+            self.assertEqual(receive(), DETECT)
+            accessory.sendall(encode(Packet(SYN, 0x20, 0, 0, synchronization())))
+            syn = receive()
+            accessory.sendall(encode(Packet(ACK, 0x20, syn.sequence, 0, None)))
+            ident = receive()
+            self.assertEqual(ident.payload, Frame(0x1d00, b'').encoded())
+            accessory.sendall(encode(Packet(ACK, 0x21, ident.sequence, 10, Frame(0x1d01, body).encoded())))
+            accessory.settimeout(0.5)
+            try:
+                while True:
+                    data = accessory.recv(4096)
+                    if not data:
+                        break
+                    after.extend(decoder.feed(data))
+            except (socket.timeout, OSError):
+                pass
+        finally:
+            worker.join(1)
+            ended = not worker.is_alive()
+            stop.set()
+            worker.join(2)
+            accessory.close()
+        return unsupported, ended, [packet.payload for packet in after if packet.payload]
+
+    @staticmethod
+    def lists(sent, received):
+        pack = lambda ids: struct.pack('>' + 'H' * len(ids), *ids)
+        return encode_param(6, pack(sent)) + encode_param(7, pack(received))
+
+    def test_earbuds_identification_ends_the_probe_and_reports_the_device(self):
+        unsupported, ended, replies = self.identify(self.lists([0xea03], [0xea00, 0xea01]))
+        self.assertEqual(unsupported, [True])
+        self.assertTrue(ended)
+        self.assertNotIn(Frame(0x1d02, b'').encoded(), replies)
+
+    def test_head_unit_identification_is_accepted(self):
+        unsupported, _, replies = self.identify(self.lists([0x5703], [0x5702, 0x4e0d]))
+        self.assertEqual(unsupported, [])
+        self.assertIn(Frame(0x1d02, b'').encoded(), replies)
 
 
 class IdentificationParsingTests(unittest.TestCase):

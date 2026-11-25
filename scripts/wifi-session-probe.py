@@ -399,7 +399,7 @@ def main():
             try:
                 print('AirPlay attempt started address={} port={} interface={}'.format(
                     address,port,interface),flush=True)
-                client = connect(address, port, interface, bind_device=True, source_address_wait=5)
+                client = connect(address, port, interface, bind_device=True, source_address_wait=5, refused_wait=15)
                 print('AirPlay control connected local={} peer={} elapsedMs={:.1f}'.format(
                     socket_endpoint(client.sock,'getsockname'),socket_endpoint(client.sock,'getpeername'),
                     (time.monotonic()-attempt_started)*1000),flush=True)
@@ -495,7 +495,7 @@ def main():
                         os.utime(restore_clock, None)
                         run_demo(client,address,interface,verified.shared,setup_info,info,demo_path,
                                  seconds=(0 if args.sustained else 45) if live_ui else 15,live=live_ui,
-                                 on_activity=lambda:os.utime(restore_clock,None),
+                                 on_activity=lambda:(os.utime(restore_clock,None),media_lease.streaming()),
                                  bluetooth_address=session.get('bluetooth_address'),
                                  bluetooth_device=session.get('bluetooth_device'),
                                  iap_link=airplay_iap_link(session.get('device_name') or 'SailfishOS',

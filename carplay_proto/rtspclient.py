@@ -99,12 +99,17 @@ class EncryptedSocket:
         self.sock.close()
 
 
-def connect(address, port, interface, timeout=5, bind_device=False, source_address_wait=0):
+def connect(address, port, interface, timeout=5, bind_device=False, source_address_wait=0,
+            refused_wait=0):
     # A link-local IPv6 destination requires the Wi-Fi interface scope ID.
     family = socket.AF_INET6 if ':' in address else socket.AF_INET
     started = time.monotonic()
     deadline = started + source_address_wait
+    # A head unit can hand out its Wi-Fi credentials before its AirPlay server
+    # listens; the control connection is then refused for several seconds.
+    refused_deadline = started + refused_wait
     attempts = 0
+    refused = 0
     while True:
         sock = socket.socket(family, socket.SOCK_STREAM)
         attempts += 1
@@ -114,12 +119,25 @@ def connect(address, port, interface, timeout=5, bind_device=False, source_addre
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, interface.encode() + b'\0')
             destination = (address.split('%')[0], port, 0, socket.if_nametoindex(interface)) if family == socket.AF_INET6 else (address, port)
             sock.connect(destination)
-            if attempts > 1:
+            if refused:
+                logging.info('AirPlay receiver listening address=%s port=%s refusedAttempts=%d elapsedMs=%.1f',
+                             address, port, refused, (time.monotonic() - started) * 1000)
+            elif attempts > 1:
                 logging.info('AirPlay IPv6 source address ready interface=%s attempts=%d elapsedMs=%.1f',
                              interface, attempts, (time.monotonic() - started) * 1000)
             return RTSPClient(sock)
         except OSError as error:
             sock.close()
+            if error.errno == errno.ECONNREFUSED:
+                remaining = refused_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                if not refused:
+                    logging.info('AirPlay receiver not listening yet address=%s port=%s waitSeconds=%s',
+                                 address, port, refused_wait)
+                refused += 1
+                time.sleep(min(.5, remaining))
+                continue
             remaining = deadline - time.monotonic()
             if family != socket.AF_INET6 or error.errno != errno.EADDRNOTAVAIL or remaining <= 0:
                 raise

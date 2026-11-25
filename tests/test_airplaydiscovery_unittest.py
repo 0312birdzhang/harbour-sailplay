@@ -102,19 +102,79 @@ class EndpointTests(unittest.TestCase):
         self.props = {'Ethernet': {'Interface': 'wlan0'},
                       'IPv4': {'Address': '192.168.50.102', 'Netmask': '255.255.255.0'}}
 
-    def test_dhcp_without_gateway_discovers_an_endpoint_and_uses_its_srv_port(self):
-        with patch.object(airplaydiscovery, 'discover', return_value=[('192.168.50.2', 12345)]) as discover:
-            self.assertEqual(list(airplaydiscovery.endpoints([], 7000, self.props, log=Mock())),
-                             [('192.168.50.2', 12345)])
-        discover.assert_called_once_with('wlan0', log=ANY)
+    def lease(self, address='192.168.50.102'):
+        return patch.object(airplaydiscovery, 'interface_address', return_value=address)
 
-    def test_empty_gateway_value_allows_discovery(self):
+    def test_dhcp_without_gateway_tries_the_first_host_then_discovers_an_endpoint(self):
+        log = Mock()
+        with patch.object(airplaydiscovery, 'discover', return_value=[('192.168.50.2', 12345)]) as discover, \
+                self.lease() as lease:
+            self.assertEqual(list(airplaydiscovery.endpoints([], 7000, self.props, log=log)),
+                             [('192.168.50.1', 7000), ('192.168.50.2', 12345)])
+        discover.assert_called_once_with('wlan0', log=ANY)
+        lease.assert_called_once_with('wlan0')
+        self.assertIn('trying first host of leased network address=192.168.50.1', log.call_args_list[0].args[0])
+
+    def test_empty_gateway_value_allows_the_first_host_and_discovery(self):
         for gateway in (None, ''):
             with self.subTest(gateway=gateway):
                 self.props['IPv4']['Gateway'] = gateway
-                with patch.object(airplaydiscovery, 'discover', return_value=[('192.168.50.2', 12345)]):
+                with patch.object(airplaydiscovery, 'discover', return_value=[('192.168.50.2', 12345)]), \
+                        self.lease():
                     self.assertEqual(list(airplaydiscovery.endpoints([], 7000, self.props, log=Mock())),
-                                     [('192.168.50.2', 12345)])
+                                     [('192.168.50.1', 7000), ('192.168.50.2', 12345)])
+
+    def test_first_host_is_derived_only_from_a_plausible_leased_network(self):
+        for address, netmask, expected in (
+                ('192.168.3.100', '255.255.255.0', '192.168.3.1'),
+                ('172.20.10.2', '255.255.255.240', '172.20.10.1'),
+                ('10.8.200.7', '255.255.0.0', '10.8.0.1'),
+                ('192.168.3.2', '255.255.255.252', '192.168.3.1'),
+                ('192.168.3.1', '255.255.255.0', None),
+                ('10.1.2.3', '255.0.0.0', None),
+                ('192.168.3.0', '255.255.255.254', None),
+                ('192.168.3.100', None, None),
+                (None, '255.255.255.0', None),
+                ('fixture', '255.255.255.0', None)):
+            with self.subTest(address=address, netmask=netmask):
+                self.assertEqual(airplaydiscovery.subnet_peer({'Address': address, 'Netmask': netmask}), expected)
+        self.assertIsNone(airplaydiscovery.subnet_peer({}))
+
+    def test_no_first_host_keeps_discovery_only(self):
+        self.props['IPv4'] = {}
+        with patch.object(airplaydiscovery, 'discover', return_value=[('192.168.50.2', 12345)]) as discover, \
+                self.lease() as lease:
+            self.assertEqual(list(airplaydiscovery.endpoints([], 7000, self.props, log=Mock())),
+                             [('192.168.50.2', 12345)])
+        discover.assert_called_once_with('wlan0', log=ANY)
+        lease.assert_not_called()
+
+    def test_discovery_is_skipped_once_the_interface_left_the_hu_lease(self):
+        for current in ('192.168.1.177', None):
+            with self.subTest(current=current):
+                log = Mock()
+                with patch.object(airplaydiscovery, 'discover') as discover, self.lease(current):
+                    self.assertEqual(list(airplaydiscovery.endpoints([], 7000, self.props, log=log)),
+                                     [('192.168.50.1', 7000)])
+                discover.assert_not_called()
+                self.assertIn('no longer holds the head unit lease', log.call_args_list[-1].args[0])
+
+    def test_discovery_is_skipped_after_a_session_on_the_first_host(self):
+        now = [100.0]
+        with patch.object(airplaydiscovery, 'discover') as discover, self.lease() as lease, \
+                patch.object(airplaydiscovery.time, 'monotonic', side_effect=lambda: now[0]):
+            candidates = airplaydiscovery.endpoints([], 7000, self.props, log=Mock())
+            self.assertEqual(next(candidates), ('192.168.50.1', 7000))
+            now[0] += airplaydiscovery.GUESS_DISCOVERY_WINDOW + 1
+            self.assertEqual(list(candidates), [])
+        discover.assert_not_called()
+        lease.assert_not_called()
+
+    def test_discovered_first_host_is_not_tried_twice(self):
+        found = [('192.168.50.1', 7000), ('192.168.50.1', 12345), ('fe80::abcd', 7000)]
+        with patch.object(airplaydiscovery, 'discover', return_value=found), self.lease():
+            self.assertEqual(list(airplaydiscovery.endpoints([], 7000, self.props, log=Mock())),
+                             [('192.168.50.1', 7000), ('192.168.50.1', 12345), ('fe80::abcd', 7000)])
 
     def test_existing_iap2_and_gateway_addresses_keep_the_negotiated_port(self):
         self.props['IPv4']['Gateway'] = '192.0.2.2'
@@ -138,15 +198,18 @@ class EndpointTests(unittest.TestCase):
 
     def test_discovery_socket_errors_are_logged(self):
         log = Mock()
-        with patch.object(airplaydiscovery, 'discover', side_effect=OSError(errno.ENODEV, 'no interface')):
-            self.assertEqual(list(airplaydiscovery.endpoints([], 7000, self.props, log=log)), [])
+        with patch.object(airplaydiscovery, 'discover', side_effect=OSError(errno.ENODEV, 'no interface')), \
+                self.lease():
+            self.assertEqual(list(airplaydiscovery.endpoints([], 7000, self.props, log=log)),
+                             [('192.168.50.1', 7000)])
         self.assertTrue(any('endpoint discovery failed' in call.args[0] for call in log.call_args_list))
 
 
 class DiscoveryTransportTests(unittest.TestCase):
-    def run_discovery(self, packets, timeout=2):
+    def run_discovery(self, packets, timeout=2, send_error=None):
         sock = Mock()
         sock.recvfrom.side_effect = packets
+        sock.sendto.side_effect = send_error
         now = [0.0]
         remaining = [len(packets)]
         def readable(sockets, writers, errors, wait):
@@ -192,6 +255,11 @@ class DiscoveryTransportTests(unittest.TestCase):
         self.assertEqual(sock.sendto.call_count, 2)
         self.assertTrue(any('reason=no-mDNS-receiver' in call.args[0] for call in log.call_args_list))
 
+    def test_failed_query_names_the_multicast_destination(self):
+        _, _, log, _ = self.run_discovery([], send_error=OSError(errno.EADDRNOTAVAIL, 'no source address'))
+        self.assertIn('AirPlay mDNS query failed destination=224.0.0.251 errno={}'.format(errno.EADDRNOTAVAIL),
+                      [call.args[0] for call in log.call_args_list])
+
     def test_bad_packets_and_responses_from_other_ports_do_not_end_discovery(self):
         response = dns_response(dns_record(INSTANCE, 33, SRV_DATA), dns_record(HOST, 1, ADDRESS_DATA))
         result, _, log, _ = self.run_discovery([(b'bad', ('192.0.2.2', 5353)),
@@ -222,7 +290,7 @@ class DiscoveryTransportTests(unittest.TestCase):
 
 
 class BoundControlTests(unittest.TestCase):
-    def connection_fixture(self, error_numbers, address='fe80::abcd', wait=5):
+    def connection_fixture(self, error_numbers, address='fe80::abcd', wait=5, **options):
         now = [100.0]
         sockets = []
         errors = iter(error_numbers)
@@ -240,7 +308,8 @@ class BoundControlTests(unittest.TestCase):
                 patch.object(rtspclient.time, 'monotonic', side_effect=lambda: now[0]), \
                 patch.object(rtspclient.time, 'sleep', side_effect=sleep) as sleeps:
             try:
-                client = rtspclient.connect(address, 7000, 'wlan0', bind_device=True, source_address_wait=wait)
+                client = rtspclient.connect(address, 7000, 'wlan0', bind_device=True, source_address_wait=wait,
+                                           **options)
                 error = None
             except OSError as failure:
                 client, error = None, failure
@@ -277,6 +346,36 @@ class BoundControlTests(unittest.TestCase):
                 self.assertEqual(elapsed, 0)
                 sleeps.assert_not_called()
                 sockets[0].close.assert_called_once_with()
+
+    def test_refused_control_connection_waits_for_the_receiver_to_listen(self):
+        for address in ('192.0.2.2', 'fe80::abcd'):
+            with self.subTest(address=address):
+                client, error, sockets, sleeps, elapsed = self.connection_fixture(
+                    [errno.ECONNREFUSED] * 6 + [None], address=address, refused_wait=15)
+                self.assertIsNone(error)
+                self.assertIs(client.sock, sockets[-1])
+                self.assertAlmostEqual(elapsed, 3)
+                self.assertEqual(sleeps.call_count, 6)
+                for sock in sockets[:-1]:
+                    sock.close.assert_called_once_with()
+                sockets[-1].close.assert_not_called()
+
+    def test_refused_wait_has_a_deadline_and_closes_all_failed_sockets(self):
+        client, error, sockets, _, elapsed = self.connection_fixture(
+            [errno.ECONNREFUSED] * 40, address='192.0.2.2', refused_wait=15)
+        self.assertIsNone(client)
+        self.assertEqual(error.errno, errno.ECONNREFUSED)
+        self.assertAlmostEqual(elapsed, 15)
+        self.assertLessEqual(len(sockets), 32)
+        for sock in sockets:
+            sock.close.assert_called_once_with()
+
+    def test_refused_wait_does_not_delay_other_errors(self):
+        _, error, sockets, sleeps, elapsed = self.connection_fixture(
+            [errno.EHOSTUNREACH], address='192.0.2.2', refused_wait=15)
+        self.assertEqual(error.errno, errno.EHOSTUNREACH)
+        self.assertEqual((len(sockets), elapsed), (1, 0))
+        sleeps.assert_not_called()
 
     def test_zero_address_wait_preserves_immediate_failure(self):
         _, error, sockets, sleeps, elapsed = self.connection_fixture([errno.EADDRNOTAVAIL], wait=0)

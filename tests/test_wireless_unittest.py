@@ -1,12 +1,53 @@
 import unittest
 from carplay_proto.wire import Frame, ProtocolError, encode_param
-from carplay_proto.wireless import (parse_wifi_configuration,
+from carplay_proto.wireless import (parse_wifi_configuration, offers_wireless_carplay, WifiRequestWatch,
                                     peer_supports_wifi_configuration_request,
                                     request_wifi_configuration,
                                     parse_start_session)
 
 
 class WirelessTests(unittest.TestCase):
+    def test_only_accessories_declaring_carplay_messages_are_head_units(self):
+        # Fiat/Marelli CARLINE_13, normally and in its plain-Bluetooth mode.
+        sent = {0xaa06, 0x5000, 0x5002, 0x5700, 0x5703, 0x5200, 0x5203, 0x00b1, 0x00b3}
+        received = {0x4e09, 0x4e0a, 0x4e0c, 0x4e0e, 0x4e0d, 0xea00, 0xea01, 0x5001, 0x5701, 0x5702,
+                    0x5201, 0x5202, 0x00b0, 0x00b2, 0x00b4}
+        self.assertTrue(offers_wireless_carplay(sent, received))
+        self.assertTrue(offers_wireless_carplay(sent - {0x5200, 0x5203}, received - {0x5201, 0x5202}))
+        # Notification-driven head units without the explicit Wi-Fi request.
+        self.assertTrue(offers_wireless_carplay({0x4301}, set()))
+        self.assertTrue(offers_wireless_carplay(set(), {0x4e0d}))
+        # Earbuds expose the accessory UUID but only External Accessory messages.
+        self.assertFalse(offers_wireless_carplay({0xea03}, {0xea00, 0xea01}))
+        self.assertFalse(offers_wireless_carplay([0xea03], []))
+        # Peers that omit both lists keep the legacy behavior.
+        self.assertTrue(offers_wireless_carplay(set(), set()))
+
+    def test_unanswered_wifi_request_is_reported_once_after_the_patience_delay(self):
+        now = [100]
+        watch = WifiRequestWatch(clock=lambda: now[0])
+        self.assertFalse(watch.overdue())
+        watch.requested()
+        now[0] = 109
+        watch.requested()
+        self.assertFalse(watch.overdue())
+        now[0] = 110
+        self.assertTrue(watch.overdue())
+        now[0] = 200
+        self.assertFalse(watch.overdue())
+
+    def test_answered_wifi_request_is_never_reported_and_rearms(self):
+        now = [100]
+        watch = WifiRequestWatch(clock=lambda: now[0])
+        watch.requested()
+        now[0] = 102
+        watch.answered()
+        now[0] = 150
+        self.assertFalse(watch.overdue())
+        watch.requested()
+        now[0] = 160
+        self.assertTrue(watch.overdue())
+
     def test_start_session_ipv6_and_private_credentials(self):
         import struct
         group = (encode_param(0, b'CarAP\0') + encode_param(1, b'secret123\0') +

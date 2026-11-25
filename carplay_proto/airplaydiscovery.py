@@ -161,7 +161,7 @@ def discover(interface, timeout=5, log=print):
                     try:
                         sock.sendto(query, destination)
                     except OSError as error:
-                        log('AirPlay mDNS query failed errno={}'.format(error.errno))
+                        log('AirPlay mDNS query failed destination={} errno={}'.format(destination[0], error.errno))
                 next_query = now + 1
             ready, _, _ = select.select([sock for sock, _ in transports], [], [],
                                         max(0, min(1, deadline - time.monotonic())))
@@ -202,26 +202,85 @@ def discover(interface, timeout=5, log=print):
     return []
 
 
+def subnet_peer(ipv4):
+    """Guess the access point when DHCP supplied an address but no router.
+
+    A head unit is its own access point and DHCP server, conventionally the
+    first host of the network it leases.  The guess is only a candidate: the
+    caller still has to pair with whatever answers there.
+    """
+    try:
+        network = ipaddress.ip_interface('{}/{}'.format(
+            ipv4.get('Address'), ipv4.get('Netmask'))).network
+    except ValueError:
+        return None
+    if network.version != 4 or not 16 <= network.prefixlen <= 30:
+        return None
+    peer = network.network_address + 1
+    if str(peer) == str(ipv4.get('Address')):
+        return None
+    return str(peer)
+
+
+# A guessed peer is only followed by mDNS while this handover is still young.
+GUESS_DISCOVERY_WINDOW = 30
+
+
+def interface_address(interface):
+    """Current IPv4 address of an interface, or None."""
+    import fcntl
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            raw = fcntl.ioctl(sock.fileno(), 0x8915, struct.pack('256s', interface.encode()[:15]))
+        return socket.inet_ntoa(raw[20:24])
+    except OSError:
+        return None
+
+
 def endpoints(addresses, port, props, log=print):
     known = list(addresses)
-    gateway = str(props.get('IPv4', {}).get('Gateway') or '')
+    ipv4 = props.get('IPv4', {})
+    gateway = str(ipv4.get('Gateway') or '')
     if gateway:
         known.append(gateway)
-    if known:
-        seen = set()
-        for candidate in known:
-            try:
-                address = ipaddress.ip_address(str(candidate).split('%')[0])
-            except ValueError:
-                continue
-            if address.is_unspecified or address.is_loopback or address.is_multicast or address in seen:
-                continue
-            seen.add(address)
-            yield str(address), int(port)
+    guessed = False
+    if not known:
+        peer = subnet_peer(ipv4)
+        if peer:
+            log('AirPlay peer address absent from iAP2 and DHCP; trying first host of leased network address={}'.format(peer))
+            known.append(peer)
+            guessed = True
+    handed_out = time.monotonic()
+    seen = set()
+    for candidate in known:
+        try:
+            address = ipaddress.ip_address(str(candidate).split('%')[0])
+        except ValueError:
+            continue
+        if address.is_unspecified or address.is_loopback or address.is_multicast or address in seen:
+            continue
+        seen.add(address)
+        yield str(address), int(port)
+    if known and not guessed:
         return
     interface = str(props.get('Ethernet', {}).get('Interface', ''))
+    if guessed:
+        # Control returns here after the caller is done with the guess.  If a
+        # session ran, or Wi-Fi has gone back to another network, discovering
+        # now would find unrelated AirPlay receivers on that network.
+        if time.monotonic() - handed_out > GUESS_DISCOVERY_WINDOW:
+            return
+        if interface_address(interface) != str(ipv4.get('Address')):
+            log('AirPlay discovery skipped; interface={} no longer holds the head unit lease'.format(interface))
+            return
     log('AirPlay peer address absent from iAP2 and DHCP; discovering on interface={}'.format(interface))
     try:
-        yield from discover(interface, log=log)
+        for address, discovered_port in discover(interface, log=log):
+            try:
+                if ipaddress.ip_address(str(address).split('%')[0]) in seen and int(discovered_port) == int(port):
+                    continue
+            except ValueError:
+                pass
+            yield address, discovered_port
     except OSError as error:
         log('AirPlay endpoint discovery failed interface={} errno={}'.format(interface, error.errno))

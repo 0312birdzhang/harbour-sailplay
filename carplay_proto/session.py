@@ -136,6 +136,11 @@ class SessionLease:
     def phase(self, value):
         self.update(phase=value)
 
+    def streaming(self):
+        """Record once that this session reached media streaming."""
+        if not self.state.get('streaming'):
+            self.update(streaming=True)
+
     def plan_network(self, old, target, forget=False, wifi_path=None, powered=True, debug=None):
         if old == target and wifi_path is None and not debug:
             return

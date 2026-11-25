@@ -1,6 +1,7 @@
 """Phone-side wireless CarPlay messages; credentials must not be logged."""
 import ipaddress
 import struct
+import time
 from .wire import Frame, ProtocolError, parse_params, encode_param
 
 
@@ -18,6 +19,47 @@ def peer_supports_wifi_configuration_request(received_message_ids):
     """
     received_message_ids = set(received_message_ids)
     return not received_message_ids or 0x5702 in received_message_ids
+
+
+def offers_wireless_carplay(sent_message_ids, received_message_ids):
+    """Return whether an identified accessory can be a wireless CarPlay head unit.
+
+    Earbuds and other accessories expose the same iAP2 accessory UUID but
+    declare only External Accessory messages. A head unit declares at least
+    one CarPlay session (0x43xx), Bluetooth/wireless CarPlay update (0x4exx)
+    or Wi-Fi sharing (0x57xx) message. Peers that omit both lists keep the
+    legacy behavior.
+    """
+    declared = set(sent_message_ids) | set(received_message_ids)
+    return not declared or any(message_id >> 8 in (0x43, 0x4e, 0x57) for message_id in declared)
+
+
+class WifiRequestWatch:
+    """Notice a head unit that leaves the Wi-Fi configuration request unanswered.
+
+    A head unit that has stopped offering wireless CarPlay to this phone
+    still authenticates over iAP2 but never answers 0x5702. Without a
+    dedicated line that state is only visible as an absence in the log.
+    """
+    def __init__(self, clock=time.monotonic, patience=10):
+        self.clock, self.patience = clock, patience
+        self.since = None
+        self.reported = False
+
+    def requested(self):
+        if self.since is None:
+            self.since = self.clock()
+
+    def answered(self):
+        self.since = None
+        self.reported = False
+
+    def overdue(self):
+        """Return True once per unanswered request, after the patience delay."""
+        if self.since is None or self.reported or self.clock() - self.since < self.patience:
+            return False
+        self.reported = True
+        return True
 
 
 class WifiConfiguration:
