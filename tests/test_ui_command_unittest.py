@@ -125,6 +125,39 @@ class UiCommandTests(unittest.TestCase):
     def test_audio_stream_is_reopened_once_when_the_head_unit_returns_audio(self):
         audio,client,peer=self.audio_return(True)
         audio.reopen.assert_called_once_with(client,peer)
+    def reopen_outcomes(self,outcomes):
+        import time
+        from types import SimpleNamespace
+        from unittest.mock import Mock,patch
+        modes={'appStates':[],'resources':[{'resourceID':i,'entity':1,'permanentEntity':1} for i in (1,2)]}
+        changed=threading.Event()
+        audio=SimpleNamespace(gain=1.0,reopen=Mock(side_effect=outcomes))
+        class Client:
+            sock=SimpleNamespace(sock=SimpleNamespace(getpeername=lambda:('192.168.3.1',7000)))
+            def request(self,method,path,body=b'',headers=None):return 200,{},b''
+        with patch('carplay_proto.videodemo.REOPEN_RETRY_SECONDS',(.05,.05,.05)):
+            feedback=ScreenFeedback(Client(),modes=modes,resume=threading.Event(),screen=Mock(),resource_changed=changed,
+                                    audio=audio,reopen_audio=True)
+            try:
+                next(r for r in modes['resources'] if r['resourceID']==2).update(entity=2)
+                changed.set()
+                end=time.monotonic()+2
+                while audio.gain!=0 and time.monotonic()<end:time.sleep(.01)
+                next(r for r in modes['resources'] if r['resourceID']==2).update(entity=1)
+                changed.set()
+                end=time.monotonic()+3
+                while audio.reopen.call_count<len(outcomes) and time.monotonic()<end:time.sleep(.01)
+                time.sleep(.3)
+                return audio,feedback.stop.is_set()
+            finally:feedback.close()
+    def test_refused_audio_reopen_is_retried_until_it_succeeds(self):
+        audio,stopped=self.reopen_outcomes([False,OSError('reset'),True])
+        self.assertEqual(audio.reopen.call_count,3)
+        self.assertFalse(stopped)
+    def test_audio_reopen_refused_every_time_ends_the_session_for_recovery(self):
+        audio,stopped=self.reopen_outcomes([False,False,False,False])
+        self.assertEqual(audio.reopen.call_count,4)
+        self.assertTrue(stopped)
     def test_audio_stream_is_left_alone_unless_the_head_unit_needs_it(self):
         audio,_,_=self.audio_return(False)
         audio.reopen.assert_not_called()

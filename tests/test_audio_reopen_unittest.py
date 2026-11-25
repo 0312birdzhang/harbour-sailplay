@@ -16,6 +16,7 @@ class FakeClient:
         self.sock = FakeTransport()
         self.requests = []
         self.setup_status = setup_status
+        self.teardown_status = 200
         self.port = port
 
     def request(self, method, path, body=b'', headers=None):
@@ -26,7 +27,7 @@ class FakeClient:
             reply = {'streams': [{'type': stream['type'], 'dataPort': self.port,
                                   'streamConnectionID': stream['streamConnectionID']}]}
             return self.setup_status, {}, plistlib.dumps(reply, fmt=plistlib.FMT_BINARY)
-        return 200, {}, b''
+        return self.teardown_status, {}, b''
 
 
 INFO = {'audioFormats': [{'type': 102, 'audioType': 'media', 'audioOutputFormats': 8388608}]}
@@ -55,13 +56,30 @@ class AudioReopenTest(unittest.TestCase):
         self.assertEqual(sender.sock.getpeername(), ('127.0.0.1', 6002))
         self.assertEqual(old_sock.fileno(), -1)
 
-    def test_rejected_setup_keeps_the_existing_stream(self):
-        client = FakeClient(setup_status=455)
+    def test_setup_refused_after_teardown_stops_sending_and_a_retry_skips_teardown(self):
+        client = FakeClient(setup_status=455, port=6004)
         sender = self.sender(client)
-        old_id, old_encoder, old_sock = sender.stream_id, sender.encoder, sender.sock
+        old_id = sender.stream_id
+        self.assertFalse(sender.torn_down)
         self.assertFalse(sender.reopen(client, ('127.0.0.1', 7000)))
+        # The receiver accepted TEARDOWN: its stream is gone whatever we keep.
+        self.assertTrue(sender.torn_down)
+        self.assertEqual([method for method, _ in client.requests], ['TEARDOWN', 'SETUP'])
+        client.setup_status = 200
+        self.assertTrue(sender.reopen(client, ('127.0.0.1', 7000)))
+        self.assertEqual([method for method, _ in client.requests], ['TEARDOWN', 'SETUP', 'SETUP'])
+        self.assertFalse(sender.torn_down)
+        self.assertNotEqual(sender.stream_id, old_id)
+        self.assertEqual(sender.sock.getpeername(), ('127.0.0.1', 6004))
+
+    def test_refused_teardown_leaves_the_old_stream_in_use(self):
+        client = FakeClient(setup_status=455)
+        client.teardown_status = 455
+        sender = self.sender(client)
+        old_id, old_sock = sender.stream_id, sender.sock
+        self.assertFalse(sender.reopen(client, ('127.0.0.1', 7000)))
+        self.assertFalse(sender.torn_down)
         self.assertEqual(sender.stream_id, old_id)
-        self.assertIs(sender.encoder, old_encoder)
         self.assertIs(sender.sock, old_sock)
 
 

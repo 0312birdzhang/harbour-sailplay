@@ -64,6 +64,7 @@ class AudioSender:
         self.control=socket.socket(tcp.family,socket.SOCK_DGRAM);self.control.bind(tuple(local))
         self.stream_id=int.from_bytes(os.urandom(7),'big') or 1
         self.encoder=AudioEncoder(shared,self.stream_id)
+        self.torn_down=False
         self.stop=threading.Event();self.thread=None;self.process=None;self.log=None
         self.gain=1.0
         self.receiver_info=info
@@ -89,14 +90,21 @@ class AudioSender:
         the resource for a phone call: RTP keeps flowing, but the sample
         clock it reports in /feedback jumps and then stays frozen. It plays
         again when given a fresh stream once it hands audio back.
+
+        Returns False when the receiver refuses the new stream. If the old one
+        was already torn down by then, nothing is sent to it any more and the
+        next call goes straight to SETUP: the caller must retry or recover.
         """
         import plistlib
         kind=102 if self.aac else 100
         headers={'Content-Type':'application/x-apple-binary-plist'}
         with self.send_lock:
-            status,_,_=client.request('TEARDOWN','/',plistlib.dumps(
-                {'streams':[{'type':kind,'streamConnectionID':self.stream_id}]},fmt=plistlib.FMT_BINARY),headers)
-            print('Audio reopen TEARDOWN status={}'.format(status),flush=True)
+            if not self.torn_down:
+                status,_,_=client.request('TEARDOWN','/',plistlib.dumps(
+                    {'streams':[{'type':kind,'streamConnectionID':self.stream_id}]},fmt=plistlib.FMT_BINARY),headers)
+                print('Audio reopen TEARDOWN status={}'.format(status),flush=True)
+                # From here the receiver has no stream for our packets.
+                self.torn_down=status==200
             stream_id=int.from_bytes(os.urandom(7),'big') or 1
             description=dict(self.description(),streamConnectionID=stream_id)
             status,_,body=client.request('SETUP','/setup',plistlib.dumps({'streams':[description]},fmt=plistlib.FMT_BINARY),headers)
@@ -108,6 +116,7 @@ class AudioSender:
             local=list(old.getsockname());local[1]=0;sock.bind(tuple(local));sock.settimeout(.5)
             dest=list(peer);dest[1]=int(response['dataPort']);sock.connect(tuple(dest))
             self.stream_id=stream_id;self.encoder=AudioEncoder(self.shared,stream_id);self.sock=sock
+            self.torn_down=False
             old.close()
             print('Audio reopen complete dataPort={} streamConnectionID={}'.format(response['dataPort'],stream_id),flush=True)
             return True
@@ -174,7 +183,8 @@ class AudioSender:
                     now=time.monotonic()
                     if deadline<now-.1:deadline=now;resets+=1
                     if self.stop.wait(max(0,deadline-now)):break
-                    with self.send_lock:self.sock.send(self.encoder.packet(chunk))
+                    with self.send_lock:
+                        if not self.torn_down:self.sock.send(self.encoder.packet(chunk))
                     sent=time.monotonic()
                     if last_send is not None:send_gap=max(send_gap,sent-last_send)
                     last_send=sent;deadline+=352/48000;count+=1
@@ -194,7 +204,8 @@ class AudioSender:
                 now=time.monotonic()
                 if deadline<now-.1:deadline=now
                 if self.stop.wait(max(0,deadline-now)):break
-                with self.send_lock:self.sock.send(self.encoder.encoded_packet(frame))
+                with self.send_lock:
+                    if not self.torn_down:self.sock.send(self.encoder.encoded_packet(frame))
                 sent=time.monotonic()
                 if previous is not None:gap=max(gap,sent-previous)
                 previous=sent;deadline+=1024/48000;count+=1

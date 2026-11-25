@@ -253,6 +253,10 @@ class UiCommands:
             os.unlink(self.path)
 
 
+# Waits before retrying a refused audio reopen; then the session is ended.
+REOPEN_RETRY_SECONDS=(1,3,6)
+
+
 class ScreenFeedback:
     """Keep control requests away from the video producer's critical path."""
     def __init__(self,client,commands=None,modes=None,resume=None,screen=None,resource_changed=None,audio=None,duck=None,mode_lock=None,mode_revision=None,reopen_audio=False):
@@ -265,6 +269,8 @@ class ScreenFeedback:
         self.audio=audio
         self.audio_entity=1
         self.reopen_audio=reopen_audio
+        self.reopen_attempts=0
+        self.reopen_at=None
         self.duck=duck if duck is not None else [1.0]
         self.mode_lock=mode_lock or threading.RLock()
         self.mode_revision=mode_revision if mode_revision is not None else [0]
@@ -318,15 +324,20 @@ class ScreenFeedback:
                                     returned=entity==1 and self.audio_entity==2
                                     self.audio_entity=entity
                                     reopen=returned and self.reopen_audio
+                        if self.audio and self.audio_entity!=1:
+                            # The head unit took audio again: a pending retry is moot.
+                            self.reopen_at=None
                         if reopen:
                             # Outside the mode lock: this is two requests to the receiver.
-                            try:self.audio.reopen(self.client,self.client.sock.sock.getpeername())
-                            except Exception as error:print('Audio reopen failed: {}: {}'.format(type(error).__name__,error),flush=True)
+                            self.reopen_attempts=0
+                            self.try_reopen()
                         if current and self.screen:self.screen.ownership(owner)
                         elif not current and self.resource_changed is not None:self.resource_changed.set()
                     elif changed:
                         raise RuntimeError('HU resource notification rejected')
                     print('Screen ownership response owner={} status={} command_status={} accepted={}'.format(owner,status,command_status,accepted),flush=True)
+                if self.reopen_at is not None and time.monotonic()>=self.reopen_at:
+                    self.try_reopen()
                 if time.monotonic()<next_feedback:
                     continue
                 status,_,body=self.client.request('POST','/feedback',headers={'User-Agent':'AirPlay/566.25.21'})
@@ -336,6 +347,29 @@ class ScreenFeedback:
                 print('Screen feedback failed: {}: {}'.format(type(error).__name__,error),flush=True)
                 self.stop.set()
                 return
+
+    def try_reopen(self):
+        """Reopen main audio; retry a refusal a few times, then end the session.
+
+        A refused SETUP after a successful TEARDOWN leaves the receiver without
+        an audio stream. Nothing else would bring one back before the next
+        ownership change, so after the last retry the media session is ended
+        and the handover reconnects with a fresh one.
+        """
+        self.reopen_at=None
+        self.reopen_attempts+=1
+        try:
+            if self.audio.reopen(self.client,self.client.sock.sock.getpeername()):
+                self.reopen_attempts=0
+                return
+            failure='SETUP refused'
+        except Exception as error:
+            failure='{}: {}'.format(type(error).__name__,error)
+        if self.reopen_attempts>len(REOPEN_RETRY_SECONDS):
+            raise RuntimeError('audio stream could not be reopened ({})'.format(failure))
+        delay=REOPEN_RETRY_SECONDS[self.reopen_attempts-1]
+        self.reopen_at=time.monotonic()+delay
+        print('Audio reopen failed attempt={} retrySeconds={} detail={}'.format(self.reopen_attempts,delay,failure),flush=True)
 
     def close(self):
         self.stop.set()
