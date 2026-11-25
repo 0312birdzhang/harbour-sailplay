@@ -106,6 +106,14 @@ Item {
     }
     Connections {
         target: carController
+        // Tapping a music app's icon selects that app's player, as its row in
+        // the player menu does, instead of showing whichever was selected.
+        onMusicAppRequested: {
+            var service = carController.musicServiceForApp(appId, player.availableServices)
+            if (service && service === player.currentService) return
+            if (service) controls.choosePlayer(service, true)
+            else controls.selectPlayerApp(appId, controls.playing)
+        }
         onPlayerPlaybackFinished: {
             if (service === player.currentService) controls.playRequestPending = false
         }
