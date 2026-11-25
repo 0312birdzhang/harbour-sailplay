@@ -1492,6 +1492,7 @@ signals:
     void playerPositionAvailable(const QString &service, const QString &trackKey, double seconds);
     void themeSettingsChanged();
     void rememberedMusicChanged();
+    void musicAppRequested(const QString &appId);
     void dashboardSettingsChanged();
     void weatherSettingsChanged();
     void artworkAvailable(const QString &key, const QUrl &localUrl);
@@ -1802,6 +1803,8 @@ private:
             ensureMusicBackend(appId);
             moveToFront(appId);
             openMusic();
+            // The view keeps its selected player; tell it which one was asked for.
+            emit musicAppRequested(musicApplicationId(appId));
             emit dockChanged();
             return;
         }
