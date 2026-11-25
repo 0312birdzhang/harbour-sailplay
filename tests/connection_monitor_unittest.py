@@ -45,6 +45,13 @@ class ConnectionMetadataTests(unittest.TestCase):
         self.assertEqual(module.public_signal('org.freedesktop.DBus', '/', 'NameOwnerChanged',
             ['net.connman', ':1.20', ':1.30'])['newOwner'], ':1.30')
 
+    def test_only_service_list_changes_of_an_adapter_count_as_churn(self):
+        self.assertTrue(module.service_churn({'interface': 'org.bluez.Adapter1', 'properties': {'UUIDs': []}}))
+        self.assertFalse(module.service_churn(
+            {'interface': 'org.bluez.Adapter1', 'properties': {'UUIDs': [], 'Powered': True}}))
+        self.assertFalse(module.service_churn({'interface': 'org.bluez.Device1', 'properties': {'UUIDs': []}}))
+        self.assertFalse(module.service_churn({'name': 'org.bluez', 'oldOwner': '', 'newOwner': ':1.5'}))
+
 
 if __name__ == '__main__':
     unittest.main()

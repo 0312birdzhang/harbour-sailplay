@@ -21,7 +21,7 @@ import fcntl
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from carplay_proto.bluezadapter import select_adapter, adapter_name, select_head_unit, previous_head_unit, remember_head_unit
 from carplay_proto.projectionpower import with_connection_power, ProfileConnectionPower
-from carplay_proto.runtime_logging import socket_endpoint
+from carplay_proto.runtime_logging import RepeatGate, socket_endpoint
 from carplay_proto.iap2link import (ACK, DETECT, EAK, RST, SYN, Decoder,
                                    Packet, encode, parse_synchronization,
                                    synchronization)
@@ -765,11 +765,17 @@ def main():
             except dbus.DBusException as error:
                 done(error)
             return False
+        service_churn = RepeatGate()
         def device_changed(interface, changed, invalidated, path=None):
             safe = {str(k): str(v) for k, v in changed.items() if k in
                     ('Powered', 'Connectable', 'Discoverable', 'Pairable', 'Alias', 'Class', 'UUIDs', 'Paired', 'Connected', 'ServicesResolved')}
-            if safe:
-                logging.info('BlueZ state change path=%s interface=%s values=%s', path, interface, safe)
+            # Another service re-registering its profiles in a loop changes only
+            # the adapter's service list and class, several times a second.
+            churn = bool(safe) and set(safe) <= {'UUIDs', 'Class'}
+            skipped = service_churn.admit((str(path), tuple(sorted(safe)))) if churn else 0
+            if safe and skipped is not None:
+                logging.info('BlueZ state change path=%s interface=%s values=%s%s', path, interface, safe,
+                             ' similarChangesNotLogged={}'.format(skipped) if skipped else '')
             if path == adapter and interface == 'org.bluez.Adapter1' and 'Powered' in changed:
                 # Re-register SDP and reapply the EIR through our systemd restart.
                 # Existing sockets/profiles cannot represent a new controller lifetime.

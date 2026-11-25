@@ -11,7 +11,7 @@ from collections import OrderedDict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from carplay_proto.networktrace import NetworkTrace, plain_value
-from carplay_proto.runtime_logging import collection_enabled, configure
+from carplay_proto.runtime_logging import RepeatGate, collection_enabled, configure
 
 PROPERTY_KEYS = {
     'org.bluez.Adapter1': {'Powered', 'Connectable', 'Discoverable', 'Pairable', 'Discovering', 'UUIDs'},
@@ -72,6 +72,12 @@ def public_signal(interface, path, member, arguments):
     return {'interface': kind, 'properties': safe} if safe else None
 
 
+def service_churn(metadata):
+    """An adapter change limited to its service list and class of device."""
+    return (metadata.get('interface') == 'org.bluez.Adapter1'
+            and set(metadata.get('properties', ())) <= {'UUIDs', 'Class'})
+
+
 def main():
     import dbus
     from dbus.mainloop.glib import DBusGMainLoop
@@ -105,6 +111,8 @@ def main():
             identities.popitem(last=False)
         return result
 
+    churn = RepeatGate()
+
     def receive(connection, message):
         if not collection_enabled():
             return
@@ -120,7 +128,12 @@ def main():
                     path, interface, member, json.dumps(metadata, sort_keys=True))
         elif kind == dbus.lowlevel.MESSAGE_TYPE_SIGNAL:
             metadata = public_signal(interface, path, member, arguments)
-            if metadata is not None:
+            skipped = 0
+            if metadata is not None and service_churn(metadata):
+                skipped = churn.admit((path, tuple(sorted(metadata['properties']))))
+            if metadata is not None and skipped is not None:
+                if skipped:
+                    metadata['similarSignalsNotLogged'] = skipped
                 logging.info('DBUS signal sender=%s path=%s interface=%s member=%s metadata=%s',
                     message.get_sender(), path, interface, member, json.dumps(metadata, sort_keys=True))
 
