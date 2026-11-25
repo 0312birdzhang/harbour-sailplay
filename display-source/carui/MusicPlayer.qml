@@ -183,23 +183,40 @@ Item {
             }
         }
     }
+    // Sized to be read and hit at a glance while driving: the application's
+    // own icon identifies the player faster than its name.
     Rectangle {
         id: playerSelector
         objectName: "playerSelector"
-        y: -70; width: parent.width; height: 54; radius: 12; color: carPalette.button
+        property int rowHeight: 84
+        y: -(height + 16); width: parent.width; height: 76; radius: 14; color: carPalette.button
         visible: !controls.compact
         z: 20
+        Image {
+            id: selectorIcon
+            objectName: "playerSelectorIcon"
+            x: 12; anchors.verticalCenter: parent.verticalCenter
+            width: 56; height: 56; fillMode: Image.PreserveAspectFit
+            property string file: carController.musicAppIcon(player.desktopEntry || carController.lastMusicApp)
+            source: file ? "file://" + file : ""
+            visible: source != ""
+        }
         Text {
-            anchors.fill: parent; anchors.margins: 12
-            text: (player.identity || carController.lastMusicName || qsTranslate("Sailplay", "Player")) + " ▾"
+            x: selectorIcon.visible ? 84 : 20; width: parent.width - x - 76; height: parent.height
+            text: player.identity || carController.lastMusicName || qsTranslate("Sailplay", "Player")
             textFormat: Text.PlainText; elide: Text.ElideRight
-            verticalAlignment: Text.AlignVCenter; font.pixelSize: 24; color: carPalette.text
+            verticalAlignment: Text.AlignVCenter; font.pixelSize: 30; color: carPalette.text
+        }
+        Silica.Icon {
+            anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
+            width: 44; height: 44; color: carPalette.text
+            source: controls.playerMenuOpen ? "image://theme/icon-m-up" : "image://theme/icon-m-down"
         }
         MouseArea { anchors.fill: parent; onClicked: controls.playerMenuOpen = !controls.playerMenuOpen }
         Rectangle {
             y: parent.height + 6; width: parent.width
-            height: Math.min(300, playerChoices.contentHeight)
-            visible: controls.playerMenuOpen; radius: 12; color: carPalette.card
+            height: Math.min(4 * playerSelector.rowHeight, playerChoices.contentHeight)
+            visible: controls.playerMenuOpen; radius: 14; color: carPalette.card
             border.color: carPalette.secondary
             ListView {
                 id: playerChoices
@@ -208,24 +225,47 @@ Item {
                 footer: Rectangle {
                     objectName: "systemPlayerChoice"
                     width: playerChoices.width
-                    height: controls.systemPlayerInstalled && !controls.systemPlayerRunning ? 64 : 0
+                    height: controls.systemPlayerInstalled && !controls.systemPlayerRunning ? playerSelector.rowHeight : 0
                     visible: height > 0
                     color: "transparent"
+                    Image {
+                        id: systemIcon
+                        x: 12; anchors.verticalCenter: parent.verticalCenter
+                        width: 60; height: 60; fillMode: Image.PreserveAspectFit
+                        property string file: carController.musicAppIcon("jolla-mediaplayer")
+                        source: file ? "file://" + file : ""
+                        visible: source != ""
+                    }
                     Text {
-                        anchors.fill: parent; anchors.margins: 12
+                        x: systemIcon.visible ? 88 : 20; width: parent.width - x - 16; height: parent.height
                         text: qsTranslate("Sailplay", "System Media")
-                        color: carPalette.text; font.pixelSize: 24; verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                        color: carPalette.text; font.pixelSize: 30; verticalAlignment: Text.AlignVCenter
                     }
                     MouseArea { anchors.fill: parent; onClicked: controls.selectPlayerApp("jolla-mediaplayer", controls.playing) }
                 }
                 delegate: Rectangle {
-                    width: playerChoices.width; height: 64
+                    width: playerChoices.width; height: playerSelector.rowHeight
                     color: modelData.service === player.currentService ? carPalette.button : "transparent"
+                    Image {
+                        id: choiceIcon
+                        x: 12; anchors.verticalCenter: parent.verticalCenter
+                        width: 60; height: 60; fillMode: Image.PreserveAspectFit
+                        property string file: carController.musicAppIcon(modelData.desktopEntry || "")
+                        source: file ? "file://" + file : ""
+                        visible: source != ""
+                    }
                     Text {
-                        anchors.fill: parent; anchors.margins: 12
-                        text: modelData.identity + (modelData.playbackStatus === Mpris.Playing ? " ▶" : "")
+                        x: choiceIcon.visible ? 88 : 20; width: parent.width - x - 72; height: parent.height
+                        text: modelData.identity
                         textFormat: Text.PlainText; elide: Text.ElideRight
-                        verticalAlignment: Text.AlignVCenter; color: carPalette.text; font.pixelSize: 24
+                        verticalAlignment: Text.AlignVCenter; color: carPalette.text; font.pixelSize: 30
+                    }
+                    Silica.Icon {
+                        anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
+                        width: 40; height: 40; color: carPalette.text
+                        source: "image://theme/icon-m-simple-play"
+                        visible: modelData.playbackStatus === Mpris.Playing
                     }
                     MouseArea { anchors.fill: parent; enabled: !controls.playRequestPending; onClicked: controls.choosePlayer(modelData.service,true) }
                 }

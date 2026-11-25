@@ -255,14 +255,14 @@ Window {
             MouseArea { anchors.fill: parent; onClicked: musicCard.openMusic() }
             Rectangle {
                 anchors.right:parent.right;anchors.rightMargin:carController.musicContentAvailable ? 196 : 16
-                y:12;z:5;width:164;height:54;radius:12;color:carPalette.button
+                y:16;z:5;width:164;height:76;radius:14;color:carPalette.button
                 visible:carController.musicActive && !!musicCard.player && !!musicCard.player.currentService
                 Text {anchors.centerIn:parent;text:qsTranslate("Sailplay","Queue");font.pixelSize:24;color:carPalette.text}
                 MouseArea {anchors.fill:parent;onClicked:musicCard.queueOpen=true}
             }
             Rectangle {
-                anchors.right: parent.right; anchors.rightMargin: 16; y: 12; z: 5
-                width: 164; height: 54; radius: 12; color: carPalette.button
+                anchors.right: parent.right; anchors.rightMargin: 16; y: 16; z: 5
+                width: 164; height: 76; radius: 14; color: carPalette.button
                 visible: carController.musicActive && carController.musicContentAvailable
                 Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Browse"); font.pixelSize: 24; color: carPalette.text }
                 MouseArea { anchors.fill: parent; onClicked: carController.browseMusic() }
@@ -273,8 +273,8 @@ Window {
                 compact: !carController.musicActive
                 width: compact || !musicCard.splitMusic ? parent.width - 64 : Math.min(820, parent.width * .48 - 48)
                 x: compact ? (parent.width - width) / 2 : 32
-                y: compact ? 20 : Math.max(86,
-                    musicCard.splitMusic ? (musicCard.height - height - musicProgress.height - 12) / 2 : 90)
+                y: compact ? 20 : Math.max(108,
+                    musicCard.splitMusic ? (musicCard.height - height - musicProgress.height - 12) / 2 : 112)
                 albumArtSource: musicCard.artwork
                 onClicked: musicCard.openMusic()
             }

@@ -849,6 +849,15 @@ public:
         const AvailableApp *a = findAvailable(lastMusicApp());
         return a ? a->name : QString();
     }
+    // Icon file of the application behind an MPRIS DesktopEntry, or nothing.
+    Q_INVOKABLE QString musicAppIcon(const QString &desktopEntry) const {
+        QString id = desktopEntry;
+        if (id.endsWith(QStringLiteral(".desktop"))) id.chop(8);
+        if (id.isEmpty() || id.contains(QLatin1Char('/'))) return QString();
+        if (const AvailableApp *app = findAvailable(musicApplicationId(id))) return app->icon;
+        QSettings desktop(QStringLiteral("/usr/share/applications/") + id + QStringLiteral(".desktop"), QSettings::IniFormat);
+        return resolveIcon(desktop.value(QStringLiteral("Desktop Entry/Icon")).toString());
+    }
     Q_INVOKABLE void rememberMusicPlayer(const QString &service) {
         if (!service.startsWith(QStringLiteral("org.mpris.MediaPlayer2."))) return;
         // DesktopEntry is optional in MPRIS. Keep the exact selection even
