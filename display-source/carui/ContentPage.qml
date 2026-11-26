@@ -16,6 +16,8 @@ Rectangle {
     // { available, playing, title, artist, canGoNext, canGoPrevious } with
     // playPause(), next() and previous().
     property var player
+    property bool canReturn: false
+    signal returnRequested()
     property var page: provider ? provider.page : ({})
     property string layout: provider && provider.layout ? provider.layout : "list"
     property var tabs: provider && provider.tabs ? provider.tabs : []
@@ -31,6 +33,10 @@ Rectangle {
 
     function plain(value) { return (value || "").replace(/[\r\n\u2028\u2029]+/g, " ") }
     function tint(colour, alpha) { return Qt.rgba(colour.r, colour.g, colour.b, alpha) }
+    function goBack() {
+        if (provider && provider.canGoBack) provider.back()
+        else if (canReturn) returnRequested()
+    }
 
     // A round touch target carrying a theme icon.
     Component {
@@ -55,10 +61,11 @@ Rectangle {
         x: root.margin; y: 14 * root.uiScale; width: root.mainWidth; height: 64 * root.uiScale
         Loader {
             id: backButton
+            objectName: "contentBack"
             sourceComponent: iconButton
-            visible: !!provider && provider.canGoBack
+            visible: (!!provider && provider.canGoBack) || root.canReturn
             width: visible ? 64 * root.uiScale : 0
-            onLoaded: { item.icon = "icon-m-back"; item.clicked.connect(function() { provider.back() }) }
+            onLoaded: { item.icon = "icon-m-back"; item.clicked.connect(root.goBack) }
         }
         Text {
             x: backButton.width + (backButton.visible ? 16 * root.uiScale : 4 * root.uiScale)

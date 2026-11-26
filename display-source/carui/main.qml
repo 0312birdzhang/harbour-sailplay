@@ -434,12 +434,15 @@ Window {
         }
     }
     ContentPage {
+        objectName: "contentPage"
         visible: carController.contentActive
         x: dock.width + 16; y: 16
         width: root.width - x - 16; height: root.height - 32
         provider: carController.content
         palette: carPalette
         player: contentPlayer
+        canReturn: carController.contentActive && carController.currentApp === carController.lastMusicApp
+        onReturnRequested: carController.openMusic()
     }
     // The player of the application being browsed, for the transport of its
     // side panel. It stays on that application's player whatever else plays.

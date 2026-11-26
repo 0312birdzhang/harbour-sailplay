@@ -55,6 +55,7 @@
 #include "contenthost.h"
 #include "musichost.h"
 #include "diagnosticslogging.h"
+#include "inputdismissal.h"
 
 static const char *kSystemConfig = "/opt/sailplay/carui-apps.conf";
 static volatile sig_atomic_t g_stopRequested = 0;
@@ -2026,6 +2027,8 @@ Q_DECL_EXPORT int main(int argc, char **argv)
     ::signal(SIGPIPE, SIG_IGN);
     inheritSystemLocale();
     QGuiApplication app(argc, argv);
+    SailplayInputDismissal inputDismissal;
+    if (!mobileSettings) app.installEventFilter(&inputDismissal);
     QTranslator uiTranslator;
     QString uiLocale = QString::fromUtf8(qgetenv("LC_ALL"));
     if (uiLocale.isEmpty()) uiLocale = QString::fromUtf8(qgetenv("LC_MESSAGES"));
