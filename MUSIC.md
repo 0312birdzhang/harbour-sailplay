@@ -121,3 +121,21 @@ Device validation parsed all six existing cached lyric entries and confirmed
 landscape/portrait video startup. The Linux unittest suite passed 217 tests.
 Actual car-side lyric appearance and the new control placement still need
 visual confirmation in a projection session.
+
+## Play queue of third-party players
+
+The Queue control previously opened for every MPRIS player and answered
+"Queue unavailable" for all but Mconnect and the system media player. It is now
+shown only when the current player has a queue provider: those two built-in
+ones, or an application declaring the SDK `queue` capability. `player-queue.py`
+then reads the rows through the `queue.read` action of a short SDK car session
+and selects one with `queue.play`, after the same unchanged-queue check and
+exclusive-play step as the built-in providers. The contract is in the SDK
+README, under "Play queue of an MPRIS player".
+
+`tests/test_player_queue_unittest.py` covers row mapping, rows without
+identity, an out-of-range current index and a stale selection. A reference
+provider was exercised on a device session bus: read, selection, refused stale
+selection and absent service. A Hutspot fork implementing the provider was then
+used on a Fiat Scudo head unit: the queue opened, a selected row played, and
+the control stayed hidden for players without a provider.

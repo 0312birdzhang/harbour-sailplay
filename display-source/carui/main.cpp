@@ -38,6 +38,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QStringList>
+#include <QHash>
 #include <QSet>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -862,6 +863,31 @@ public:
         }
         return QString();
     }
+    // An application that declares the SDK "queue" capability serves its
+    // own play queue. The lookup is cached because the queue panel polls.
+    const AvailableApp *queueProvider(const QString &service) const {
+        QString id = m_queueProviders.value(service);
+        if (id.isEmpty()) {
+            for (const AvailableApp &candidate : g_available) {
+                if (!candidate.sdk.valid || !candidate.sdk.capabilities.contains(QStringLiteral("queue"))) continue;
+                if (musicServiceForApp(candidate.id, QStringList{service}) != service) continue;
+                id = candidate.id;
+                m_queueProviders.insert(service, id);
+                break;
+            }
+        }
+        const AvailableApp *app = id.isEmpty() ? nullptr : findAvailable(id);
+        return app && app->sdk.valid && app->sdk.capabilities.contains(QStringLiteral("queue")) ? app : nullptr;
+    }
+    Q_INVOKABLE bool playerQueueSupported(const QString &service) const {
+        return service == QLatin1String("org.mpris.MediaPlayer2.harbour_mconnect")
+            || service.startsWith(QLatin1String("org.mpris.MediaPlayer2.jolla-mediaplayer"))
+            || queueProvider(service) != nullptr;
+    }
+    QStringList queueProviderArguments(const QString &service) const {
+        const AvailableApp *app = queueProvider(service);
+        return app ? QStringList{app->sdk.service, app->sdk.path} : QStringList();
+    }
     QString lastMusicApp() const {
         QSettings state(uiStatePath(), QSettings::IniFormat);
         const QString id = musicApplicationId(state.value(QStringLiteral("MusicApp")).toString());
@@ -1009,8 +1035,8 @@ public:
     }
     Q_INVOKABLE void playQueueItem(const QString &service, int index, const QString &key, const QString &revision) {
         if (index < 0 || index >= 10000 || key.size()>16384 || revision.size()!=64) return;
-        runPlayerProcess(service,{QStringLiteral("/opt/sailplay/scripts/player-queue.py"),QStringLiteral("play"),service,
-            QString::number(index),key,revision});
+        runPlayerProcess(service,QStringList{QStringLiteral("/opt/sailplay/scripts/player-queue.py"),QStringLiteral("play"),service,
+            QString::number(index),key,revision} + queueProviderArguments(service));
     }
     void runPlayerProcess(const QString &service, const QStringList &args) {
         if (!service.startsWith(QLatin1String("org.mpris.MediaPlayer2.")) || m_playPending.contains(service)) return;
@@ -1054,7 +1080,8 @@ public:
                 m_queuePending.remove(service);emit playerQueueAvailable(service,{},-1,QString(),false,true);process->deleteLater();
             }
         });
-        process->start(QStringLiteral("python3"),{QStringLiteral("/opt/sailplay/scripts/player-queue.py"),QStringLiteral("read"),service});
+        process->start(QStringLiteral("python3"),QStringList{QStringLiteral("/opt/sailplay/scripts/player-queue.py"),
+            QStringLiteral("read"),service} + queueProviderArguments(service));
         QTimer::singleShot(6000,process,[process]() {if(process->state()!=QProcess::NotRunning)process->kill();});
     }
     Q_INVOKABLE QUrl artworkSource(const QUrl &remote, const QUrl &track) {
@@ -1618,6 +1645,7 @@ private:
     QSet<QString> m_positionPending;
     QSet<QString> m_playPending;
     QSet<QString> m_queuePending;
+    mutable QHash<QString, QString> m_queueProviders;
     QSet<QString> m_lyricsPending;
     QVariantMap m_status;
     void setStatus(const QString &key, const QVariant &value)

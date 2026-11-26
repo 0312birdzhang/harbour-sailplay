@@ -52,5 +52,6 @@ QtObject {
     function requestPlayerPosition(service, key) {}
     function playerTrackId(value) { return String(value || "") }
     function requestPlayerLyrics(service, track, key) {}
+    function playerQueueSupported(service) { return true }
     function requestPlayerQueue(service) {}
 }

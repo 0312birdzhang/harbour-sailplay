@@ -15,8 +15,48 @@ def module(name,filename):
 def revision(items):
     return hashlib.sha256(json.dumps([row['key'] for row in items],ensure_ascii=False).encode()).hexdigest()
 
-def queue(bus,service,interface):
-    if service=='org.mpris.MediaPlayer2.harbour_mconnect':
+def sdk_request(provider,action,parameters,timeout=4):
+    """Run one action in a short SDK car session of a "queue" provider."""
+    import dbus
+    from dbus.mainloop.glib import DBusGMainLoop
+    from gi.repository import GLib
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+    from sailplay_sdk.client import SessionClient
+    DBusGMainLoop(set_as_default=True)
+    loop=GLib.MainLoop();outcome={}
+    def finish(result,error):
+        outcome.setdefault('value',(result,error));loop.quit()
+        return False
+    client=SessionClient(provider[0],'car',('queue',),provider[1],
+        on_ready=lambda ready:ready and client.invoke(action,dbus.Dictionary(parameters,signature='sv')),
+        on_request=lambda request,revision,result,name,message:finish(result,name),
+        on_error=lambda name,message:finish({},name or 'failed'))
+    GLib.timeout_add(int(timeout*1000),finish,{},'timeout')
+    try:
+        client.open();loop.run()
+    finally:
+        client.close()
+    result,error=outcome['value']
+    if error:raise ValueError('queue provider failed: '+error)
+    return result
+
+def sdk_queue(provider):
+    value=sdk_request(provider,'queue.read',{}).get('queue')
+    rows=None if not hasattr(value,'get') else value.get('items')
+    if not isinstance(rows,(list,tuple)) or len(rows)>10000:raise ValueError('invalid provider queue')
+    items=[]
+    for index,row in enumerate(rows):
+        if not hasattr(row,'get') or not isinstance(row.get('id'),str) or not row.get('id'):
+            raise ValueError('invalid provider song')
+        items.append({'key':str(row['id']),'title':str(row.get('title',''))[:1024],
+                      'artist':str(row.get('subtitle',''))[:1024],'index':index})
+    selected=int(value.get('index',-1))
+    return items,selected if 0<=selected<len(items) else -1
+
+def queue(bus,service,interface,provider=None):
+    if provider:
+        items,selected=sdk_queue(provider)
+    elif service=='org.mpris.MediaPlayer2.harbour_mconnect':
         lyrics=module('queue_core','player-lyrics.py')
         owner=bus.get_name_owner('org.sailfishos.Mconnect.Core')
         api=interface(bus.get_object(owner,'/org/sailfishos/Mconnect/Core'),'org.sailfishos.Mconnect.Core')
@@ -47,12 +87,15 @@ def queue(bus,service,interface):
     else:raise ValueError('unsupported queue provider')
     return {'items':items,'index':selected,'revision':revision(items),'loading':False}
 
-def play(bus,service,index,key,expected,interface):
-    before=queue(bus,service,interface)
+def play(bus,service,index,key,expected,interface,provider=None):
+    before=queue(bus,service,interface,provider)
     if before['revision']!=expected or not 0<=index<len(before['items']) or before['items'][index]['key']!=key:
         raise ValueError('queue changed; refresh required')
     def perform():
-        if service=='org.mpris.MediaPlayer2.harbour_mconnect':
+        if provider:
+            import dbus
+            sdk_request(provider,'queue.play',{'index':dbus.UInt32(index),'id':dbus.String(key)})
+        elif service=='org.mpris.MediaPlayer2.harbour_mconnect':
             api=interface(bus.get_object('org.sailfishos.Mconnect.Core','/org/sailfishos/Mconnect/Core'),'org.sailfishos.Mconnect.Core')
             api.Request('playIndex',json.dumps({'index':index}),timeout=3)
         else:
@@ -68,7 +111,11 @@ if __name__=='__main__':
     if not service.startswith('org.mpris.MediaPlayer2.'):raise ValueError('invalid player')
     try:
         bus=dbus.SessionBus()
-        result=queue(bus,service,dbus.Interface) if action=='read' else play(bus,service,int(sys.argv[3]),sys.argv[4],sys.argv[5],dbus.Interface)
+        # Sailplay appends the SDK service and path of a "queue" provider.
+        provider=tuple(sys.argv[3:5] if action=='read' else sys.argv[6:8])
+        if len(provider)!=2:provider=None
+        result=(queue(bus,service,dbus.Interface,provider) if action=='read'
+                else play(bus,service,int(sys.argv[3]),sys.argv[4],sys.argv[5],dbus.Interface,provider))
     except Exception:
         result={'ok':False,'items':[],'index':-1,'revision':'','error':True}
     print(json.dumps(result,ensure_ascii=False))

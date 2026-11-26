@@ -496,6 +496,35 @@ selection. Its normal MPRIS interface continues to handle playback controls.
 Selecting a queue row checks the index and song identity against the current
 queue before using the native player's existing selection operation.
 
+## Play queue of an MPRIS player
+
+A media application that keeps its MPRIS player can serve its own play queue
+to the Queue control of the car music view. Declare `queue;` in
+`X-Sailplay-Capabilities`, advertise the `queue` capability in `App1`, and set
+the MPRIS `DesktopEntry` property to the desktop file that carries the
+declaration. The Queue control is shown for Mconnect, the system media player
+and every player whose application declares this capability. It is hidden for
+other players.
+
+Sailplay opens a short `car` session requiring `queue` for each request, and
+closes it afterwards. Providers implement two asynchronous Session1 actions.
+
+- `queue.read` takes no parameter and completes with `{"queue": queue}`.
+  `queue` holds `items`, an array of up to 10000 dictionaries in playing
+  order, and `index`, the int32 position of the current row or -1. A row has
+  a nonempty string `id`, a `title` and a `subtitle`.
+- `queue.play` accepts a uint32 `index` and the string `id` of that row. The
+  provider checks that the row at `index` still has this `id`, fails with
+  `StaleRevision` otherwise, and completes once playback of the row has been
+  requested.
+
+Sailplay reads the queue again before every selection and sends `queue.play`
+only when the rows are unchanged. It pauses other local players first, as for
+the built-in queues. Playback controls remain on MPRIS.
+
+Python `ContentBackend` accepts `capabilities=('queue',)` so a content
+provider can add both actions to its existing backend.
+
 ### Presentation hints
 
 A provider may describe how a page is best shown in the car. The hints are
