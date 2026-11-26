@@ -8,7 +8,19 @@ Rectangle {
     readonly property var guidance: provider ? provider.guidance : ({})
     readonly property bool navigating: !!provider && provider.navigating
     readonly property bool guidanceAvailable: navigating && provider.ready && guidance.state === "active"
+    property var lastGuidance: ({})
+    readonly property bool showGuidance: guidanceAvailable || (navigating && !!provider && provider.ready && !!lastGuidance && lastGuidance.state === "active")
+    readonly property var displayGuidance: guidanceAvailable ? guidance : (showGuidance ? lastGuidance : ({}))
     readonly property var lastRoute: provider ? provider.lastRouteOverview : ({})
+    function syncLastGuidance() {
+        if (!navigating) lastGuidance = ({})
+        else if (guidanceAvailable) lastGuidance = guidance
+    }
+    onGuidanceAvailableChanged: syncLastGuidance()
+    onGuidanceChanged: syncLastGuidance()
+    onNavigatingChanged: syncLastGuidance()
+    onProviderChanged: syncLastGuidance()
+    Component.onCompleted: syncLastGuidance()
     radius: 22; color: palette.card
     clip: true
 
@@ -27,7 +39,7 @@ Rectangle {
             anchors.centerIn: parent
             width: parent.width - 32
             spacing: 6
-            visible: !card.guidanceAvailable
+            visible: !card.showGuidance
             Text {
                 objectName: "dashboardNavigationStatus"
                 width: parent.width
@@ -55,14 +67,14 @@ Rectangle {
             }
         }
         Row {
-            visible: card.guidanceAvailable
+            visible: card.showGuidance
             anchors.centerIn: parent
             width: parent.width - 32; spacing: 16
             Text {
                 objectName: "dashboardManeuver"
                 width: 100; height: 100
                 anchors.verticalCenter: parent.verticalCenter
-                text: Guidance.symbol(card.guidance.maneuver || "unknown", card.guidance.drivingSide, card.guidance.exitNumber)
+                text: Guidance.symbol(card.displayGuidance.maneuver || "unknown", card.displayGuidance.drivingSide, card.displayGuidance.exitNumber)
                 color: card.palette.text; font.pixelSize: 76
                 horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
             }
@@ -70,19 +82,19 @@ Rectangle {
                 width: parent.width - 116; spacing: 8
                 Text {
                     objectName: "dashboardNextDistance"
-                    width: parent.width; text: Guidance.distance(card.guidance.nextDistanceMeters || 0)
+                    width: parent.width; text: Guidance.distance(card.displayGuidance.nextDistanceMeters || 0)
                     color: card.palette.text; font.pixelSize: 36; font.bold: true
                 }
                 Text {
                     objectName: "dashboardNextRoad"
-                    width: parent.width; text: card.guidance.nextRoad || card.guidance.currentRoad || ""
+                    width: parent.width; text: card.displayGuidance.nextRoad || card.displayGuidance.currentRoad || ""
                     textFormat: Text.PlainText; color: card.palette.text; font.pixelSize: 26; elide: Text.ElideRight
                 }
                 Text {
                     objectName: "dashboardRemainingRoute"
                     width: parent.width
-                    text: qsTranslate("Sailplay", "%1 min").arg(Math.ceil((card.guidance.remainingSeconds || 0) / 60))
-                          + " · " + Guidance.distance(card.guidance.remainingDistanceMeters || 0)
+                    text: qsTranslate("Sailplay", "%1 min").arg(Math.ceil((card.displayGuidance.remainingSeconds || 0) / 60))
+                          + " · " + Guidance.distance(card.displayGuidance.remainingDistanceMeters || 0)
                     color: card.palette.secondary; font.pixelSize: 22; elide: Text.ElideRight
                 }
             }

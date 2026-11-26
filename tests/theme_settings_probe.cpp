@@ -318,9 +318,10 @@ static void verifyDashboardUi()
         navigation->setProperty("guidance", QVariantMap{{"state", "unavailable"}});
         controller->setProperty("dashboardWeather", QVariantMap{{"city", QString::fromUtf8("上海")},
             {"populated", true}, {"temperature", 12}, {"weatherType", "d000"}});
-        require(summary->isVisible() && status->isVisible() && lastRoute->isVisible() && !distance->isVisible()
+        require(summary->isVisible() && !status->isVisible() && distance->isVisible()
+            && distance->property("text").toString() == "370 m"
             && !weatherCity->isVisible(),
-            "temporary loss of guidance let a weather update reclaim the card");
+            "temporary loss of guidance did not keep last navigation content");
         navigation->setProperty("ready", false);
         navigation->setProperty("guidance", QVariantMap());
         require(summary->isVisible() && status->isVisible() && !weatherCity->isVisible(),

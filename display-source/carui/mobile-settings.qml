@@ -21,29 +21,91 @@ ApplicationWindow {
                        unknown: qsTranslate("Sailplay", "Unavailable") }
         return labels[state] || state
     }
+    function projectionStateText() {
+        var states = { connecting: qsTranslate("Sailplay", "Connecting"),
+                       projecting: qsTranslate("Sailplay", "Projecting"),
+                       restoring: qsTranslate("Sailplay", "Restoring Wi-Fi"),
+                       idle: qsTranslate("Sailplay", "Waiting for car") }
+        var state = states[carController.projectionConnectionState] || carController.projectionConnectionState
+        return carController.activeProjectionProtocol ? carController.activeProjectionProtocol + " — " + state
+                                                      : qsTranslate("Sailplay", "Waiting for car")
+    }
     allowedOrientations: Orientation.All
     cover: Component {
         CoverBackground {
-            Column {
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.verticalCenter: parent.verticalCenter
-                width: parent.width - 2 * Theme.paddingLarge
-                spacing: Theme.paddingMedium
-                Image {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    width: Math.min(parent.width, parent.height) * 0.62
-                    height: width
-                    fillMode: Image.PreserveAspectFit
-                    source: "file:///opt/sailplay/carui/harbour-sailplay.png"
+            id: coverPage
+
+            Image {
+                anchors {
+                    right: parent.right
+                    bottom: parent.bottom
+                    rightMargin: -width * 0.18
+                    bottomMargin: Theme.paddingLarge * 2
                 }
+                width: parent.width * 0.78
+                height: width
+                fillMode: Image.PreserveAspectFit
+                source: "file:///opt/sailplay/carui/harbour-sailplay.png"
+                opacity: 0.14
+            }
+
+            Column {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                    topMargin: Theme.paddingLarge
+                    leftMargin: Theme.paddingLarge
+                    rightMargin: Theme.paddingLarge
+                }
+                spacing: Theme.paddingSmall
+
                 Label {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: qsTranslate("Sailplay", "Car display apps")
+                    width: parent.width
+                    text: "Sailplay"
                     color: Theme.highlightColor
+                    font.pixelSize: Theme.fontSizeLarge
+                    font.family: Theme.fontFamilyHeading
+                    truncationMode: TruncationMode.Fade
+                }
+
+                Label {
+                    width: parent.width
+                    text: app.serviceStateText(carController.serviceState)
+                    color: carController.serviceRunning ? Theme.primaryColor : Theme.secondaryColor
                     font.pixelSize: Theme.fontSizeSmall
+                    truncationMode: TruncationMode.Fade
+                }
+
+                Label {
+                    width: parent.width
+                    text: app.projectionStateText()
+                    color: carController.projectionConnectionState === "projecting"
+                           ? Theme.highlightColor
+                           : Theme.secondaryColor
+                    font.pixelSize: Theme.fontSizeExtraSmall
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: 2
+                    truncationMode: TruncationMode.Fade
                 }
             }
 
+            CoverActionList {
+                id: coverActionList
+                enabled: !carController.serviceBusy
+
+                CoverAction {
+                    iconSource: "image://theme/icon-cover-refresh"
+                    onTriggered: carController.connectCar()
+                }
+
+                CoverAction {
+                    iconSource: carController.serviceRunning
+                                ? "image://theme/icon-cover-pause"
+                                : "image://theme/icon-cover-play"
+                    onTriggered: carController.setServiceRunning(!carController.serviceRunning)
+                }
+            }
         }
     }
     initialPage: Component {
@@ -97,15 +159,7 @@ ApplicationWindow {
                         width: parent.width - 2 * Theme.horizontalPageMargin
                         wrapMode: Text.WordWrap
                         color: Theme.highlightColor
-                        text: {
-                            var states = { connecting: qsTranslate("Sailplay", "Connecting"),
-                                           projecting: qsTranslate("Sailplay", "Projecting"),
-                                           restoring: qsTranslate("Sailplay", "Restoring Wi-Fi"),
-                                           idle: qsTranslate("Sailplay", "Waiting for car") }
-                            var state = states[carController.projectionConnectionState] || carController.projectionConnectionState
-                            return carController.activeProjectionProtocol ? carController.activeProjectionProtocol + " — " + state
-                                                                          : qsTranslate("Sailplay", "Waiting for car")
-                        }
+                        text: app.projectionStateText()
                     }
                     Button {
                         anchors.horizontalCenter: parent.horizontalCenter

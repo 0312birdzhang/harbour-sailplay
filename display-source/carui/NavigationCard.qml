@@ -10,6 +10,9 @@ Rectangle {
     property var guidance: provider ? provider.guidance : ({})
     readonly property bool navigating: !!provider && provider.navigating
     readonly property bool guidanceAvailable: navigating && provider.ready && guidance.state === "active"
+    property var lastGuidance: ({})
+    readonly property bool showGuidance: guidanceAvailable || (navigating && !!provider && provider.ready && !!lastGuidance && lastGuidance.state === "active")
+    readonly property var displayGuidance: guidanceAvailable ? guidance : (showGuidance ? lastGuidance : ({}))
     property bool mapMode: provider ? provider.mapAvailable : false
     property var mapState: mapMode ? provider.mapState : ({})
     property bool browserAvailable: !!provider && provider.mapBrowser.page !== undefined
@@ -26,13 +29,19 @@ Rectangle {
         var scale = Math.min(1, 1280 / Math.max(width, height))
         provider.configureMap(Math.round(width * scale), Math.round(height * scale))
     }
+    function syncLastGuidance() {
+        if (!navigating) lastGuidance = ({})
+        else if (guidanceAvailable) lastGuidance = guidance
+    }
     onWidthChanged: configureMap()
     onHeightChanged: configureMap()
     onVisibleChanged: { configureMap(); if (!visible) panelOpen = false }
-    onNavigatingChanged: if (navigating && panelOpen) { provider.mapBrowse("close"); panelOpen = false }
+    onNavigatingChanged: { syncLastGuidance(); if (navigating && panelOpen) { provider.mapBrowse("close"); panelOpen = false } }
+    onGuidanceAvailableChanged: syncLastGuidance()
+    onGuidanceChanged: syncLastGuidance()
     onMapModeChanged: configureMap()
-    onProviderChanged: configureMap()
-    Component.onCompleted: configureMap()
+    onProviderChanged: { configureMap(); syncLastGuidance() }
+    Component.onCompleted: { configureMap(); syncLastGuidance() }
 
     MapCanvas {
         id: canvas
@@ -138,8 +147,8 @@ Rectangle {
                 id: mapStatus
                 anchors.centerIn: parent
                 width: parent.width - 24
-                text: guidanceAvailable ? card.symbol(guidance.maneuver || "unknown") + "  "
-                      + card.distance(guidance.nextDistanceMeters || 0) + "  " + (guidance.nextRoad || "")
+                text: showGuidance ? card.symbol(displayGuidance.maneuver || "unknown") + "  "
+                      + card.distance(displayGuidance.nextDistanceMeters || 0) + "  " + (displayGuidance.nextRoad || "")
                       : navigating ? card.statusText()
                       : ((provider ? provider.error : "") || qsTranslate("Sailplay", "Loading map"))
                 color: palette.text
@@ -190,7 +199,7 @@ Rectangle {
             radius: 14
             color: palette.card
             opacity: 0.93
-            visible: mapMode && !compact && !panelOpen && (guidanceAvailable || (!navigating
+            visible: mapMode && !compact && !panelOpen && (showGuidance || (!navigating
                 && (!!mapState.place || !!mapState.building || !!mapState.built || !!mapState.error)))
             MouseArea { objectName: "navigationPreviewShield"; anchors.fill: parent }
             Text {
@@ -198,8 +207,8 @@ Rectangle {
                 objectName: "navigationPreviewText"
                 x: 16; y: 16
                 width: Math.max(0, parent.width - 32)
-                text: navigating ? qsTranslate("Sailplay", "%1 min").arg(Math.ceil((guidance.remainingSeconds || 0) / 60))
-                      + " · " + card.distance(guidance.remainingDistanceMeters || 0)
+                text: navigating ? qsTranslate("Sailplay", "%1 min").arg(Math.ceil((displayGuidance.remainingSeconds || 0) / 60))
+                      + " · " + card.distance(displayGuidance.remainingDistanceMeters || 0)
                       : (mapState.error || mapState.summary || mapState.place || qsTranslate("Sailplay", "Building route"))
                 color: palette.text
                 font.pixelSize: 24
@@ -278,7 +287,7 @@ Rectangle {
         return Guidance.distance(meters)
     }
     function symbol(maneuver) {
-        return Guidance.symbol(maneuver, guidance.drivingSide, guidance.exitNumber)
+        return Guidance.symbol(maneuver, displayGuidance.drivingSide, displayGuidance.exitNumber)
     }
     function statusText() {
         if (provider && provider.error) return provider.error
@@ -307,8 +316,8 @@ Rectangle {
         }
         Text {
             width: parent.width
-            visible: guidanceAvailable
-            text: card.symbol(guidance.maneuver || "unknown")
+            visible: showGuidance
+            text: card.symbol(displayGuidance.maneuver || "unknown")
             color: palette.text
             font.pixelSize: compact ? 78 : 108
             horizontalAlignment: Text.AlignHCenter
@@ -316,15 +325,15 @@ Rectangle {
         }
         Text {
             width: parent.width
-            visible: guidanceAvailable
-            text: card.distance(guidance.nextDistanceMeters || 0)
+            visible: showGuidance
+            text: card.distance(displayGuidance.nextDistanceMeters || 0)
             color: palette.text
             font.pixelSize: compact ? 34 : 44
             horizontalAlignment: Text.AlignHCenter
         }
         Text {
             width: parent.width
-            text: guidanceAvailable ? (guidance.nextRoad || guidance.currentRoad || "") : card.statusText()
+            text: showGuidance ? (displayGuidance.nextRoad || displayGuidance.currentRoad || "") : card.statusText()
             color: palette.text
             font.pixelSize: compact ? 26 : 34
             horizontalAlignment: Text.AlignHCenter
@@ -334,9 +343,9 @@ Rectangle {
         }
         Text {
             width: parent.width
-            visible: guidanceAvailable
-            text: qsTranslate("Sailplay", "%1 min").arg(Math.ceil((guidance.remainingSeconds || 0) / 60))
-                  + " · " + card.distance(guidance.remainingDistanceMeters || 0)
+            visible: showGuidance
+            text: qsTranslate("Sailplay", "%1 min").arg(Math.ceil((displayGuidance.remainingSeconds || 0) / 60))
+                  + " · " + card.distance(displayGuidance.remainingDistanceMeters || 0)
             color: palette.secondary
             font.pixelSize: compact ? 24 : 28
             horizontalAlignment: Text.AlignHCenter
