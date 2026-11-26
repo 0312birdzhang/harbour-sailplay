@@ -139,3 +139,21 @@ provider was exercised on a device session bus: read, selection, refused stale
 selection and absent service. A Hutspot fork implementing the provider was then
 used on a Fiat Scudo head unit: the queue opened, a selected row played, and
 the control stayed hidden for players without a provider.
+
+## Steering-wheel keys sent as an iAP2 HID component
+
+Some head units declare no consumer-page device in AirPlay `hidDevices` and
+send the steering-wheel media keys over the iAP2 link carried by
+`iAPSendMessage` instead. A Fiat Scudo (Marelli) lists only `TouchScreen` and
+`PhoneKeyInput` in AirPlay, identifies an iAP2 HID component
+`MediaRemoteControl` with the media playback remote function, then sends
+`StartHID` (0x6800) with a consumer-page descriptor for Play, Pause, Next and
+Previous, and one `AccessoryHIDReport` (0x6802) per press and release.
+
+The iAP2 link now passes these messages, once the accessory is authenticated,
+to the same `MediaKeys` decoder and `media-control.py` actions as AirPlay HID
+reports. `StopHID` (0x6803) forgets the component. Descriptors without media
+keys are ignored.
+
+`tests/test_wireless_probe_unittest.py` and `tests/test_media_control_unittest.py`
+replay the descriptor and reports captured from that head unit.

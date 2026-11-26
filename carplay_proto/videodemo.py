@@ -442,7 +442,19 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         # Replies go out at once from the tunnel's own thread; RTSPClient
         # serialises them with the session's other control requests.
         from .iaptunnel import IAPTunnel
-        iap_tunnel=IAPTunnel(iap_link,lambda data:send_iap(client,data))
+        # The iAP2 link can deliver StartHID before the media keys exist.
+        iap_hid_descriptors={}
+        def iap_hid(kind,component,data=b''):
+            if kind=='start':iap_hid_descriptors[component]=data
+            elif kind=='stop':iap_hid_descriptors.pop(component,None)
+            if not media:return
+            if kind=='stop':media.iap_stop(component)
+            elif kind=='start':media.iap_start(component,iap_hid_descriptors.pop(component))
+            else:
+                if component in iap_hid_descriptors:
+                    media.iap_start(component,iap_hid_descriptors.pop(component))
+                media.iap_report(component,data)
+        iap_tunnel=IAPTunnel(lambda sock,stop:iap_link(sock,stop,on_hid=iap_hid),lambda data:send_iap(client,data))
     def event_command(value):
         if vehicle_theme is not None:
             result = vehicle_theme.command(value)

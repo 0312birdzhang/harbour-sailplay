@@ -29,7 +29,8 @@ def airplay_iap_link(local_name, local_address=None):
     except Exception as error:
         print('iAP tunnel unavailable: {}'.format(type(error).__name__), flush=True)
         return None
-    return lambda sock, stop: module.airplay_link(sock, stop, local_name, local_address)
+    return lambda sock, stop, on_hid=None: module.airplay_link(sock, stop, local_name, local_address,
+                                                                on_hid=on_hid)
 
 
 def refresh_session(path, session):
