@@ -16,6 +16,7 @@ class SailplayNavigationHost : public QObject
     Q_PROPERTY(QString name READ name NOTIFY changed)
     Q_PROPERTY(bool navigating READ navigating NOTIFY changed)
     Q_PROPERTY(QVariantMap guidance READ guidance NOTIFY changed)
+    Q_PROPERTY(QVariantMap lastGuidance READ lastGuidance NOTIFY changed)
     Q_PROPERTY(QVariantMap lastRouteOverview READ lastRouteOverview NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(bool mapAvailable READ mapAvailable NOTIFY changed)
@@ -33,6 +34,7 @@ public:
     QString name() const { return m_name; }
     bool navigating() const { return m_navigating; }
     QVariantMap guidance() const { return m_guidance; }
+    QVariantMap lastGuidance() const { return m_lastGuidance; }
     QVariantMap lastRouteOverview() const { return m_lastRouteOverview; }
     QString error() const { return m_error; }
     bool mapAvailable() const { return ready() && m_session.capabilities().contains(QStringLiteral("navigation-map")); }
@@ -77,6 +79,7 @@ private:
     QImage m_mapImage;
     QVariantMap m_mapState;
     QVariantMap m_mapBrowser;
+    QVariantMap m_lastGuidance;
     QQueue<QVariantMap> m_touches;
     qulonglong m_mapRequest = 0;
     qulonglong m_touchRequest = 0;

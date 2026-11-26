@@ -355,8 +355,10 @@ void SailplayNavigationHost::receiveState()
         const QString state = value.value(QStringLiteral("state")).toString();
         m_navigating = state == QStringLiteral("active") || state == QStringLiteral("unavailable");
         if (!m_navigating) {
+            m_lastGuidance.clear();
             m_lastRouteOverview.clear();
         } else if (state == QStringLiteral("active")) {
+            m_lastGuidance = value;
             const qulonglong timestamp = value.value(QStringLiteral("updatedMs")).toULongLong();
             if (boottimeMs() - timestamp <= kGuidanceMaxAgeMs && (!value.value(QStringLiteral("destination")).toString().isEmpty()
                 || value.value(QStringLiteral("remainingDistanceMeters")).toDouble() > 0

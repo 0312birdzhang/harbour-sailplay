@@ -10,8 +10,8 @@ Rectangle {
     property var guidance: provider ? provider.guidance : ({})
     readonly property bool navigating: !!provider && provider.navigating
     readonly property bool guidanceAvailable: navigating && provider.ready && guidance.state === "active"
-    property var lastGuidance: ({})
-    readonly property bool showGuidance: guidanceAvailable || (navigating && !!provider && provider.ready && !!lastGuidance && lastGuidance.state === "active")
+    readonly property var lastGuidance: provider && provider.lastGuidance ? provider.lastGuidance : ({})
+    readonly property bool showGuidance: guidanceAvailable || (navigating && !!lastGuidance && lastGuidance.state === "active")
     readonly property var displayGuidance: guidanceAvailable ? guidance : (showGuidance ? lastGuidance : ({}))
     property bool mapMode: provider ? provider.mapAvailable : false
     property var mapState: mapMode ? provider.mapState : ({})
@@ -29,19 +29,13 @@ Rectangle {
         var scale = Math.min(1, 1280 / Math.max(width, height))
         provider.configureMap(Math.round(width * scale), Math.round(height * scale))
     }
-    function syncLastGuidance() {
-        if (!navigating) lastGuidance = ({})
-        else if (guidanceAvailable) lastGuidance = guidance
-    }
     onWidthChanged: configureMap()
     onHeightChanged: configureMap()
     onVisibleChanged: { configureMap(); if (!visible) panelOpen = false }
-    onNavigatingChanged: { syncLastGuidance(); if (navigating && panelOpen) { provider.mapBrowse("close"); panelOpen = false } }
-    onGuidanceAvailableChanged: syncLastGuidance()
-    onGuidanceChanged: syncLastGuidance()
+    onNavigatingChanged: { if (navigating && panelOpen) { provider.mapBrowse("close"); panelOpen = false } }
     onMapModeChanged: configureMap()
-    onProviderChanged: { configureMap(); syncLastGuidance() }
-    Component.onCompleted: { configureMap(); syncLastGuidance() }
+    onProviderChanged: configureMap()
+    Component.onCompleted: configureMap()
 
     MapCanvas {
         id: canvas

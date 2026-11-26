@@ -8,19 +8,10 @@ Rectangle {
     readonly property var guidance: provider ? provider.guidance : ({})
     readonly property bool navigating: !!provider && provider.navigating
     readonly property bool guidanceAvailable: navigating && provider.ready && guidance.state === "active"
-    property var lastGuidance: ({})
-    readonly property bool showGuidance: guidanceAvailable || (navigating && !!provider && provider.ready && !!lastGuidance && lastGuidance.state === "active")
+    readonly property var lastGuidance: provider && provider.lastGuidance ? provider.lastGuidance : ({})
+    readonly property bool showGuidance: guidanceAvailable || (navigating && !!lastGuidance && lastGuidance.state === "active")
     readonly property var displayGuidance: guidanceAvailable ? guidance : (showGuidance ? lastGuidance : ({}))
     readonly property var lastRoute: provider ? provider.lastRouteOverview : ({})
-    function syncLastGuidance() {
-        if (!navigating) lastGuidance = ({})
-        else if (guidanceAvailable) lastGuidance = guidance
-    }
-    onGuidanceAvailableChanged: syncLastGuidance()
-    onGuidanceChanged: syncLastGuidance()
-    onNavigatingChanged: syncLastGuidance()
-    onProviderChanged: syncLastGuidance()
-    Component.onCompleted: syncLastGuidance()
     radius: 22; color: palette.card
     clip: true
 
