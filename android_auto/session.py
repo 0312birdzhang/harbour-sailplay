@@ -7,6 +7,7 @@ from carplay_proto.vehicletheme import VehicleTheme
 from .discovery import Discovery
 from .input import InputHandler, SUPPORTED_KEYS
 from .media import AudioProducer, MediaChannel, VideoProducer
+from .navigation import NavigationBridge
 from .protobuf import Message, field
 
 
@@ -29,6 +30,8 @@ class Session:
         self.requested = set()
         self.input = None
         self.input_bound = False
+        self.navigation = None
+        self.mic_open = False
         self.video_focus = self.audio_focus = False
         self.input_focus = False
         self.running = True
@@ -46,23 +49,29 @@ class Session:
         self.discovery = Discovery(payload)
         night_sensor = next((service for service in self.discovery.services.values()
                              if service.kind == 'sensor' and 10 in service.sensors), None)
-        services = (self.discovery.video, self.discovery.audio, self.discovery.input, night_sensor)
+        services = (self.discovery.video, self.discovery.audio, self.discovery.input,
+                    night_sensor, self.discovery.navigation, self.discovery.microphone)
         for service in services:
             if service is not None:
                 self.requested.add(service.id)
                 self.send(service.id, 7, field(1, 0) + field(2, service.id))
-        logging.info('Android Auto head unit %s video=%d audio=%s input=%s', self.discovery.name,
+        logging.info('Android Auto head unit %s video=%d audio=%s input=%s nav=%s mic=%s', self.discovery.name,
                      self.discovery.video.id, self.discovery.audio.id if self.discovery.audio else None,
-                     self.discovery.input.id if self.discovery.input else None)
+                     self.discovery.input.id if self.discovery.input else None,
+                     self.discovery.navigation.id if self.discovery.navigation else None,
+                     self.discovery.microphone.id if self.discovery.microphone else None)
         notifications, self.early_notifications = self.early_notifications, []
         for packet in notifications:
             self.handle(packet)
 
     def channel_opened(self, channel, payload):
         status = Message(payload).integer(1, signed=True)
-        if channel in self.requested and self.discovery.services[channel].kind == 'sensor' and status != 0:
+        if (channel in self.requested
+                and self.discovery.services[channel].kind in ('sensor', 'navigation', 'microphone')
+                and status != 0):
             self.requested.discard(channel)
-            logging.info('Android Auto night sensor channel rejected status=%s', status)
+            logging.info('Android Auto %s channel rejected status=%s',
+                         self.discovery.services[channel].kind, status)
             return
         if channel not in self.requested or status != 0:
             raise ValueError('head unit rejected Android Auto channel open')
@@ -73,7 +82,10 @@ class Session:
         if service.kind == 'sensor':
             self.send(channel, 0x8001, field(1, 10) + field(2, 1000000))
             return
-        if service.kind in ('video', 'audio'):
+        if service.kind == 'navigation':
+            self.navigation = NavigationBridge(channel, service.min_interval_ms)
+            return
+        if service.kind in ('video', 'audio', 'microphone'):
             self.send(channel, 0x8000, field(1, service.codec))
         elif service.kind == 'input':
             keys = [code for code in SUPPORTED_KEYS if code in service.keys]
@@ -236,10 +248,24 @@ class Session:
                 self.input_bound = False
                 if self.input is not None:
                     self.input.release()
+            elif service.kind == 'navigation':
+                self.navigation = None
+            elif service.kind == 'microphone':
+                self.mic_open = False
             return
         if service.kind == 'sensor':
             if message_type == 0x8002:
                 logging.info('Android Auto night sensor subscription status=%s', Message(payload).integer(1))
+            return
+        if service.kind == 'navigation':
+            return
+        if service.kind == 'microphone':
+            if message_type == 0x8003:
+                logging.info('Android Auto microphone configured channel=%d', channel)
+            elif message_type == 0x8007:
+                self.mic_open = bool(Message(payload).integer(1, 0))
+                self.send(channel, 0x8008, field(1, 0) + field(2, 1 if self.mic_open else 0))
+                logging.info('Android Auto microphone state open=%s', self.mic_open)
             return
         if service.kind == 'input':
             if message_type == 0x8003:
@@ -296,6 +322,8 @@ class Session:
                 self.handle(packet)
             if not self.running:
                 break
+            if self.navigation is not None:
+                self.navigation.pump(self.transport)
             for media in self.media.values():
                 media.pump(self.transport)
                 if media.service.kind == 'video' and media.frames_sent and self.lease.state.get('phase') != 'projecting':
@@ -307,6 +335,8 @@ class Session:
 
     def close(self):
         self.running = False
+        if self.navigation is not None:
+            self.navigation.close(self.transport)
         errors = []
         for owned in list(self.media.values()) + [self.input, self.media_keys, self.commands, self.transport, self.vehicle_theme]:
             if owned is None:

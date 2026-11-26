@@ -36,6 +36,20 @@ class Service:
         elif message.blob(2) is not None:
             self.kind = 'sensor'
             self.sensors = [sensor.integer(1) for sensor in Message(message.blob(2)).messages(1)]
+        elif message.blob(5) is not None:
+            source = Message(message.blob(5))
+            self.codec = source.integer(1, 1)
+            self.kind = 'microphone'
+            cfg = source.blob(2)
+            if cfg is not None:
+                audio = Message(cfg)
+                rate, bits, channels = audio.integer(1, 16000), audio.integer(2, 16), audio.integer(3, 1)
+                self.configs[0] = AudioConfig(0, rate, bits, channels)
+        elif message.blob(8) is not None:
+            nav = Message(message.blob(8))
+            self.kind = 'navigation'
+            self.min_interval_ms = max(100, nav.integer(1, 1000))
+            self.nav_type = nav.integer(2, 1)
 
     def sink(self, sink):
         self.codec = sink.integer(1)
@@ -80,6 +94,8 @@ class Discovery:
         self.audio = self.choose('audio', required=False)
         self.input = self.choose('input', required=False)
         self.sensor = self.choose('sensor', required=False)
+        self.navigation = self.choose('navigation', required=False)
+        self.microphone = self.choose('microphone', required=False)
         if self.input is not None:
             # DiAuto 0.3.12 advertises full video dimensions but reports touches
             # relative to the UI after removing the negotiated video margins.

@@ -28,6 +28,11 @@ def select_head_unit(objects, configured=None, previous=None, ignored=()):
                        or authenticated_head_unit(path))]
     if len(candidates) == 1:
         return candidates[0]
+    authenticated = [path for path in candidates if authenticated_head_unit(path)]
+    if len(authenticated) == 1:
+        return authenticated[0]
+    if configured in authenticated:
+        return configured
     if configured in candidates:
         return configured
     if len(candidates) > 1:

@@ -19,7 +19,8 @@ import subprocess
 import fcntl
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from carplay_proto.bluezadapter import select_adapter, adapter_name, select_head_unit, previous_head_unit, remember_head_unit
+from carplay_proto.bluezadapter import (select_adapter, adapter_name, select_head_unit,
+                                        previous_head_unit, remember_head_unit, authenticated_head_unit)
 from carplay_proto.projectionpower import with_connection_power, ProfileConnectionPower
 from carplay_proto.runtime_logging import RepeatGate, socket_endpoint
 from carplay_proto.iap2link import (ACK, DETECT, EAK, RST, SYN, Decoder,
@@ -731,7 +732,8 @@ def main():
                              'org.freedesktop.DBus.ObjectManager').GetManagedObjects()
     adapter, args.device = select_adapter(objects, args.device)
     args.device = select_head_unit(objects, args.device, previous_head_unit())
-    if args.device and objects.get(args.device, {}).get('org.bluez.Device1', {}).get('Connected'):
+    if (args.device and authenticated_head_unit(args.device)
+            and objects.get(args.device, {}).get('org.bluez.Device1', {}).get('Connected')):
         remember_head_unit(args.device)
     adapter, args.device = select_adapter(objects, args.device)
     logging.info('using Bluetooth adapter %s, target %s', adapter, args.device)
