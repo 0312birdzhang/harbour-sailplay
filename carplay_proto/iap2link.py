@@ -78,9 +78,10 @@ class Decoder:
                 if len(self.buffer) < size:
                     break
                 raw = bytes(self.buffer[:size])
-                del self.buffer[:size]
                 if size > 9 and sum(raw[9:]) & 255:
                     self.errors += 1
+                    del self.buffer[0]
                     continue
+                del self.buffer[:size]
                 result.append(Packet(*raw[4:8], None if size == 9 else raw[9:-1]))
         return result

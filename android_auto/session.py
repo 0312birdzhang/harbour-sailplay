@@ -181,8 +181,12 @@ class Session:
         if channel == 0:
             if message_type == 6:
                 self.discover(payload)
-            elif message_type == 19 and self.discovery is not None:
-                self.audio_focus_changed(payload)
+            elif message_type == 19:
+                if self.discovery is not None:
+                    self.audio_focus_changed(payload)
+                elif len(payload) <= 16384 and len(self.early_notifications) < 16:
+                    self.early_notifications.append(packet)
+                    logging.info('Android Auto deferred audio focus notification')
             elif message_type == 13:
                 self.send(0, 14, field(1, 2))
             return
@@ -224,6 +228,7 @@ class Session:
             if media is not None:
                 media.close()
             self.opened.discard(channel)
+            self.requested.discard(channel)
             if service.kind == 'video':
                 self.exit_reason = 'peer-exit'
                 self.running = False
@@ -286,7 +291,7 @@ class Session:
             outgoing = any(media.started and len(media.sent) < media.max_unacked
                            and (media.pending or not media.producer.queue.empty())
                            for media in self.media.values())
-            packet = self.transport.receive(.001 if outgoing else .02)
+            packet = self.transport.receive(0 if outgoing else .02)
             if packet is not None:
                 self.handle(packet)
             if not self.running:

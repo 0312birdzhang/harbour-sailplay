@@ -52,7 +52,7 @@ class Credentials:
         self.ap_type = info.integer(5, 0)
         if not 1 <= len(self.ssid.encode('utf-8')) <= 32 or '\x00' in self.ssid:
             raise ValueError('invalid WPP network name')
-        if self.security not in (1, 4, 8, 12) or self.ap_type not in (0, 1):
+        if self.security not in (1, 4, 8, 12, 20, 24) or self.ap_type not in (0, 1):
             raise ValueError('unsupported WPP access point security')
         if self.security != 1 and not (8 <= len(self.password.encode('utf-8')) <= 63
                 or re.fullmatch(r'[0-9a-fA-F]{64}', self.password)):

@@ -394,8 +394,8 @@ class MediaChannel:
         message = Message(payload)
         if message.integer(1, signed=True) != self.session_id:
             return
-        count = message.integer(2)
-        if count is None or count > 4096:
+        count = message.integer(2, 1)
+        if count > 4096:
             raise ValueError('invalid Android Auto media acknowledgement')
         if count and self.sent:
             self.last_acknowledged_at = time.monotonic()

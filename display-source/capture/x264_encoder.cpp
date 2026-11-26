@@ -70,6 +70,8 @@ bool X264Encoder::init(int width, int height, int fps, int bitrate,
     m_pic = new x264_picture_t;
     if (x264_picture_alloc(m_pic, param.i_csp, width, height) < 0) {
         m_error = "x264_picture_alloc failed";
+        delete m_pic;
+        m_pic = nullptr;
         x264_encoder_close(m_enc);
         m_enc = nullptr;
         return false;

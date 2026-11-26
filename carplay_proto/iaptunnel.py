@@ -52,13 +52,19 @@ class IAPTunnel:
                 self.starts += 1
             return False
         self.starts += 1
+        if self.link_stop:
+            self.link_stop.set()
         if self.local:
+            try:
+                self.local.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
             self.local.close()
         self.local, remote = socket.socketpair()
         self.link_stop = threading.Event()
         self.link = threading.Thread(target=self._run, args=(remote, self.link_stop), daemon=True,
                                      name='iAP tunnel link {}'.format(self.starts))
-        threading.Thread(target=self._pump, args=(self.local,), daemon=True).start()
+        threading.Thread(target=self._pump, args=(self.local, self.link_stop), daemon=True).start()
         self.link.start()
         print('iAP tunnel: link started (attempt {})'.format(self.starts), flush=True)
         return True
@@ -71,15 +77,24 @@ class IAPTunnel:
         finally:
             remote.close()
 
-    def _pump(self, local):
-        while True:
+    def _pump(self, local, link_stop):
+        while not link_stop.is_set():
             try:
                 data = local.recv(4096)
             except OSError:
                 return
             if not data:
                 return
-            self.send(data)
+            try:
+                self.send(data)
+            except Exception as error:
+                print('iAP tunnel: send failed: {}'.format(type(error).__name__), flush=True)
+                link_stop.set()
+                try:
+                    local.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                return
 
     def close(self):
         with self.lock:

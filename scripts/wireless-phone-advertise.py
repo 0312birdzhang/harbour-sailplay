@@ -171,9 +171,8 @@ def main():
             run_probe(probe, ensure=advertisement.ensure)
             return 0
         advertisement.ensure()
-        result = subprocess.call([sys.executable, probe] + sys.argv[1:])
-        logging.info('CarPlay profile process exited status=%d', result)
-        return result
+        run_probe(probe, ensure=advertisement.ensure)
+        return 0
     finally:
         advertisement.close()
 

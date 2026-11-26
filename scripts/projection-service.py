@@ -65,7 +65,10 @@ def main():
                         except ProcessLookupError:
                             pass
                         except subprocess.TimeoutExpired:
-                            os.killpg(child.pid, signal.SIGKILL)
+                            try:
+                                os.killpg(child.pid, signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
                             child.wait()
                         del children[index]
                     failures[index] = 0

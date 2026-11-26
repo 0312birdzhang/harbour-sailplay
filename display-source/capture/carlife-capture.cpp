@@ -49,6 +49,11 @@ int main(int argc, char **argv)
         else if (a == "--out") outPath = argv[++i];
         else if (a == "--input") inputMode = argv[++i];
     }
+    if (fps <= 0) fps = 30;
+    if (width <= 0 || height <= 0) {
+        fprintf(stderr, "carlife-capture: invalid dimensions %dx%d\n", width, height);
+        return 1;
+    }
 
     signal(SIGINT, onSig);
     signal(SIGTERM, onSig);

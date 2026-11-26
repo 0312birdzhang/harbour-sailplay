@@ -169,9 +169,19 @@ class PinnedAccessory:
                 raise ValueError('accessory challenge signature rejected')
             if self.pending_pin:
                 path, pin = self.pending_pin
-                descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-                with os.fdopen(descriptor, 'w') as output:
-                    json.dump(pin, output)
+                temp_path = '{}.tmp.{}'.format(path, os.getpid())
+                descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                try:
+                    with os.fdopen(descriptor, 'w') as output:
+                        json.dump(pin, output)
+                        output.flush()
+                        os.fsync(output.fileno())
+                    os.link(temp_path, path)
+                finally:
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
                 self.pending_pin = None
         finally:
             if context:

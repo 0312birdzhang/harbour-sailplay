@@ -1080,6 +1080,13 @@ public:
                         emit artworkAvailable(key,QUrl::fromLocalFile(path));
                     process->deleteLater();
                 });
+            connect(process, static_cast<void(QProcess::*)(QProcess::ProcessError)>(&QProcess::error),
+                this, [this,process,key](QProcess::ProcessError err) {
+                    if (err == QProcess::FailedToStart) {
+                        m_artworkPending.remove(key);
+                        process->deleteLater();
+                    }
+                });
             process->start(QStringLiteral("python3"), {QStringLiteral("/opt/sailplay/scripts/extract-artwork.py"), track.toLocalFile(),path});
             QTimer::singleShot(5000,process,[process]() { if (process->state()!=QProcess::NotRunning) process->kill(); });
         } else {
@@ -1967,7 +1974,10 @@ private:
                 record.close();
                 record.remove();
             }
-            if (m_renderers.value(app.id) != process) return;
+            if (m_renderers.value(app.id) != process) {
+                process->deleteLater();
+                return;
+            }
             m_renderers.remove(app.id);
             m_appPids.remove(app.id);
             m_hiddenApps.remove(app.id);

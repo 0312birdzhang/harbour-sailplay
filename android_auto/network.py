@@ -45,10 +45,15 @@ def associated_network(bus, interface):
         if str(current.Get('fi.w1.wpa_supplicant1.Interface', 'State')) != 'completed':
             return None, None
         bss = str(current.Get('fi.w1.wpa_supplicant1.Interface', 'CurrentBSS'))
-        details = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', bss),
-                                    'org.freedesktop.DBus.Properties')
-        ssid = bytes(details.Get('fi.w1.wpa_supplicant1.BSS', 'SSID')).decode('utf-8')
-        bssid = ':'.join('{:02x}'.format(byte) for byte in details.Get('fi.w1.wpa_supplicant1.BSS', 'BSSID'))
+        if not bss or bss == '/':
+            return None, None
+        try:
+            details = network_interface(network_object(bus, 'fi.w1.wpa_supplicant1', bss),
+                                        'org.freedesktop.DBus.Properties')
+            ssid = bytes(details.Get('fi.w1.wpa_supplicant1.BSS', 'SSID')).decode('utf-8', errors='replace')
+            bssid = ':'.join('{:02x}'.format(byte) for byte in details.Get('fi.w1.wpa_supplicant1.BSS', 'BSSID'))
+        except Exception:
+            return None, None
         return ssid, bssid
     return None, None
 

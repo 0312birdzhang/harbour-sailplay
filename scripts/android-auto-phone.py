@@ -47,14 +47,14 @@ class Worker:
     def close(self):
         self.stop.set()
         self.close_bluetooth()
+        if self.tcp is not None:
+            try:
+                self.tcp.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
         if self.thread is not None:
             self.thread.join(30)
             if self.thread.is_alive():
-                if self.tcp is not None:
-                    try:
-                        self.tcp.shutdown(socket.SHUT_RDWR)
-                    except OSError:
-                        pass
                 raise RuntimeError('Android Auto connection worker did not stop')
 
 

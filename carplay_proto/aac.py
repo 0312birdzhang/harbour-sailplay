@@ -86,7 +86,7 @@ class AacCapture:
                 samples=array.array('h');samples.frombytes(data)
                 self.peak=max(self.peak,max(map(abs,samples),default=0))
                 gain=self.gain()
-                if gain!=1:samples=array.array('h',(int(v*gain) for v in samples))
+                if gain!=1:samples=array.array('h',(max(-32768,min(32767,int(v*gain))) for v in samples))
                 view=memoryview(samples.tobytes())
                 while view:
                     n=os.write(self.process.stdin.fileno(),view);view=view[n:]

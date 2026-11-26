@@ -98,9 +98,12 @@ class InputHandler:
                 self.release_touch()
             return
         pointer = next((point for point in pointers if point.integer(3) == self.primary), None)
-        if self.primary is not None and pointer is not None:
-            self.point(pointer)
-            self.send('T 1 {} {}'.format(self.x, self.y))
+        if self.primary is not None:
+            if pointer is None:
+                self.release_touch()
+            else:
+                self.point(pointer)
+                self.send('T 1 {} {}'.format(self.x, self.y))
 
     def key(self, code, down):
         if down not in (0, 1) or code is None:

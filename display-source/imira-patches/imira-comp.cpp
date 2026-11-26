@@ -874,8 +874,13 @@ public:
                     && ((!appKey.isEmpty() && m_content.at(i).appKey == appKey)
                         || (appKey.isEmpty() && m_content.at(i).title == title)))
                 {
+                    QQuickItem *viewport = m_content[i].item->parentItem();
                     m_content[i].item->setVisible(false);
-                    m_content[i].item->parentItem()->setVisible(false);
+                    if (viewport) {
+                        viewport->setVisible(false);
+                        viewport->setParentItem(nullptr);
+                        viewport->deleteLater();
+                    }
                     m_content.removeAt(i);
                 }
             }
@@ -985,7 +990,7 @@ public:
     {
         for (int i = m_inputPanels.size()-1; i >= 0; --i) {
             const QPointer<QWaylandSurfaceItem> panel = m_inputPanels.at(i);
-            if (!panel || !panel->isVisible()) continue;
+            if (!panel || !panel->isVisible() || !panel->surface()) continue;
             const QPointF local = panel->mapFromScene(pos);
             const QVariant mouseRegion = panel->surface()->windowProperties().value(QStringLiteral("MOUSE_REGION"));
             const bool accepts = mouseRegion.canConvert<QRegion>()
@@ -1021,8 +1026,13 @@ public:
                 // A closed/unmapped client's view can retain a black buffer.
                 // Removing only its bookkeeping entry leaves that view above
                 // the restored map, even though it can no longer receive input.
+                QQuickItem *viewport = item->parentItem();
                 item->setVisible(false);
-                item->parentItem()->setVisible(false);
+                if (viewport) {
+                    viewport->setVisible(false);
+                    viewport->setParentItem(nullptr);
+                    viewport->deleteLater();
+                }
                 m_content.removeAt(i);
             }
         }
@@ -1236,6 +1246,7 @@ public:
                             m_content[i].item->setVisible(false);
                         }
                     }
+                    m_dashboard = false;
                     m_content[target].visible = true;
                     layoutDashboard();
                     m_content[target].item->parentItem()->setVisible(true);
@@ -1814,12 +1825,18 @@ int main(int argc, char *argv[])
     shm_unlink(kShmName);
     int fd = shm_open(kShmName, O_CREAT | O_RDWR, 0644);
     if (fd < 0 || ftruncate(fd, sizeof(ShmHeader) + frameBytes) < 0) {
+        if (fd >= 0) close(fd);
         fprintf(stderr, "imira-comp: shm setup failed\n");
         return 1;
     }
     auto *shm = static_cast<uint8_t *>(
         mmap(nullptr, sizeof(ShmHeader) + frameBytes,
              PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+    close(fd);
+    if (shm == MAP_FAILED) {
+        fprintf(stderr, "imira-comp: shm mmap failed\n");
+        return 1;
+    }
     auto *hdr = reinterpret_cast<ShmHeader *>(shm);
     uint8_t *frame = shm + sizeof(ShmHeader);
     hdr->magic = kMagic;

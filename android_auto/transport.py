@@ -281,7 +281,7 @@ class Transport:
                 if len(plaintext) > 65535:
                     raise ValueError('AAP TLS plaintext exceeds fragment limit')
             if not plaintext:
-                raise ValueError('AAP fragment contains no complete TLS application record')
+                continue
             packet = self.assembler.add(fragment, bytes(plaintext))
             if packet is not None:
                 return packet

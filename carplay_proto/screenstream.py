@@ -36,8 +36,9 @@ class ScreenStream:
 
     def expect_owner(self,owner):
         # Called by the event thread: no I/O or control-socket requests here.
-        self.desired_owner=owner
-        if owner==2:self.reopen_required=True
+        with self.lock:
+            self.desired_owner=owner
+            if owner==2:self.reopen_required=True
 
     def ownership(self, owner):
         with self.lock:
@@ -80,7 +81,11 @@ class ScreenStream:
             self.video = connect(self.address, int(stream['dataPort']), self.interface).sock
             self.encoder = ScreenEncoder(self.shared, stream_id, self.packet_profile)
             self.config, self.need_idr = None, True
-            status, _, _ = self.client.request('RECORD', '/')
+            try:
+                status, _, _ = self.client.request('RECORD', '/')
+            except Exception:
+                self._close_video()
+                raise
             print('CarPlay screen resume RECORD status={}'.format(status), flush=True)
             if status != 200:
                 self._close_video()

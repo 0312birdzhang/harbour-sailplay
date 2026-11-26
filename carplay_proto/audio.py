@@ -60,10 +60,16 @@ class AudioSender:
         if not supported and not self.aac:raise ValueError('HU does not advertise PCM 48000 stereo on main audio')
         tcp=client.sock.sock
         self.sock=socket.socket(tcp.family,socket.SOCK_DGRAM)
-        local=list(tcp.getsockname());local[1]=0;self.sock.bind(tuple(local));self.sock.settimeout(.5)
-        self.control=socket.socket(tcp.family,socket.SOCK_DGRAM);self.control.bind(tuple(local))
-        self.stream_id=int.from_bytes(os.urandom(7),'big') or 1
-        self.encoder=AudioEncoder(shared,self.stream_id)
+        self.control=None
+        try:
+            local=list(tcp.getsockname());local[1]=0;self.sock.bind(tuple(local));self.sock.settimeout(.5)
+            self.control=socket.socket(tcp.family,socket.SOCK_DGRAM);self.control.bind(tuple(local))
+            self.stream_id=int.from_bytes(os.urandom(7),'big') or 1
+            self.encoder=AudioEncoder(shared,self.stream_id)
+        except Exception:
+            self.sock.close()
+            if self.control is not None:self.control.close()
+            raise
         self.torn_down=False
         self.stop=threading.Event();self.thread=None;self.process=None;self.log=None
         self.gain=1.0
@@ -113,8 +119,12 @@ class AudioSender:
             response=next(s for s in plistlib.loads(body)['streams'] if s['type']==kind)
             old=self.sock
             sock=socket.socket(old.family,socket.SOCK_DGRAM)
-            local=list(old.getsockname());local[1]=0;sock.bind(tuple(local));sock.settimeout(.5)
-            dest=list(peer);dest[1]=int(response['dataPort']);sock.connect(tuple(dest))
+            try:
+                local=list(old.getsockname());local[1]=0;sock.bind(tuple(local));sock.settimeout(.5)
+                dest=list(peer);dest[1]=int(response['dataPort']);sock.connect(tuple(dest))
+            except Exception:
+                sock.close()
+                raise
             self.stream_id=stream_id;self.encoder=AudioEncoder(self.shared,stream_id);self.sock=sock
             self.torn_down=False
             old.close()
@@ -177,7 +187,7 @@ class AudioSender:
                     capture_peak=max(capture_peak,max(map(abs,samples),default=0))
                     gain=self.gain
                     if gain!=1:
-                        samples=array.array('h',(int(sample*gain) for sample in samples))
+                        samples=array.array('h',(max(-32768,min(32767,int(sample*gain))) for sample in samples))
                         chunk=samples.tobytes()
                     peak=max(peak,max(map(abs,samples),default=0))
                     now=time.monotonic()

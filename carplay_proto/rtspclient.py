@@ -9,18 +9,26 @@ import time
 class RTSPClient:
     def __init__(self, sock):
         self.sock, self.sequence, self.buffer = sock, 0, b''
+        self._broken = False
         # Requests come from the session thread, the feedback thread and the
         # iAP2 tunnel; each request/response pair must not interleave.
         self.lock = threading.RLock()
 
     def enable_encryption(self, keys):
         from .controlcipher import ControlCipher
-        self.sock = EncryptedSocket(self.sock, ControlCipher(keys.read_key, keys.write_key), self.buffer)
-        self.buffer = b''
+        with self.lock:
+            self.sock = EncryptedSocket(self.sock, ControlCipher(keys.read_key, keys.write_key), self.buffer)
+            self.buffer = b''
 
     def request(self, method, path, body=b'', headers=None):
         with self.lock:
-            return self._request(method, path, body, headers)
+            if self._broken:
+                raise OSError('RTSP control stream desynchronized')
+            try:
+                return self._request(method, path, body, headers)
+            except Exception:
+                self._broken = True
+                raise
 
     def _request(self, method, path, body=b'', headers=None):
         # Retry receiving the SAME feedback response; never resend a request

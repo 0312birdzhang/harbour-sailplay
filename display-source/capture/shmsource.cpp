@@ -54,7 +54,7 @@ bool ShmFrameSource::start(int fps, const FrameCallback &cb)
             }
             ShmHeader hdr;
             if (read(fd, &hdr, sizeof(hdr)) != sizeof(hdr)
-                    || hdr.magic != kMagic || hdr.width == 0) {
+                    || hdr.magic != kMagic || hdr.width == 0 || hdr.height == 0) {
                 close(fd);
                 usleep(200000);
                 continue;
