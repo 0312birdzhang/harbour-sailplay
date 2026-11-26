@@ -53,9 +53,11 @@ Rectangle {
         delegate: Rectangle {
             width:list.width;height:82;radius:12
             color:index===panel.currentIndex ? panel.palette.button : "transparent"
-            Text {x:16;y:12;width:parent.width-48;color:panel.palette.text;font.pixelSize:27
+            Text {x:16;y:12;width:parent.width-48;font.pixelSize:27
+                color:index===panel.currentIndex ? panel.palette.highlightColor : panel.palette.text
                 text:(index===panel.currentIndex ? (panel.playing ? "▶ " : "• ") : "")+modelData.title;textFormat:Text.PlainText;elide:Text.ElideRight}
-            Text {x:16;y:48;width:parent.width-48;color:panel.palette.secondary;font.pixelSize:21
+            Text {x:16;y:48;width:parent.width-48;font.pixelSize:21
+                color:index===panel.currentIndex ? panel.palette.secondaryHighlightColor : panel.palette.secondary
                 text:modelData.artist;textFormat:Text.PlainText;elide:Text.ElideRight}
             MouseArea {
                 anchors.fill:parent;enabled:!panel.playingItem && !panel.failed && panel.revision.length===64

@@ -70,7 +70,7 @@ Item {
             wrapMode: Text.Wrap
             font.pixelSize: panel.expanded ? (index === panel.currentIndex ? 36 : 28) : 25
             font.bold: index === panel.currentIndex
-            color: index === panel.currentIndex ? panel.palette.text : panel.palette.secondary
+            color: index === panel.currentIndex ? panel.palette.highlightColor : panel.palette.secondary
             opacity: index === panel.currentIndex ? 1 : .65
         }
     }

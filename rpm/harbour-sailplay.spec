@@ -14,6 +14,7 @@ Requires(pre): python3-base
 Requires: python3-dbus
 Requires: python3-gobject
 Requires: sailfishsilica-qt5
+Requires: nemo-qml-plugin-configuration-qt5
 Requires: sailfish-components-media-qt5
 Requires: sailfish-components-weather-qt5
 Requires: sailjail

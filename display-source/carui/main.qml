@@ -36,6 +36,13 @@ Window {
             GradientStop { position: 1; color: carPalette.gradientBottom }
         }
     }
+    Image {
+        objectName: "ambienceBackground"
+        anchors.fill: parent
+        visible: source != "" && status === Image.Ready
+        source: carPalette.wallpaper
+        smooth: true; asynchronous: true
+    }
     Rectangle {
         id: dock
         width: Math.round(140 * root.scale) / root.scale; height: parent.height; color: carPalette.dock
@@ -84,7 +91,7 @@ Window {
         Repeater {
             model: carController.dockApps.slice(0, 3)
             Rectangle {
-                x: 25; y: 207 + index * 121; width: 90; height: 90; radius: 21; color: dockTouch.pressed ? carPalette.pressed : carPalette.card
+                x: 25; y: 207 + index * 121; width: 90; height: 90; radius: 21; color: dockTouch.pressed ? carPalette.pressed : carPalette.ambience && modelData.icon ? "transparent" : carPalette.surface
                 Image { anchors.centerIn: parent; width: 78; height: 78; fillMode: Image.PreserveAspectFit; source: modelData.icon ? "file://" + modelData.icon : ""; visible: source !== "" }
                 Text { anchors.centerIn: parent; text: modelData.icon ? "" : modelData.name.charAt(0); color: carPalette.text; font.pixelSize: 38 }
                 // The ambience glow marks the application on screen.
@@ -94,7 +101,7 @@ Window {
                         || (carController.musicActive && carController.lastMusicApp === modelData.appId))
                     anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height / 2 + 6
                     width: 52; height: 52
-                    color: carPalette.highlightColor; falloffRadius: 0.2; radius: 0.2; cache: false
+                    color: carPalette.highlightColor; backgroundColor: carPalette.glowBackgroundColor; falloffRadius: 0.2; radius: 0.2; cache: false
                 }
                 MouseArea { id: dockTouch; anchors.fill: parent; onClicked: carController.dockClicked(modelData.appId) }
             }
@@ -141,7 +148,7 @@ Window {
                         property real tileTop: (height - iconSize - labelGap - labelSize * 1.3) / 2
                         Rectangle {
                             y: parent.tileTop; anchors.horizontalCenter: parent.horizontalCenter
-                            width: parent.iconSize; height: width; radius: width * 34 / 156; color: oem ? carPalette.oem : nowPlaying ? "#e9553d" : carPalette.tile; opacity: appTouch.pressed ? 0.65 : 1
+                            width: parent.iconSize; height: width; radius: width * 34 / 156; color: oem ? carPalette.oem : nowPlaying ? "#e9553d" : carPalette.ambience && entry && entry.icon ? "transparent" : carPalette.tile; opacity: appTouch.pressed ? 0.65 : 1
                             Image { anchors.fill: parent; anchors.margins: 8; fillMode: Image.PreserveAspectFit; source: entry && entry.icon ? "file://" + entry.icon : ""; visible: !oem && source !== "" }
                             Text { anchors.centerIn: parent; visible: !oem && entry && !entry.icon; text: entry ? entry.name.charAt(0) : ""; font.pixelSize: parent.width * 76 / 156; color: carPalette.text }
                             Canvas {
@@ -208,7 +215,7 @@ Window {
             objectName: "dashboardMapCard"
             visible: !carController.musicActive
             x: 0; y: parent.verticalGap; width: parent.mapWidth + 16; height: parent.height - 2 * parent.verticalGap
-            radius: 22; color: carPalette.card
+            radius: 22; color: carPalette.surface
             Text { anchors.centerIn: parent; width: parent.width - 40; wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter; color: carPalette.secondary; font.pixelSize: 26
                 visible: !carController.dashboardMapApp
@@ -234,7 +241,7 @@ Window {
             y: carController.musicActive ? parent.verticalGap : dashboardInfoCard.y + dashboardInfoCard.height + parent.verticalGap
             width: carController.musicActive ? parent.width - 32 : parent.width - parent.mapWidth - 48
             height: parent.height - y - parent.verticalGap
-            radius: 22; color: carPalette.card
+            radius: 22; color: carPalette.surface
             property var player: lockscreenMusic.localController
             readonly property bool showLyrics: carController.showMusicLyrics
             readonly property bool splitMusic: showLyrics && carController.musicActive && width > 1000
@@ -375,12 +382,14 @@ Window {
                 }
                 Silica.Slider {
                     id: seekSlider
-                    Binding { target: seekSlider; property: "color"; when: carPalette.day; value: "transparent" }
-                    Binding { target: seekSlider; property: "backgroundColor"; when: carPalette.day; value: "transparent" }
-                    Binding { target: seekSlider; property: "highlightColor"; when: carPalette.day; value: "transparent" }
-                    Binding { target: seekSlider; property: "backgroundGlowColor"; when: carPalette.day; value: "transparent" }
+                    Binding { target: seekSlider; property: "color"; when: carPalette.flatSeekBar; value: "transparent" }
+                    Binding { target: seekSlider; property: "highlightColor"; when: !carPalette.flatSeekBar; value: carPalette.highlightColor }
+                    Binding { target: seekSlider; property: "color"; when: !carPalette.flatSeekBar; value: carPalette.highlightColor }
+                    Binding { target: seekSlider; property: "backgroundColor"; when: carPalette.flatSeekBar; value: "transparent" }
+                    Binding { target: seekSlider; property: "highlightColor"; when: carPalette.flatSeekBar; value: "transparent" }
+                    Binding { target: seekSlider; property: "backgroundGlowColor"; when: carPalette.flatSeekBar; value: "transparent" }
                     Item {
-                        anchors.fill: parent; z: 3; visible: carPalette.day
+                        anchors.fill: parent; z: 3; visible: carPalette.flatSeekBar
                         opacity: seekSlider.enabled ? 1 : 0.5
                         Rectangle {
                             id: dayTrack
@@ -388,8 +397,8 @@ Window {
                             width: Math.max(0, parent.width - seekSlider.leftMargin - seekSlider.rightMargin)
                             height: 4; radius: 2; color: carPalette.disabled
                             property real progress: Math.max(0, Math.min(1, (seekSlider.value - seekSlider.minimumValue) / Math.max(1, seekSlider.maximumValue - seekSlider.minimumValue)))
-                            Rectangle { width: parent.width * parent.progress; height: parent.height; radius: 2; color: carPalette.text }
-                            Rectangle { x: parent.width * parent.progress - width / 2; y: (parent.height - height) / 2; width: 14; height: 14; radius: 7; color: carPalette.text }
+                            Rectangle { width: parent.width * parent.progress; height: parent.height; radius: 2; color: carPalette.highlightColor }
+                            Rectangle { x: parent.width * parent.progress - width / 2; y: (parent.height - height) / 2; width: 14; height: 14; radius: 7; color: carPalette.highlightColor }
                         }
                     }
                     width: parent.width; height: carController.musicActive && musicCard.showLyrics ? 72 : 56
@@ -517,7 +526,13 @@ Window {
         Repeater {
             model: root.pageCount
             Rectangle {
-                width: 12; height: 12; radius: 6; color: index === pages.currentIndex ? carPalette.text : carPalette.inactiveDot
+                width: 12; height: 12; radius: 6; color: index === pages.currentIndex ? carPalette.highlightColor : carPalette.inactiveDot
+                Silica.GlassItem {
+                    objectName: "pageGlow_" + index
+                    visible: index === pages.currentIndex
+                    anchors.centerIn: parent; width: 44; height: 44
+                    color: carPalette.highlightColor; backgroundColor: carPalette.glowBackgroundColor; falloffRadius: 0.2; radius: 0.2; cache: false
+                }
                 MouseArea { anchors.fill: parent; anchors.margins: -12; onClicked: pages.goToPage(index) }
             }
         }
