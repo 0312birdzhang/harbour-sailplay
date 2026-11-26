@@ -37,3 +37,8 @@ WIRELESS.local.md
 *.ko
 display-source/imira-patches/imira-comp-arm
 display-source/carui/harbour-sailife.png
+*_interface.h
+*_interface.cpp
+qmake_sailplay_contracts.qrc
+qrc_*.cpp
+display-source/communication/sailplay-communication

@@ -195,6 +195,7 @@ def main():
     failures, retry_at = {}, {}
     probe_thread = None
     discovered_sockets = []
+    discovered_lock = threading.Lock()
     unavailable_probes = {}
 
     def reset_bluetooth(device):
@@ -276,10 +277,13 @@ def main():
                 if stop.is_set():
                     sock.close()
                 else:
-                    discovered_sockets.append(sock)
+                    with discovered_lock:
+                        discovered_sockets.append(sock)
 
                     def deliver():
-                        discovered_sockets.remove(sock)
+                        with discovered_lock:
+                            if sock in discovered_sockets:
+                                discovered_sockets.remove(sock)
                         return start_worker(target, sock)
 
                     GLib.idle_add(deliver)
@@ -385,7 +389,10 @@ def main():
         stop.set()
         if probe_thread is not None:
             probe_thread.join(10)
-        for sock in discovered_sockets:
+        with discovered_lock:
+            remaining_sockets = list(discovered_sockets)
+            discovered_sockets.clear()
+        for sock in remaining_sockets:
             sock.close()
         for worker in workers.values():
             try:

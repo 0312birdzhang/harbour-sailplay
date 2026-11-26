@@ -240,7 +240,10 @@ class AudioSender:
             except subprocess.TimeoutExpired:
                 os.killpg(self.process.pid,signal.SIGKILL);self.process.wait()
             if self.log is None:self.process.stderr.close()
-        self.sock.close();self.control.close()
+        with self.send_lock:
+            self.torn_down=True
+            self.sock.close()
+        self.control.close()
         if self.log:self.log.close()
 
 

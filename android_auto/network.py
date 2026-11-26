@@ -159,7 +159,10 @@ class NetworkHandover:
             self.service(target).SetProperty('IPv4.Configuration', dbus.Dictionary(
                 {'Method': dbus.String('dhcp')}, signature='sv', variant_level=1))
         if credentials.security != 1 and properties.get('State') not in ('ready', 'online'):
-            self.service(target).SetProperty('Passphrase', dbus.String(password, variant_level=1))
+            try:
+                self.service(target).SetProperty('Passphrase', dbus.String(password, variant_level=1))
+            except dbus.DBusException:
+                pass
         completed, errors = threading.Event(), []
 
         def failed(error):

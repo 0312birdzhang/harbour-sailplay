@@ -59,9 +59,15 @@ SailplayContentHost::SailplayContentHost(QObject *parent) : QObject(parent), m_s
             }
             if (page.value("version").toULongLong() != m_requestedVersion
                 || m_root.value("version").toULongLong() != m_requestedVersion) {
-                requestPage();
+                if (++m_versionRetries <= 3) {
+                    requestPage();
+                    return;
+                }
+                m_versionRetries = 0;
+                fail(translated("Content provider returned an invalid page"));
                 return;
             }
+            m_versionRetries = 0;
             const QVariantMap presentation =
                 SailplayContent::cleanPresentation(result.value(QStringLiteral("presentation")), page);
             const QVariantList incoming = withoutSide(page,
@@ -277,9 +283,17 @@ void SailplayContentHost::receivePane(const QVariantMap &result)
     }
     if (page.value("version").toULongLong() != m_requestedVersion
         || m_root.value("version").toULongLong() != m_requestedVersion) {
-        requestPane(target, 0);
+        if (++m_versionRetries <= 3) {
+            requestPane(target, 0);
+            return;
+        }
+        m_versionRetries = 0;
+        pane.clear();
+        emit changed();
+        pump();
         return;
     }
+    m_versionRetries = 0;
     const QVariantMap presentation =
         SailplayContent::cleanPresentation(result.value(QStringLiteral("presentation")), page);
     const QVariantList incoming = SailplayContent::presentedItems(page.value("items").toList(), presentation);

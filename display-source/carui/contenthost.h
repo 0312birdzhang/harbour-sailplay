@@ -106,6 +106,7 @@ private:
     Location m_location;
     qulonglong m_request = 0;
     qulonglong m_requestedVersion = 0;
+    int m_versionRetries = 0;
     uint m_offset = 0;
     bool m_pageRequest = false;
     QString m_activatedItem;
