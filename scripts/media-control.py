@@ -8,11 +8,24 @@ from pathlib import Path
 import json
 import time
 
+def is_local_player(bus, name):
+    try:
+        pid = int(bus.call_blocking('org.freedesktop.DBus', '/org/freedesktop/DBus',
+                                   'org.freedesktop.DBus', 'GetConnectionUnixProcessID',
+                                   's', (str(name),), timeout=1))
+        return Path(os.readlink('/proc/%d/exe' % pid)).name != 'mpris-proxy'
+    except (OSError, TypeError, ValueError):
+        return True
+    except Exception:
+        # A player may disappear between enumeration and the PID lookup.
+        return False
+
 def exclusive_play(bus,interface,target,perform):
     paused=[]
     try:
         for name in bus.list_names():
             if not str(name).startswith('org.mpris.MediaPlayer2.') or str(name)==target:continue
+            if not is_local_player(bus, name):continue
             obj=bus.get_object(name,'/org/mpris/MediaPlayer2')
             props=interface(obj,'org.freedesktop.DBus.Properties').GetAll('org.mpris.MediaPlayer2.Player',timeout=2)
             if str(props.get('PlaybackStatus'))=='Playing' and props.get('CanPause',False):
@@ -52,6 +65,7 @@ def control(bus,action,interface,preferred=('', ''),uri=''):
         paused=[]
         for name in bus.list_names():
             if not str(name).startswith('org.mpris.MediaPlayer2.'):continue
+            if not is_local_player(bus, name):continue
             try:
                 obj=bus.get_object(name,'/org/mpris/MediaPlayer2')
                 props=interface(obj,'org.freedesktop.DBus.Properties').GetAll('org.mpris.MediaPlayer2.Player',timeout=1)
@@ -66,6 +80,7 @@ def control(bus,action,interface,preferred=('', ''),uri=''):
     for name in bus.list_names():
         if not name.startswith('org.mpris.MediaPlayer2.'):continue
         try:
+            if not is_local_player(bus, name):continue
             obj=bus.get_object(name,'/org/mpris/MediaPlayer2')
             props=interface(obj,'org.freedesktop.DBus.Properties').GetAll('org.mpris.MediaPlayer2.Player',timeout=2)
             if not props.get('CanControl',True):continue

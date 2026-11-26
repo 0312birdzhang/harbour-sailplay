@@ -7,10 +7,12 @@ Item {
     CarPalette { id: carPalette }
     id: controls
     property alias mprisController: player
+    readonly property bool localCurrent: musicServices.indexOf(player.currentService) >= 0
+    readonly property var localController: localCurrent ? player : null
     property url albumArtSource
     property bool compact: false
-    readonly property bool playing: player.playbackStatus === Mpris.Playing
-    readonly property bool idleCard: compact && !playing && player.playbackStatus !== Mpris.Paused
+    readonly property bool playing: localCurrent && player.playbackStatus === Mpris.Playing
+    readonly property bool idleCard: compact && (!localCurrent || !playing && player.playbackStatus !== Mpris.Paused)
     readonly property real _squareSize: compact ? 72 : 88
     readonly property real coverSize: compact ? 112 : Math.min(220, width * .35)
     readonly property real headerHeight: compact ? 120 : Math.max(220, coverSize)
@@ -20,11 +22,17 @@ Item {
     property string pendingApp: ""
     property int pendingTicks: 0
     property bool pendingPlayback: true
+    readonly property var musicServices: player.availableServices.filter(function(service) {
+        return carController.isLocalMusicService(service)
+    })
+    readonly property var musicClients: player.availableClients.filter(function(client) {
+        return controls.musicServices.indexOf(client.service) >= 0
+    })
     readonly property var stoppedPlayers: {
         var apps = carController.availableApps(true)
         var result = []
         for (var i=0; i<apps.length; ++i) {
-            if (apps[i].backgroundPlayer && !carController.musicServiceForApp(apps[i].id, player.availableServices))
+            if (apps[i].backgroundPlayer && !carController.musicServiceForApp(apps[i].id, controls.musicServices))
                 result.push(apps[i])
         }
         return result
@@ -39,6 +47,7 @@ Item {
         controls.pendingTicks = 0
     }
     function choosePlayer(service, resumePlaying) {
+        if (controls.musicServices.indexOf(service) < 0) return
         cancelPendingPlayer()
         var resume = resumePlaying === true && controls.playing && player.currentService !== service
         selectedService = service
@@ -51,13 +60,14 @@ Item {
     }
     Timer {
         id: rememberTimer; interval: 150
-        onTriggered: if (player.currentService && (player.playbackStatus === Mpris.Playing || !carController.hasRememberedMusic))
+        onTriggered: if (controls.musicServices.indexOf(player.currentService) >= 0 && (player.playbackStatus === Mpris.Playing || !carController.hasRememberedMusic))
             carController.rememberMusicPlayer(player.currentService)
     }
     function resumeMusic() {
-        var service = selectedService || player.currentService || carController.preferredMusicService(player.availableServices)
+        var service = selectedService || player.currentService
+        if (controls.musicServices.indexOf(service) < 0) service = carController.preferredMusicService(controls.musicServices)
         if (service) player.currentService = service
-        if (service && (player.canPlay || carController.musicServiceForApp("jolla-mediaplayer",player.availableServices) === service)) {
+        if (service && (player.canPlay || carController.musicServiceForApp("jolla-mediaplayer",controls.musicServices) === service)) {
             controls.playRequestPending = true
             carController.playMusicPlayer(service)
             return
@@ -77,7 +87,7 @@ Item {
         id: pendingPlay; interval: 250; repeat: true
         onTriggered: {
             if (++controls.pendingTicks > 60) { stop(); controls.pendingApp = ""; return }
-            var service = carController.musicServiceForApp(controls.pendingApp, player.availableServices)
+            var service = carController.musicServiceForApp(controls.pendingApp, controls.musicServices)
             if (service) player.currentService = service
             if (service) {
                 stop(); controls.pendingApp = ""; controls.choosePlayer(service)
@@ -88,11 +98,11 @@ Item {
     Timer {
         id: selectPreferred; interval: 200
         onTriggered: {
-            if (controls.selectedService && player.availableServices.indexOf(controls.selectedService) >= 0) return
+            if (controls.selectedService && controls.musicServices.indexOf(controls.selectedService) >= 0) return
             controls.selectedService = ""
-            var service = carController.preferredMusicService(player.availableServices)
+            var service = carController.preferredMusicService(controls.musicServices)
             if (service) { player.currentService = service; return }
-            var clients = player.availableClients
+            var clients = controls.musicClients
             for (var i = 0; i < clients.length; ++i)
                 if (clients[i].playbackStatus === Mpris.Playing) { player.currentService = clients[i].service; return }
             if (clients.length) player.currentService = clients[0].service
@@ -120,7 +130,7 @@ Item {
         // the player menu does, instead of showing whichever was selected.
         onMusicAppRequested: {
             controls.cancelPendingPlayer()
-            var service = carController.musicServiceForApp(appId, player.availableServices)
+            var service = carController.musicServiceForApp(appId, controls.musicServices)
             if (service && service === player.currentService) return
             if (service) controls.choosePlayer(service, true)
             else controls.selectPlayerApp(appId, controls.playing)
@@ -133,7 +143,7 @@ Item {
         width: controls.coverSize; height: width; radius: 16; color: carPalette.button
         Image {
             anchors.fill: parent; anchors.margins: 4
-            source: controls.idleCard ? "" : controls.albumArtSource
+            source: controls.idleCard || !controls.localCurrent ? "" : controls.albumArtSource
             fillMode: Image.PreserveAspectFit
         }
         Text { anchors.centerIn: parent; text: "♫"; color: carPalette.secondary; font.pixelSize: 64; visible: controls.idleCard || !controls.albumArtSource }
@@ -144,7 +154,7 @@ Item {
             width: parent.width; color: carPalette.text; font.pixelSize: controls.compact ? 28 : 34
             elide: Text.ElideRight
             text: controls.idleCard ? qsTranslate("Sailplay", "Not Playing")
-                                  : player.metaData.title || player.identity || carController.lastMusicName
+                                  : controls.localCurrent ? player.metaData.title || player.identity || carController.lastMusicName : carController.lastMusicName
             textFormat: Text.PlainText
             wrapMode: controls.compact ? Text.NoWrap : Text.Wrap
             maximumLineCount: controls.compact ? 1 : 2
@@ -152,18 +162,18 @@ Item {
         Text {
             width: parent.width; color: carPalette.secondary; font.pixelSize: 26
             elide: Text.ElideRight
-            text: controls.playbackError || carController.musicError || (controls.idleCard ? carController.lastMusicName : (player.metaData.contributingArtist || "").toString())
+            text: controls.playbackError || carController.musicError || (controls.idleCard ? carController.lastMusicName : controls.localCurrent ? (player.metaData.contributingArtist || "").toString() : "")
             textFormat: Text.PlainText
         }
         Text {
             width: parent.width; color: carPalette.secondary; font.pixelSize: 25
             visible: !controls.compact && !!text
-            elide: Text.ElideRight; text: player.metaData.albumTitle || ""
+            elide: Text.ElideRight; text: controls.localCurrent ? player.metaData.albumTitle || "" : ""
             textFormat: Text.PlainText
         }
         Text {
             width: parent.width; color: carPalette.secondary; font.pixelSize: 22
-            elide: Text.ElideRight; text: controls.idleCard ? "" : player.identity || ""
+            elide: Text.ElideRight; text: controls.idleCard || !controls.localCurrent ? "" : player.identity || ""
             textFormat: Text.PlainText
         }
     }
@@ -176,13 +186,13 @@ Item {
                 width: controls.width / 3; height: controls._squareSize
                 Silica.IconButton {
                     anchors.centerIn: parent; width: controls._squareSize; height: width
-                    enabled: index === 0 ? (!controls.idleCard && player.canGoPrevious) : index === 2 ? (!controls.idleCard && player.canGoNext)
-                              : player.playbackStatus === Mpris.Playing ? player.canPause : !pendingPlay.running && !controls.playRequestPending
+                    enabled: index === 0 ? (controls.localCurrent && !controls.idleCard && player.canGoPrevious) : index === 2 ? (controls.localCurrent && !controls.idleCard && player.canGoNext)
+                              : controls.playing ? player.canPause : !pendingPlay.running && !controls.playRequestPending
                     opacity: enabled ? 1 : 0.35
                     icon.color: carPalette.text
                     icon.source: index === 0 ? "image://theme/icon-m-simple-previous"
                                  : index === 2 ? "image://theme/icon-m-simple-next"
-                                 : player.playbackStatus === Mpris.Playing ? "image://theme/icon-m-simple-pause"
+                                 : controls.playing ? "image://theme/icon-m-simple-pause"
                                  : "image://theme/icon-m-simple-play"
                     onClicked: {
                         if (index === 0) player.previous()
@@ -208,13 +218,13 @@ Item {
             objectName: "playerSelectorIcon"
             x: 12; anchors.verticalCenter: parent.verticalCenter
             width: 56; height: 56; fillMode: Image.PreserveAspectFit
-            property string file: carController.musicAppIcon(player.desktopEntry || carController.lastMusicApp)
+            property string file: carController.musicAppIcon((controls.localCurrent ? player.desktopEntry : "") || carController.lastMusicApp)
             source: file ? "file://" + file : ""
             visible: source != ""
         }
         Text {
             x: selectorIcon.visible ? 84 : 20; width: parent.width - x - 76; height: parent.height
-            text: player.identity || carController.lastMusicName || qsTranslate("Sailplay", "Player")
+            text: (controls.localCurrent ? player.identity : "") || carController.lastMusicName || qsTranslate("Sailplay", "Player")
             textFormat: Text.PlainText; elide: Text.ElideRight
             verticalAlignment: Text.AlignVCenter; font.pixelSize: 30; color: carPalette.text
         }
@@ -233,7 +243,7 @@ Item {
             ListView {
                 id: playerChoices
                 anchors.fill: parent; clip: true
-                model: player.availableClients
+                model: controls.musicClients
                 footer: Column {
                     width: playerChoices.width
                     Repeater {

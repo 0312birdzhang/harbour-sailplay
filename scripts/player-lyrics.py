@@ -140,7 +140,8 @@ def read(service, track):
     metadata = dbus.Interface(obj, 'org.freedesktop.DBus.Properties').Get('org.mpris.MediaPlayer2.Player', 'Metadata', timeout=1)
     if str(metadata.get('mpris:trackid', '')) != track:
         return {'lines': [], 'offsetMs': 0}
-    if service == 'org.mpris.MediaPlayer2.harbour_mconnect':
+    mconnect = re.fullmatch(r'org\.mpris\.MediaPlayer2\.harbour_mconnect(?:\.instance\d+)?', service) is not None
+    if mconnect:
         try:
             # Never activate another application merely to look for lyrics.
             owner = bus.get_name_owner('org.sailfishos.Mconnect.Core')
@@ -150,7 +151,7 @@ def read(service, track):
         except Exception:
             pass  # Older Mconnect releases still use the read-only cache path.
     text, offset = str(metadata.get('xesam:asText', '')), 0
-    if not text and service == 'org.mpris.MediaPlayer2.harbour_mconnect':
+    if not text and mconnect:
         text, offset = cached(track, Path.home()/'.local/share/harbour-mconnect/mconnect.sqlite')
     text = lyric_text(text)
     lines = parse(text)

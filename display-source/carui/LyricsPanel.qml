@@ -14,6 +14,9 @@ Item {
     property bool requested: false
     property int offsetMs: 0
     property int currentIndex: -1
+    readonly property int compactStart: Math.max(0, Math.min(currentIndex - 1, lines.length - 4))
+    readonly property var compactLines: lines.slice(compactStart, compactStart + 4)
+    readonly property real compactRowHeight: Math.min(44, Math.max(0, (height - 24) / 4))
     clip: true
     onTrackKeyChanged: { lines = []; plainText = ""; currentIndex = -1; requested = false; load() }
     onPositionSecondsChanged: update()
@@ -49,7 +52,7 @@ Item {
         id: timedLines
         objectName: "timedLyrics"
         anchors.fill: parent
-        visible: panel.lines.length > 0
+        visible: panel.expanded && panel.lines.length > 0
         model: panel.lines
         currentIndex: panel.currentIndex
         interactive: false
@@ -71,9 +74,33 @@ Item {
             opacity: index === panel.currentIndex ? 1 : .65
         }
     }
+    Column {
+        objectName: "compactLyrics"
+        width: parent.width
+        height: compactRows.count * panel.compactRowHeight
+        anchors.verticalCenter: parent.verticalCenter
+        visible: !panel.expanded && panel.lines.length > 0
+        Repeater {
+            id: compactRows
+            model: panel.compactLines
+            Text {
+                objectName: "compactLyricLine_" + index
+                width: panel.width; height: panel.compactRowHeight
+                text: String(modelData[1]).replace(/\s*\n\s*/g, " ")
+                textFormat: Text.PlainText
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+                font.pixelSize: Math.min(25, panel.compactRowHeight * .8)
+                font.bold: panel.compactStart + index === panel.currentIndex
+                color: font.bold ? panel.palette.text : panel.palette.secondary
+                opacity: font.bold ? 1 : .65
+            }
+        }
+    }
     Flickable {
         anchors.fill: parent
-        visible: !panel.lines.length && !!panel.plainText
+        visible: panel.expanded && !panel.lines.length && !!panel.plainText
         contentHeight: plainLyrics.height
         Text {
             id: plainLyrics
@@ -82,6 +109,17 @@ Item {
             wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter
             font.pixelSize: panel.expanded ? 30 : 25; color: panel.palette.text
         }
+    }
+    Text {
+        objectName: "compactPlainLyrics"
+        width: parent.width
+        anchors.verticalCenter: parent.verticalCenter
+        visible: !panel.expanded && !panel.lines.length && !!panel.plainText
+        text: panel.plainText; textFormat: Text.PlainText
+        wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideRight
+        horizontalAlignment: Text.AlignHCenter
+        font.pixelSize: Math.min(25, panel.compactRowHeight * .8)
+        color: panel.palette.text
     }
     Text {
         anchors.centerIn: parent; width: parent.width

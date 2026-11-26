@@ -11,7 +11,7 @@ root = Path(__file__).resolve().parents[1]
 
 with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as directory:
     temp = Path(directory)
-    for name in ['MusicPlayer.qml', 'CarPalette.qml', 'ContentPage.qml', 'ContentPane.qml']:
+    for name in ['MusicPlayer.qml', 'CarPalette.qml', 'ContentPage.qml', 'ContentPane.qml', 'LyricsPanel.qml']:
         shutil.copyfile(root / 'display-source/carui' / name, temp / name)
     silica = temp / 'Sailfish/Silica'
     amber = temp / 'Amber/Mpris'
@@ -29,8 +29,8 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
     QtObject {
      property bool singleService: true
      property string currentService: "org.mpris.MediaPlayer2.b"
-     property var availableServices: ["org.mpris.MediaPlayer2.b"]
-     property var availableClients: []
+     property var availableServices: ["org.mpris.MediaPlayer2.BIRD_PC", "org.mpris.MediaPlayer2.b"]
+     property var availableClients: [{service:"org.mpris.MediaPlayer2.BIRD_PC", identity:"BIRD-PC", playbackStatus:1}]
      property int playbackStatus: 2
      property bool canPlay: true
      property bool canPause: true
@@ -59,11 +59,12 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
       function availableApps(all) { return [{id:"a",name:"Mconnect",icon:"",backgroundPlayer:true}, {id:"b",name:"Media",icon:"",backgroundPlayer:true}] }
       function ensureMusicBackend(app) { activatedApp = app || ""; return true }
       function musicAppIcon(app) { return "" }
+      function isLocalMusicService(service) { return service !== "org.mpris.MediaPlayer2.BIRD_PC" }
       function musicServiceForApp(app, services) {
        var service = "org.mpris.MediaPlayer2."+app
        return app === "a" && !aReady || services.indexOf(service) < 0 ? "" : service
       }
-      function preferredMusicService(services) { return "org.mpris.MediaPlayer2.b" }
+      function preferredMusicService(services) { return services.indexOf("org.mpris.MediaPlayer2.b") >= 0 ? "org.mpris.MediaPlayer2.b" : "" }
       function rememberMusicPlayer(service) {}
       function playMusicPlayer(service) {}
      }
@@ -77,6 +78,9 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
         Qt.quit(); return
        }
        if (stage === 3) {
+        if (music.musicServices.indexOf("org.mpris.MediaPlayer2.BIRD_PC") >= 0 || music.musicClients.length) {
+         console.log("MUSIC_SELECTION_FAIL remote proxy retained"); Qt.quit(); return
+        }
         carController.aReady = false
         music.playerMenuOpen = true
         stage++; return
@@ -108,7 +112,15 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
         if (music.mprisController.currentService !== "org.mpris.MediaPlayer2.a" || music.stoppedPlayers.length !== 0) {
          console.log("MUSIC_SELECTION_FAIL relaunched player not selected"); Qt.quit(); return
         }
-        console.log("MUSIC_SELECTION_PASS current other-running menu stopped-player-relaunch"); Qt.quit(); return
+        music.mprisController.availableServices = ["org.mpris.MediaPlayer2.BIRD_PC"]
+        music.mprisController.currentService = "org.mpris.MediaPlayer2.BIRD_PC"
+        stage++; return
+       }
+       if (stage === 6) {
+        if (music.localCurrent || music.localController || music.musicClients.length) {
+         console.log("MUSIC_SELECTION_FAIL proxy exposed without local player"); Qt.quit(); return
+        }
+        console.log("MUSIC_SELECTION_PASS current other-running menu stopped-player-relaunch proxy-filter"); Qt.quit(); return
        }
        carController.aReady = false
        if (stage === 1) music.mprisController.currentService = "org.mpris.MediaPlayer2.c"
@@ -140,6 +152,13 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
     assert result.returncode==0
     assert 'MUSIC_SELECTION_PASS' in output
     assert 'MUSIC_SELECTION_FAIL' not in output
+    assert not any(error in output for error in ('ReferenceError', 'TypeError', 'Cannot assign', 'is not a type'))
+    shutil.copyfile(root / 'tests/lyrics_compact_integration.qml', temp / 'lyrics.qml')
+    result = subprocess.run([str(temp/'runner'),str(temp/'lyrics.qml')],env=dict(os.environ,QT_QPA_PLATFORM='offscreen',QML2_IMPORT_PATH=str(temp)),text=True,capture_output=True,timeout=15)
+    output = result.stdout + result.stderr
+    print(output)
+    assert result.returncode == 0 and 'LYRICS_COMPACT_PASS' in output
+    assert 'LYRICS_COMPACT_FAIL' not in output
     assert not any(error in output for error in ('ReferenceError', 'TypeError', 'Cannot assign', 'is not a type'))
     shutil.copyfile(root / 'tests/content_controls_integration.qml', temp / 'content.qml')
     result = subprocess.run([str(temp/'runner'),str(temp/'content.qml')],env=dict(os.environ,QT_QPA_PLATFORM='offscreen',QML2_IMPORT_PATH=str(temp)),text=True,capture_output=True,timeout=15)

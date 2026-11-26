@@ -235,7 +235,7 @@ Window {
             width: carController.musicActive ? parent.width - 32 : parent.width - parent.mapWidth - 48
             height: parent.height - y - parent.verticalGap
             radius: 22; color: carPalette.card
-            property var player: lockscreenMusic.mprisController
+            property var player: lockscreenMusic.localController
             property bool splitMusic: carController.musicActive && width > 1000
             property bool queueOpen: false
             property string artworkKey: player ? String(player.metaData.artUrl || player.metaData.url || "") : ""
@@ -285,7 +285,7 @@ Window {
                 x: lockscreenMusic.x; width: lockscreenMusic.width; height: carController.musicActive ? 100 : 72
                 y: lockscreenMusic.y + lockscreenMusic.height + 4
                 visible: lockscreenMusic.visible && !lockscreenMusic.idleCard
-                property var player: lockscreenMusic.mprisController
+                property var player: lockscreenMusic.localController
                 // Amber metadata duration is milliseconds; queried MPRIS Position is microseconds.
                 property bool nativeSystemTrack: !!player && carController.playerTrackId(player.metaData.trackId).indexOf("/com/jolla/mediaplayer/track/") === 0
                 // The stock AudioPlayer publishes Grilo's seconds as Amber
@@ -406,7 +406,7 @@ Window {
                 expanded: carController.musicActive
                 x: musicCard.splitMusic ? musicCard.width * .52 : lockscreenMusic.x
                 width: musicCard.splitMusic ? musicCard.width - x - 32 : lockscreenMusic.width
-                y: musicCard.splitMusic ? 90 : musicProgress.y + musicProgress.height + 8
+                y: musicCard.splitMusic ? 90 : musicProgress.y + musicProgress.height + (expanded ? 8 : 24)
                 height: Math.max(0, musicCard.height - y - 24)
             }
             Text {

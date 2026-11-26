@@ -6,11 +6,26 @@ import tempfile
 import unittest
 import json
 import base64
+import types
 from unittest import mock
 spec=importlib.util.spec_from_file_location('lyrics',Path(__file__).parents[1]/'scripts/player-lyrics.py')
 lyrics=importlib.util.module_from_spec(spec);spec.loader.exec_module(lyrics)
 
 class LyricsTests(unittest.TestCase):
+    def test_mconnect_cache_accepts_amber_instance_service(self):
+        properties = types.SimpleNamespace(Get=lambda *a, **kw: {'mpris:trackid': '/test/track'})
+        bus = types.SimpleNamespace(get_object=lambda *a: object(),
+                                   get_name_owner=mock.Mock(side_effect=RuntimeError('core is not running')))
+        dbus = types.SimpleNamespace(SessionBus=lambda: bus, Interface=lambda *a: properties)
+        with mock.patch.dict('sys.modules', dbus=dbus), mock.patch.object(lyrics, 'cached', return_value=('[00:02]cached', 0)) as cache:
+            for suffix in ('', '.instance123'):
+                result = lyrics.read('org.mpris.MediaPlayer2.harbour_mconnect'+suffix, '/test/track')
+                self.assertEqual(result['lines'], [[2.0, 'cached']])
+            self.assertEqual(cache.call_count, 2)
+            cache.reset_mock()
+            lyrics.read('org.mpris.MediaPlayer2.harbour_mconnect_other', '/test/track')
+            cache.assert_not_called()
+
     def test_live_lyrics_work_when_sqlite_extension_is_not_installed(self):
         with mock.patch.dict('sys.modules', {'sqlite3': None}):
             module = importlib.util.module_from_spec(spec)

@@ -820,15 +820,24 @@ public:
         QSettings state(uiStatePath(), QSettings::IniFormat);
         return !musicApplicationId(state.value(QStringLiteral("MusicApp")).toString()).isEmpty();
     }
+    Q_INVOKABLE bool isLocalMusicService(const QString &service) const {
+        if (!service.startsWith(QStringLiteral("org.mpris.MediaPlayer2."))) return false;
+        const auto pid = QDBusConnection::sessionBus().interface()->servicePid(service);
+        if (!pid.isValid()) return false;
+        // BlueZ exports remote Bluetooth devices as MPRIS players, using
+        // their host names as Identity. They are not phone music apps.
+        const QString executable = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pid.value())).symLinkTarget();
+        return QFileInfo(executable).fileName() != QLatin1String("mpris-proxy");
+    }
     Q_INVOKABLE QString preferredMusicService(const QStringList &services) const {
         QSettings state(uiStatePath(), QSettings::IniFormat);
         const QString selected = state.value(QStringLiteral("MusicService")).toString();
-        if (services.contains(selected)) return selected;
+        if (services.contains(selected) && isLocalMusicService(selected)) return selected;
         return musicServiceForApp(lastMusicApp(), services);
     }
     Q_INVOKABLE QString musicServiceForApp(const QString &appId, const QStringList &services) const {
         for (const QString &service : services) {
-            if (!service.startsWith(QStringLiteral("org.mpris.MediaPlayer2."))) continue;
+            if (!isLocalMusicService(service)) continue;
             QDBusMessage get = QDBusMessage::createMethodCall(service, QStringLiteral("/org/mpris/MediaPlayer2"),
                 QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
             get << QStringLiteral("org.mpris.MediaPlayer2") << QStringLiteral("DesktopEntry");
@@ -859,7 +868,7 @@ public:
         return resolveIcon(desktop.value(QStringLiteral("Desktop Entry/Icon")).toString());
     }
     Q_INVOKABLE void rememberMusicPlayer(const QString &service) {
-        if (!service.startsWith(QStringLiteral("org.mpris.MediaPlayer2."))) return;
+        if (!isLocalMusicService(service)) return;
         // DesktopEntry is optional in MPRIS. Keep the exact selection even
         // for players that cannot be mapped to a launchable desktop file.
         QSettings selection(uiStatePath(), QSettings::IniFormat);

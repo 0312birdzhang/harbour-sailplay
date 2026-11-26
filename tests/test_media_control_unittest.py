@@ -10,6 +10,26 @@ spec=importlib.util.spec_from_file_location('media_control',Path(__file__).resol
 control=importlib.util.module_from_spec(spec);spec.loader.exec_module(control)
 DESCRIPTOR=bytes.fromhex('050c0901a10115002506050c0a00000ab0000ab1000ab5000ab6000ab9000abc00750895018100c0')
 class MediaTests(unittest.TestCase):
+    def test_bluetooth_proxy_is_not_resumed_selected_or_paused(self):
+        remote = 'org.mpris.MediaPlayer2.BIRD_PC'
+        local = 'org.mpris.MediaPlayer2.music'
+        bus = Mock()
+        bus.list_names.return_value = [remote, local]
+        bus.call_blocking.side_effect = lambda *args, **kwargs: 123 if args[5][0] == remote else 456
+        bus.get_object.side_effect = lambda name, path: name
+        players = {name: Mock() for name in [remote, local]}
+        def interface(obj, name):
+            if name == 'org.freedesktop.DBus.Properties':
+                return SimpleNamespace(GetAll=lambda *a, **k: {'PlaybackStatus': 'Playing', 'CanPlay': True, 'CanPause': True})
+            return players[obj]
+        with patch.object(control.os, 'readlink', side_effect=lambda path: '/usr/bin/mpris-proxy' if '/123/' in path else '/usr/bin/player'):
+            self.assertEqual(control.control(bus, 'ResumePreferred', interface, (remote, '')), 'no eligible player')
+            self.assertIn(local, control.control(bus, 'ResumePreferred', interface))
+            self.assertIn(local, control.control(bus, 'PausePlaying', interface))
+        players[remote].Play.assert_not_called()
+        players[remote].Pause.assert_not_called()
+        players[local].Play.assert_called_once()
+
     def test_disconnect_pauses_all_playing_players_despite_stale_selection(self):
         names=['org.mpris.MediaPlayer2.music','org.mpris.MediaPlayer2.system','org.mpris.MediaPlayer2.paused']
         bus=Mock();bus.list_names.return_value=names;bus.get_object.side_effect=lambda name,path:name
