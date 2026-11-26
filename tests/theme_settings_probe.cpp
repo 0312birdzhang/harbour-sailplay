@@ -223,15 +223,9 @@ static void verifyDashboardUi()
     auto *map = findItem(window->contentItem(), "dashboardMapCard");
     auto *summary = findItem(window->contentItem(), "dashboardNavigationSummary");
     auto *placeholder = findItem(window->contentItem(), "dashboardWeatherPlaceholder");
-    auto *lyrics = findItem(window->contentItem(), "musicLyrics");
-    auto *timedLyrics = findItem(window->contentItem(), "timedLyrics");
     auto *controls = findItem(window->contentItem(), "musicControls");
-    require(dashboard && info && music && map && summary && placeholder && lyrics && timedLyrics && controls,
+    require(dashboard && info && music && map && summary && placeholder && controls,
         "dashboard slots missing");
-    // Keep live phone player metadata from replacing the fixture's timed lyrics.
-    require(QQmlProperty(lyrics, "player").write(QVariant::fromValue<QObject *>(nullptr))
-        && QQmlProperty(lyrics, "trackKey").write(QStringLiteral("dashboard-lyrics-test")),
-        "lyrics fixture bindings could not be isolated");
     const auto bounds = [&](QQuickItem *item) {
         return item->mapRectToItem(dashboard, QRectF(0, 0, item->width(), item->height()));
     };
@@ -250,27 +244,41 @@ static void verifyDashboardUi()
         window->resize(size);
         QTest::qWait(30);
         verifyLayout();
+        auto *lyrics = findItem(window->contentItem(), "musicLyrics");
+        require(lyrics && QQmlProperty(lyrics, "player").write(QVariant::fromValue<QObject *>(nullptr))
+            && QQmlProperty(lyrics, "trackKey").write(QStringLiteral("dashboard-lyrics-test")),
+            "lyrics fixture bindings could not be isolated");
         QVariantList lines;
         for (int index = 0; index < 10; ++index)
             lines.append(QVariant(QVariantList{index * 4, QString::fromUtf8("歌词第%1句").arg(index + 1)}));
         lyrics->setProperty("lines", lines);
         require(QQmlProperty(lyrics, "positionSeconds").write(12.0), "lyrics test position could not be set");
-        require(QMetaObject::invokeMethod(timedLyrics, "forceLayout"), "lyrics layout could not be updated");
-        QTest::qWait(250);
-        require(controls->y() <= 24 && lyrics->height() >= 140, "dashboard did not allocate space to lyrics");
+        QTest::qWait(30);
+        require(controls->y() <= 24 && lyrics->height() > 24, "dashboard did not allocate space to lyrics");
         require(bounds(music).contains(bounds(lyrics)), "lyrics panel exceeds music card");
         require(!bounds(controls).intersects(bounds(lyrics)), "lyrics overlap playback controls");
         int completeLines = 0;
-        for (int index = 0; index < 10; ++index) {
-            auto *line = findItem(window->contentItem(), QStringLiteral("lyricLine_%1").arg(index));
-            if (line && bounds(lyrics).adjusted(-0.1, -0.1, 0.1, 0.1).contains(bounds(line))) ++completeLines;
+        for (int index = 0; index < 4; ++index) {
+            auto *line = findItem(window->contentItem(), QStringLiteral("compactLyricLine_%1").arg(index));
+            if (line && line->height() > 0 && bounds(lyrics).adjusted(-0.1, -0.1, 0.1, 0.1).contains(bounds(line)))
+                ++completeLines;
         }
-        std::printf("DASHBOARD_LYRICS_GEOMETRY %dx%d height=%.1f count=%d current=%d contentY=%.1f\n",
+        std::printf("DASHBOARD_LYRICS_GEOMETRY %dx%d height=%.1f count=%d current=%d\n",
             size.width(), size.height(), lyrics->height(), completeLines,
-            lyrics->property("currentIndex").toInt(), timedLyrics->property("contentY").toDouble());
+            lyrics->property("currentIndex").toInt());
         require(completeLines >= 3, "dashboard lyrics display fewer than three complete lines");
         std::printf("DASHBOARD_LYRICS_PASS %dx%d height=%.1f completeLines=%d\n",
             size.width(), size.height(), lyrics->height(), completeLines);
+        const double coverWithLyrics = controls->property("coverSize").toDouble();
+        controller->setProperty("showMusicLyrics", false);
+        QTest::qWait(30);
+        require(!findItem(window->contentItem(), "musicLyrics") && controls->property("centered").toBool(),
+            "lyrics toggle did not switch to centered playback");
+        require(std::abs(bounds(controls).center().x() - bounds(music).center().x()) < 0.5
+            && bounds(music).contains(bounds(controls)), "centered player exceeds or is misaligned with its card");
+        if (size == QSize(1920, 720))
+            require(controls->property("coverSize").toDouble() > coverWithLyrics, "hidden lyrics did not enlarge the cover");
+        controller->setProperty("showMusicLyrics", true);
         const QRectF reserve = bounds(info);
         require(placeholder->isVisible() && !summary->isVisible(), "unset weather did not retain placeholder");
         controller->setProperty("dashboardWeatherLocation", "met_norway:1");
@@ -283,10 +291,12 @@ static void verifyDashboardUi()
         }
         controller->setProperty("dashboardMapApp", "test-map");
         controller->setProperty("dashboardNavigationTemplate", true);
-        navigation->setProperty("guidance", QVariantMap{{"state", "active"}, {"maneuver", "roundabout-exit"},
+        const QVariantMap activeGuidance{{"state", "active"}, {"maneuver", "roundabout-exit"},
             {"drivingSide", "left"}, {"exitNumber", 3}, {"nextDistanceMeters", 370},
             {"nextRoad", QString::fromUtf8("测试道路名称很长时仍保持在卡片内")},
-            {"remainingSeconds", 61}, {"remainingDistanceMeters", 2400}});
+            {"remainingSeconds", 61}, {"remainingDistanceMeters", 2400}};
+        navigation->setProperty("navigating", true);
+        navigation->setProperty("guidance", activeGuidance);
         require(summary->isVisible() && bounds(info) == reserve, "navigation did not replace weather in its slot");
         for (const QString &name : {QStringLiteral("dashboardManeuver"), QStringLiteral("dashboardNextDistance"),
                                     QStringLiteral("dashboardNextRoad"), QStringLiteral("dashboardRemainingRoute")}) {
@@ -297,8 +307,37 @@ static void verifyDashboardUi()
             "dashboard lost left-driving roundabout mapping");
         require(findItem(window->contentItem(), "dashboardNextDistance")->property("text").toString() == "370 m",
             "dashboard maneuver distance incorrect");
-        navigation->setProperty("guidance", QVariantMap{{"state", "stopped"}});
-        require(!summary->isVisible() && !placeholder->isVisible(), "navigation stop did not restore weather");
+        auto *weatherCity = findItem(window->contentItem(), "dashboardWeatherCity");
+        auto *status = findItem(summary, "dashboardNavigationStatus");
+        auto *distance = findItem(summary, "dashboardNextDistance");
+        auto *lastRoute = findItem(summary, "dashboardLastRoute");
+        require(weatherCity && status && distance && lastRoute && !weatherCity->isVisible() && !status->isVisible(),
+            "navigation left weather or a status visible");
+        navigation->setProperty("lastRouteOverview", QVariantMap{{"destination", QString::fromUtf8("测试目的地")},
+            {"remainingSeconds", 61}, {"remainingDistanceMeters", 2400}});
+        navigation->setProperty("guidance", QVariantMap{{"state", "unavailable"}});
+        controller->setProperty("dashboardWeather", QVariantMap{{"city", QString::fromUtf8("上海")},
+            {"populated", true}, {"temperature", 12}, {"weatherType", "d000"}});
+        require(summary->isVisible() && status->isVisible() && lastRoute->isVisible() && !distance->isVisible()
+            && !weatherCity->isVisible(),
+            "temporary loss of guidance let a weather update reclaim the card");
+        navigation->setProperty("ready", false);
+        navigation->setProperty("guidance", QVariantMap());
+        require(summary->isVisible() && status->isVisible() && !weatherCity->isVisible(),
+            "provider reconnect let weather reclaim the card");
+        navigation->setProperty("ready", true);
+        navigation->setProperty("guidance", activeGuidance);
+        require(summary->isVisible() && !status->isVisible() && distance->isVisible() && !weatherCity->isVisible(),
+            "fresh instructions did not restore the navigation summary");
+        for (const QString &state : {QStringLiteral("stopped"), QStringLiteral("arrived"), QStringLiteral("idle")}) {
+            navigation->setProperty("navigating", true);
+            navigation->setProperty("guidance", activeGuidance);
+            navigation->setProperty("guidance", QVariantMap{{"state", state}});
+            navigation->setProperty("navigating", false);
+            require(!summary->isVisible() && weatherCity->isVisible()
+                && weatherCity->property("text").toString() == QString::fromUtf8("上海"),
+                "ending navigation did not restore the latest weather");
+        }
         controller->setProperty("dashboardMapApp", "");
         controller->setProperty("dashboardNavigationTemplate", false);
         controller->setProperty("dashboardWeatherLocation", "");

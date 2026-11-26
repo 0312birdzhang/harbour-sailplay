@@ -24,6 +24,8 @@ QtObject {
     property bool musicContentAvailable: false
     property QtObject navigation: QtObject {
         property bool ready: true
+        property bool navigating: false
+        property var lastRouteOverview: ({})
         property string name: "Test navigation"
         property bool mapAvailable: false
         property string error: ""
@@ -33,6 +35,7 @@ QtObject {
         function configureMap(width, height) {}
     }
     signal artworkAvailable(string key, url localUrl)
+    signal musicAppRequested(string appId)
     signal playerPlaybackFinished(string service, bool success)
     signal playerPositionAvailable(string service, string trackKey, real seconds)
     signal playerLyricsAvailable(string key, var rows, int offsetMs, string plainText)
@@ -40,6 +43,8 @@ QtObject {
     function restoreShellView() {}
     function availableApps(showAll) { return [] }
     function ensureMusicBackend() { return false }
+    function isLocalMusicService(service) { return false }
+    function musicAppIcon(appId) { return "" }
     function musicServiceForApp(app, services) { return "" }
     function preferredMusicService(services) { return "" }
     function rememberMusicPlayer(service) {}

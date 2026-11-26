@@ -35,6 +35,14 @@
       <translation>Навигация недоступна</translation>
     </message>
     <message>
+      <source>Waiting for navigation updates</source>
+      <translation>Ожидание данных навигации</translation>
+    </message>
+    <message>
+      <source>Last update: %1 min · %2</source>
+      <translation>Последние данные: %1 мин · %2</translation>
+    </message>
+    <message>
       <source>Navigation stopped</source>
       <translation>Навигация остановлена</translation>
     </message>

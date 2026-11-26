@@ -35,6 +35,14 @@
       <translation>導航暫不可用</translation>
     </message>
     <message>
+      <source>Waiting for navigation updates</source>
+      <translation>等待導航更新</translation>
+    </message>
+    <message>
+      <source>Last update: %1 min · %2</source>
+      <translation>上次更新：%1 分鐘 · %2</translation>
+    </message>
+    <message>
       <source>Navigation stopped</source>
       <translation>導航已停止</translation>
     </message>

@@ -35,6 +35,14 @@
       <translation>Navigation indisponible</translation>
     </message>
     <message>
+      <source>Waiting for navigation updates</source>
+      <translation>En attente de données de navigation</translation>
+    </message>
+    <message>
+      <source>Last update: %1 min · %2</source>
+      <translation>Dernière mise à jour : %1 min · %2</translation>
+    </message>
+    <message>
       <source>Navigation stopped</source>
       <translation>Navigation arrêtée</translation>
     </message>

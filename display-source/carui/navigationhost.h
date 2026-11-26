@@ -14,7 +14,9 @@ class SailplayNavigationHost : public QObject
     Q_PROPERTY(bool ready READ ready NOTIFY changed)
     Q_PROPERTY(QString applicationId READ applicationId NOTIFY changed)
     Q_PROPERTY(QString name READ name NOTIFY changed)
+    Q_PROPERTY(bool navigating READ navigating NOTIFY changed)
     Q_PROPERTY(QVariantMap guidance READ guidance NOTIFY changed)
+    Q_PROPERTY(QVariantMap lastRouteOverview READ lastRouteOverview NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(bool mapAvailable READ mapAvailable NOTIFY changed)
     Q_PROPERTY(bool mapReady READ mapReady NOTIFY mapChanged)
@@ -29,7 +31,9 @@ public:
     bool ready() const { return m_session.ready(); }
     QString applicationId() const { return m_declaration.presentationId(); }
     QString name() const { return m_name; }
+    bool navigating() const { return m_navigating; }
     QVariantMap guidance() const { return m_guidance; }
+    QVariantMap lastRouteOverview() const { return m_lastRouteOverview; }
     QString error() const { return m_error; }
     bool mapAvailable() const { return ready() && m_session.capabilities().contains(QStringLiteral("navigation-map")); }
     bool mapReady() const { return !m_mapImage.isNull(); }
@@ -53,6 +57,7 @@ signals:
     void mapBrowserChanged();
 
 private:
+    void resetSession();
     void receiveState();
     void publish();
     void removeExport();
@@ -83,8 +88,10 @@ private:
     QString m_bootId;
     QString m_startTicks;
     QVariantMap m_guidance;
+    QVariantMap m_lastRouteOverview;
     QByteArray m_lastExport;
     bool m_active = true;
+    bool m_navigating = false;
 };
 
 #endif

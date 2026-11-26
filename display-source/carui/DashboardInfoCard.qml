@@ -6,7 +6,9 @@ Rectangle {
     property var provider
     property var palette
     readonly property var guidance: provider ? provider.guidance : ({})
-    readonly property bool navigating: !!provider && provider.ready && guidance.state === "active"
+    readonly property bool navigating: !!provider && provider.navigating
+    readonly property bool guidanceAvailable: navigating && provider.ready && guidance.state === "active"
+    readonly property var lastRoute: provider ? provider.lastRouteOverview : ({})
     radius: 22; color: palette.card
     clip: true
 
@@ -21,7 +23,39 @@ Rectangle {
         readonly property real uiScale: Math.max(0.1, Math.min(card.width / 420, card.height / 170))
         width: card.width / uiScale; height: card.height / uiScale
         scale: uiScale; transformOrigin: Item.TopLeft
+        Column {
+            anchors.centerIn: parent
+            width: parent.width - 32
+            spacing: 6
+            visible: !card.guidanceAvailable
+            Text {
+                objectName: "dashboardNavigationStatus"
+                width: parent.width
+                text: card.provider && card.provider.ready ? qsTranslate("Sailplay", "Waiting for navigation updates")
+                                                           : qsTranslate("Sailplay", "Connecting navigation")
+                color: card.palette.secondary; font.pixelSize: 25
+                horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+            }
+            Text {
+                width: parent.width
+                text: card.lastRoute.destination || ""
+                visible: !!text
+                textFormat: Text.PlainText; color: card.palette.text; font.pixelSize: 32
+                horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+            }
+            Text {
+                objectName: "dashboardLastRoute"
+                width: parent.width
+                visible: card.lastRoute.remainingDistanceMeters > 0 || card.lastRoute.remainingSeconds > 0
+                text: visible ? qsTranslate("Sailplay", "Last update: %1 min · %2")
+                    .arg(Math.ceil((card.lastRoute.remainingSeconds || 0) / 60))
+                    .arg(Guidance.distance(card.lastRoute.remainingDistanceMeters || 0)) : ""
+                color: card.palette.secondary; font.pixelSize: 24
+                horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+            }
+        }
         Row {
+            visible: card.guidanceAvailable
             anchors.centerIn: parent
             width: parent.width - 32; spacing: 16
             Text {

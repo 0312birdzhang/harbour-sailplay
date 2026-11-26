@@ -22,6 +22,8 @@
 #include <unistd.h>
 
 namespace {
+constexpr qulonglong kGuidanceMaxAgeMs = 10000;
+
 qulonglong boottimeMs()
 {
     timespec now;
@@ -172,9 +174,16 @@ SailplayNavigationHost::~SailplayNavigationHost()
 
 void SailplayNavigationHost::open(const SailplayApplication &declaration, const QString &name)
 {
-    if (!declaration.applicationId.isEmpty()
-        && declaration.presentationId() == m_declaration.presentationId() && m_error.isEmpty()) return;
-    close();
+    const bool sameProvider = !declaration.applicationId.isEmpty()
+        && declaration.applicationId == m_declaration.applicationId
+        && declaration.presentationId() == m_declaration.presentationId()
+        && declaration.service == m_declaration.service && declaration.path == m_declaration.path;
+    if (sameProvider && m_error.isEmpty()) return;
+    if (!sameProvider) {
+        m_navigating = false;
+        m_lastRouteOverview.clear();
+    }
+    resetSession();
     m_declaration = declaration;
     m_name = name;
     m_error.clear();
@@ -199,7 +208,7 @@ void SailplayNavigationHost::setActive(bool active)
     if (m_session.ready()) m_session.setActive(active);
 }
 
-void SailplayNavigationHost::close()
+void SailplayNavigationHost::resetSession()
 {
     m_reconnectTimer.stop();
     m_reconnectAttempts = 0;
@@ -208,6 +217,13 @@ void SailplayNavigationHost::close()
     resetMap();
     removeExport();
     m_guidance.clear();
+}
+
+void SailplayNavigationHost::close()
+{
+    m_navigating = false;
+    m_lastRouteOverview.clear();
+    resetSession();
     m_declaration = SailplayApplication();
     m_name.clear();
     m_error.clear();
@@ -336,8 +352,21 @@ void SailplayNavigationHost::receiveState()
             fail(translated("Navigation provider returned invalid guidance"));
             return;
         }
-        m_guidance = value.value(QStringLiteral("state")) == QStringLiteral("active")
-            ? value : clearedGuidance(value, value.value(QStringLiteral("state")).toString());
+        const QString state = value.value(QStringLiteral("state")).toString();
+        m_navigating = state == QStringLiteral("active") || state == QStringLiteral("unavailable");
+        if (!m_navigating) {
+            m_lastRouteOverview.clear();
+        } else if (state == QStringLiteral("active")) {
+            const qulonglong timestamp = value.value(QStringLiteral("updatedMs")).toULongLong();
+            if (boottimeMs() - timestamp <= kGuidanceMaxAgeMs && (!value.value(QStringLiteral("destination")).toString().isEmpty()
+                || value.value(QStringLiteral("remainingDistanceMeters")).toDouble() > 0
+                || value.value(QStringLiteral("remainingSeconds")).toULongLong() > 0)) {
+                m_lastRouteOverview = {{QStringLiteral("destination"), value.value(QStringLiteral("destination"))},
+                    {QStringLiteral("remainingDistanceMeters"), value.value(QStringLiteral("remainingDistanceMeters"))},
+                    {QStringLiteral("remainingSeconds"), value.value(QStringLiteral("remainingSeconds"))}};
+            }
+        }
+        m_guidance = state == QStringLiteral("active") ? value : clearedGuidance(value, state);
         m_error.clear();
         publish();
     }
@@ -352,7 +381,7 @@ void SailplayNavigationHost::publish()
     }
     const qulonglong now = boottimeMs();
     if (m_guidance.value(QStringLiteral("state")) == QStringLiteral("active")
-        && now - m_guidance.value(QStringLiteral("updatedMs")).toULongLong() > 10000) {
+        && now - m_guidance.value(QStringLiteral("updatedMs")).toULongLong() > kGuidanceMaxAgeMs) {
         m_guidance = clearedGuidance(m_guidance, QStringLiteral("unavailable"));
         emit changed();
     }

@@ -327,6 +327,9 @@ Providers advertise `navigation` and implement the asynchronous
 types. `guidance(...)` creates complete models with a suspend-aware timestamp.
 Active guidance expires after ten seconds without a navigation update.
 The car publisher's heartbeat independently expires after three seconds.
+Use `unavailable` while a route is still being followed and turn instructions
+are temporarily unavailable. The dashboard reserves the navigation card until
+the provider reports `idle`, `stopped` or `arrived`.
 
 ```python
 from sailplay_sdk.guidance import guidance

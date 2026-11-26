@@ -8,7 +8,8 @@ Rectangle {
     property var palette
     property bool compact: false
     property var guidance: provider ? provider.guidance : ({})
-    property bool navigating: guidance.state === "active"
+    readonly property bool navigating: !!provider && provider.navigating
+    readonly property bool guidanceAvailable: navigating && provider.ready && guidance.state === "active"
     property bool mapMode: provider ? provider.mapAvailable : false
     property var mapState: mapMode ? provider.mapState : ({})
     property bool browserAvailable: !!provider && provider.mapBrowser.page !== undefined
@@ -137,8 +138,9 @@ Rectangle {
                 id: mapStatus
                 anchors.centerIn: parent
                 width: parent.width - 24
-                text: navigating ? card.symbol(guidance.maneuver || "unknown") + "  "
+                text: guidanceAvailable ? card.symbol(guidance.maneuver || "unknown") + "  "
                       + card.distance(guidance.nextDistanceMeters || 0) + "  " + (guidance.nextRoad || "")
+                      : navigating ? card.statusText()
                       : ((provider ? provider.error : "") || qsTranslate("Sailplay", "Loading map"))
                 color: palette.text
                 font.pixelSize: compact ? 24 : 30
@@ -188,7 +190,8 @@ Rectangle {
             radius: 14
             color: palette.card
             opacity: 0.93
-            visible: mapMode && !compact && !panelOpen && (navigating || !!mapState.place || !!mapState.building || !!mapState.built || !!mapState.error)
+            visible: mapMode && !compact && !panelOpen && (guidanceAvailable || (!navigating
+                && (!!mapState.place || !!mapState.building || !!mapState.built || !!mapState.error)))
             MouseArea { objectName: "navigationPreviewShield"; anchors.fill: parent }
             Text {
                 id: routeText
@@ -282,7 +285,7 @@ Rectangle {
         if (!provider || !provider.ready) return qsTranslate("Sailplay", "Connecting navigation")
         var states = {
             "idle": qsTranslate("Sailplay", "Ready for navigation"),
-            "unavailable": qsTranslate("Sailplay", "Navigation unavailable"),
+            "unavailable": qsTranslate("Sailplay", "Waiting for navigation updates"),
             "stopped": qsTranslate("Sailplay", "Navigation stopped"),
             "arrived": qsTranslate("Sailplay", "You have arrived")
         }
@@ -304,7 +307,7 @@ Rectangle {
         }
         Text {
             width: parent.width
-            visible: navigating
+            visible: guidanceAvailable
             text: card.symbol(guidance.maneuver || "unknown")
             color: palette.text
             font.pixelSize: compact ? 78 : 108
@@ -313,7 +316,7 @@ Rectangle {
         }
         Text {
             width: parent.width
-            visible: navigating
+            visible: guidanceAvailable
             text: card.distance(guidance.nextDistanceMeters || 0)
             color: palette.text
             font.pixelSize: compact ? 34 : 44
@@ -321,7 +324,7 @@ Rectangle {
         }
         Text {
             width: parent.width
-            text: navigating ? guidance.nextRoad : card.statusText()
+            text: guidanceAvailable ? (guidance.nextRoad || guidance.currentRoad || "") : card.statusText()
             color: palette.text
             font.pixelSize: compact ? 26 : 34
             horizontalAlignment: Text.AlignHCenter
@@ -331,7 +334,7 @@ Rectangle {
         }
         Text {
             width: parent.width
-            visible: navigating
+            visible: guidanceAvailable
             text: qsTranslate("Sailplay", "%1 min").arg(Math.ceil((guidance.remainingSeconds || 0) / 60))
                   + " · " + card.distance(guidance.remainingDistanceMeters || 0)
             color: palette.secondary
@@ -340,7 +343,7 @@ Rectangle {
             elide: Text.ElideRight
         }
         Rectangle {
-            visible: !compact && navigating
+            visible: !compact && navigating && provider.ready
             width: Math.min(parent.width, 340)
             height: 66
             anchors.horizontalCenter: parent.horizontalCenter

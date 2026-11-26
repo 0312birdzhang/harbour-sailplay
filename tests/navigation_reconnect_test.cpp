@@ -66,13 +66,51 @@ int main(int argc, char **argv)
     SailplayNavigationHost host(runtime.path());
     host.open(declaration, "Map");
     CHECK(waitFor([&]() { return host.ready(); }));
+    CHECK(!host.navigating());
+    const auto guidanceState = [&]() { return host.guidance().value(QStringLiteral("state")).toString(); };
+    const auto publish = [&](const QString &state) {
+        CHECK(provider.publish({{"navigation", SailplayProvider::navigationGuidance(state)}}));
+        CHECK(waitFor([&]() { return guidanceState() == state; }));
+    };
+    publish("unavailable");
+    CHECK(host.navigating());
+    CHECK(host.lastRouteOverview().isEmpty());
+    auto expiring = SailplayProvider::navigationGuidance("active");
+    const qulonglong timestamp = expiring.value("updatedMs").toULongLong();
+    expiring["updatedMs"] = timestamp > 9000 ? timestamp - 9000 : qulonglong(0);
+    expiring["nextRoad"] = QStringLiteral("Old turn");
+    expiring["destination"] = QStringLiteral("Test destination");
+    expiring["remainingDistanceMeters"] = 2400.0;
+    expiring["remainingSeconds"] = qulonglong(360);
+    CHECK(provider.publish({{"navigation", expiring}}));
+    CHECK(waitFor([&]() { return guidanceState() == "active"; }));
+    CHECK(waitFor([&]() { return guidanceState() == "unavailable"; }, 12000));
+    CHECK(host.navigating() && host.guidance().value("nextRoad").toString().isEmpty());
+    CHECK(host.lastRouteOverview().value("destination") == "Test destination"
+        && host.lastRouteOverview().value("remainingDistanceMeters").toDouble() == 2400.0
+        && !host.lastRouteOverview().contains("nextRoad"));
+    auto stale = expiring;
+    stale["destination"] = QStringLiteral("Stale destination");
+    CHECK(provider.publish({{"navigation", stale}}));
+    publish("active");
     CHECK(bus.unregisterService(service));
     CHECK(waitFor([&]() { return !host.ready(); }));
+    CHECK(host.navigating() && host.guidance().isEmpty());
+    CHECK(host.lastRouteOverview().value("destination") == "Test destination");
     // With no activation file, the daemon names the service in its activation
     // error. Reaching this error proves the host actively tried to restart it.
     CHECK(waitFor([&]() { return host.error().contains(service); }));
     CHECK(bus.registerService(service));
     CHECK(waitFor([&]() { return host.ready() && host.error().isEmpty(); }));
+    CHECK(host.navigating());
+    publish("stopped");
+    CHECK(!host.navigating() && host.lastRouteOverview().isEmpty());
+    publish("active");
+    publish("arrived");
+    CHECK(!host.navigating());
+    publish("active");
+    publish("idle");
+    CHECK(!host.navigating());
     host.setActive(false);
     CHECK(bus.unregisterService(service));
     CHECK(waitFor([&]() { return !host.ready(); }));
@@ -86,6 +124,6 @@ int main(int argc, char **argv)
     CHECK(waitFor([&]() { return !host.ready(); }));
     host.close();
     waitFor([]() { return false; }, 400);
-    CHECK(host.error().isEmpty() && host.applicationId().isEmpty());
-    fprintf(stderr, "NAVIGATION_RECONNECT_PASS\n");
+    CHECK(host.error().isEmpty() && host.applicationId().isEmpty() && !host.navigating());
+    fprintf(stderr, "NAVIGATION_RECONNECT_PASS route lifecycle stale guidance recovery\n");
 }

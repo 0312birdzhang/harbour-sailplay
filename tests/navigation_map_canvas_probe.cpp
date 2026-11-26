@@ -305,6 +305,11 @@ int main(int argc, char **argv)
             "active guidance was rejected");
         waitFor([&] { return card->property("navigating").toBool(); });
         check(!bookmarks->isVisible() && !start->isVisible(), "planning buttons remained visible during navigation");
+        check(provider.publish({{QStringLiteral("navigation"), SailplayProvider::navigationGuidance(QStringLiteral("unavailable"))}}),
+            "temporarily unavailable guidance was rejected");
+        waitFor([&] { return !card->property("guidanceAvailable").toBool(); });
+        check(card->property("navigating").toBool() && !preview->isVisible() && !bookmarks->isVisible(),
+            "navigation controls were lost or stale directions remained visible");
         click(settings, QPointF(settings->width() - 2, settings->height() - 2));
         check(stops == 1 && touches.size() == beforeOverlay, "scaled stop button edge did not stop navigation");
         check(provider.publish({{QStringLiteral("navigation"), SailplayProvider::navigationGuidance()}}), "idle guidance was rejected");
