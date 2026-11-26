@@ -145,9 +145,9 @@ Item {
             MouseArea { id: area; anchors.fill: parent; enabled: pane.usable && modelData.enabled; onClicked: pane.activated(modelData.id) }
         }
         footer: Item {
-            width: list.width; height: pane.hasMore ? 70 * pane.uiScale : 0; visible: pane.hasMore
+            width: list.width; height: pane.hasMore ? 84 * pane.uiScale : 0; visible: pane.hasMore
             Rectangle {
-                y: 8 * pane.uiScale; width: parent.width; height: 62 * pane.uiScale; radius: 12 * pane.uiScale
+                y: 8 * pane.uiScale; width: parent.width; height: 76 * pane.uiScale; radius: 12 * pane.uiScale
                 color: moreArea.pressed ? pane.tint(palette.highlightColor, 0.3) : pane.tint(palette.highlightBackgroundColor, 0.55)
                 Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Load more"); color: palette.highlightColor; font.pixelSize: 26 * pane.uiScale }
                 MouseArea { id: moreArea; anchors.fill: parent; enabled: pane.usable; onClicked: pane.moreRequested() }
@@ -225,9 +225,9 @@ Item {
             }
         }
         footer: Item {
-            width: grid.width; height: pane.hasMore ? 74 * pane.uiScale : 0; visible: pane.hasMore
+            width: grid.width; height: pane.hasMore ? 88 * pane.uiScale : 0; visible: pane.hasMore
             Rectangle {
-                width: parent.width - grid.gap; height: 62 * pane.uiScale; radius: 12 * pane.uiScale
+                width: parent.width - grid.gap; height: 76 * pane.uiScale; radius: 12 * pane.uiScale
                 color: gridMoreArea.pressed ? pane.tint(palette.highlightColor, 0.3) : pane.tint(palette.highlightBackgroundColor, 0.55)
                 Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Load more"); color: palette.highlightColor; font.pixelSize: 26 * pane.uiScale }
                 MouseArea { id: gridMoreArea; anchors.fill: parent; enabled: pane.usable; onClicked: pane.moreRequested() }

@@ -254,6 +254,7 @@ Window {
             }
             MouseArea { anchors.fill: parent; onClicked: musicCard.openMusic() }
             Rectangle {
+                id: musicQueueButton
                 anchors.right:parent.right;anchors.rightMargin:carController.musicContentAvailable ? 196 : 16
                 y:16;z:5;width:164;height:76;radius:14;color:carPalette.button
                 visible:carController.musicActive && !!musicCard.player && !!musicCard.player.currentService
@@ -261,6 +262,7 @@ Window {
                 MouseArea {anchors.fill:parent;onClicked:musicCard.queueOpen=true}
             }
             Rectangle {
+                id: musicBrowseButton
                 anchors.right: parent.right; anchors.rightMargin: 16; y: 16; z: 5
                 width: 164; height: 76; radius: 14; color: carPalette.button
                 visible: carController.musicActive && carController.musicContentAvailable
@@ -406,7 +408,10 @@ Window {
                 expanded: carController.musicActive
                 x: musicCard.splitMusic ? musicCard.width * .52 : lockscreenMusic.x
                 width: musicCard.splitMusic ? musicCard.width - x - 32 : lockscreenMusic.width
-                y: musicCard.splitMusic ? 90 : musicProgress.y + musicProgress.height + (expanded ? 8 : 24)
+                // Keep the lyrics below the toolbar with a full 32px gap.
+                y: musicCard.splitMusic ? Math.max(musicQueueButton.y + musicQueueButton.height,
+                    musicBrowseButton.y + musicBrowseButton.height) + 32
+                    : musicProgress.y + musicProgress.height + (expanded ? 8 : 24)
                 height: Math.max(0, musicCard.height - y - 24)
             }
             Text {

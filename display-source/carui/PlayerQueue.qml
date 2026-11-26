@@ -36,19 +36,19 @@ Rectangle {
     }
     MouseArea { anchors.fill:parent }
     Rectangle {
-        x:16;y:16;width:112;height:58;radius:12;color:palette.button
+        x:16;y:16;width:112;height:76;radius:12;color:palette.button
         Text {anchors.centerIn:parent;text:qsTranslate("Sailplay","Back");color:panel.palette.text;font.pixelSize:24}
         MouseArea {anchors.fill:parent;onClicked:panel.closed()}
     }
     Text {
-        x:152;y:26;width:parent.width-x-24
+        x:152;y:16;width:parent.width-x-24;height:76;verticalAlignment:Text.AlignVCenter
         text:qsTranslate("Sailplay","Play queue (%1)").arg(panel.items.length)
         color:palette.text;font.pixelSize:30;elide:Text.ElideRight
     }
     ListView {
         id: list
         objectName: "queueSongs"
-        x:16;y:92;width:parent.width-32;height:parent.height-y-16
+        x:16;y:108;width:parent.width-32;height:parent.height-y-16
         clip:true;model:panel.items;spacing:6
         delegate: Rectangle {
             width:list.width;height:82;radius:12

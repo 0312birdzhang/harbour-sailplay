@@ -13,7 +13,7 @@ Item {
     property bool compact: false
     readonly property bool playing: localCurrent && player.playbackStatus === Mpris.Playing
     readonly property bool idleCard: compact && (!localCurrent || !playing && player.playbackStatus !== Mpris.Paused)
-    readonly property real _squareSize: compact ? 72 : 88
+    readonly property real _squareSize: compact ? 76 : 88
     readonly property real coverSize: compact ? 112 : Math.min(220, width * .35)
     readonly property real headerHeight: compact ? 120 : Math.max(220, coverSize)
     signal clicked()
@@ -184,21 +184,31 @@ Item {
             model: 3
             Item {
                 width: controls.width / 3; height: controls._squareSize
-                Silica.IconButton {
+                Rectangle {
                     anchors.centerIn: parent; width: controls._squareSize; height: width
+                    radius: 14
+                    color: transportTouch.pressed ? carPalette.pressed : carPalette.button
                     enabled: index === 0 ? (controls.localCurrent && !controls.idleCard && player.canGoPrevious) : index === 2 ? (controls.localCurrent && !controls.idleCard && player.canGoNext)
                               : controls.playing ? player.canPause : !pendingPlay.running && !controls.playRequestPending
                     opacity: enabled ? 1 : 0.35
-                    icon.color: carPalette.text
-                    icon.source: index === 0 ? "image://theme/icon-m-simple-previous"
-                                 : index === 2 ? "image://theme/icon-m-simple-next"
-                                 : controls.playing ? "image://theme/icon-m-simple-pause"
-                                 : "image://theme/icon-m-simple-play"
-                    onClicked: {
-                        if (index === 0) player.previous()
-                        else if (index === 2) player.next()
-                        else if (controls.playing) player.pause()
-                        else controls.resumeMusic()
+                    Silica.Icon {
+                        anchors.centerIn: parent
+                        width: controls.compact ? 44 : 52; height: width
+                        color: carPalette.text
+                        source: index === 0 ? "image://theme/icon-m-simple-previous"
+                              : index === 2 ? "image://theme/icon-m-simple-next"
+                              : controls.playing ? "image://theme/icon-m-simple-pause"
+                              : "image://theme/icon-m-simple-play"
+                    }
+                    MouseArea {
+                        id: transportTouch
+                        anchors.fill: parent
+                        onClicked: {
+                            if (index === 0) player.previous()
+                            else if (index === 2) player.next()
+                            else if (controls.playing) player.pause()
+                            else controls.resumeMusic()
+                        }
                     }
                 }
             }

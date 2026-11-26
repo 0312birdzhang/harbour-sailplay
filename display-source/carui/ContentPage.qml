@@ -25,6 +25,8 @@ Rectangle {
     property var detail: provider && provider.detail ? provider.detail : ({})
     property bool usable: !!provider && provider.ready && !provider.busy
     property real margin: 20 * uiScale
+    // Match the map toolbar, including the visible icon and its touch target.
+    readonly property real buttonSize: 76 * uiScale
     // Width left to browsing once the side panel has taken its share.
     property real mainWidth: width - 2 * margin - (side ? sidePanel.width + margin : 0)
     color: palette.overlayBackgroundColor
@@ -45,7 +47,7 @@ Rectangle {
             property string icon: ""
             property bool active: true
             signal clicked()
-            width: 64 * root.uiScale; height: width; radius: width / 2
+            width: root.buttonSize; height: width; radius: 14 * root.uiScale
             color: iconArea.pressed ? root.tint(palette.highlightColor, 0.3) : root.tint(palette.highlightBackgroundColor, 0.55)
             opacity: active ? 1 : 0.4
             Image {
@@ -58,13 +60,13 @@ Rectangle {
 
     Item {
         id: header
-        x: root.margin; y: 14 * root.uiScale; width: root.mainWidth; height: 64 * root.uiScale
+        x: root.margin; y: 14 * root.uiScale; width: root.mainWidth; height: root.buttonSize
         Loader {
             id: backButton
             objectName: "contentBack"
             sourceComponent: iconButton
             visible: (!!provider && provider.canGoBack) || root.canReturn
-            width: visible ? 64 * root.uiScale : 0
+            width: visible ? root.buttonSize : 0
             onLoaded: { item.icon = "icon-m-back"; item.clicked.connect(root.goBack) }
         }
         Text {
@@ -78,7 +80,7 @@ Rectangle {
         Loader {
             id: refreshButton
             sourceComponent: iconButton
-            x: parent.width - 64 * root.uiScale
+            x: parent.width - root.buttonSize
             onLoaded: { item.icon = "icon-m-refresh"; item.clicked.connect(function() { if (provider.ready && !provider.busy) provider.refresh() }) }
         }
     }
@@ -88,7 +90,7 @@ Rectangle {
         id: tabBar
         objectName: "contentTabs"
         property real gap: 10 * root.uiScale
-        property real tabHeight: 62 * root.uiScale
+        property real tabHeight: root.buttonSize
         property int perLine: Math.max(1, Math.floor((width + gap) / (220 * root.uiScale + gap)))
         property real tabWidth: Math.floor((width + gap) / perLine - gap)
         property int lines: root.tabs.length > perLine ? 2 : 1
@@ -131,13 +133,13 @@ Rectangle {
     }
     Rectangle {
         id: searchBox
-        x: root.margin; y: tabBar.y + tabBar.height + (visible ? 10 * root.uiScale : 0); width: root.mainWidth; height: visible ? 58 * root.uiScale : 0
+        x: root.margin; y: tabBar.y + tabBar.height + (visible ? 10 * root.uiScale : 0); width: root.mainWidth; height: visible ? root.buttonSize : 0
         visible: page.searchEnabled === true
         color: root.tint(palette.highlightBackgroundColor, 0.55); radius: 12 * root.uiScale
         TextInput {
             id: searchInput
             objectName: "contentSearch"
-            x: 16 * root.uiScale; width: parent.width - 96 * root.uiScale; height: parent.height
+            x: 16 * root.uiScale; width: parent.width - x - root.buttonSize; height: parent.height
             color: palette.primaryColor; font.pixelSize: 26 * root.uiScale; verticalAlignment: TextInput.AlignVCenter
             clip: true; maximumLength: 256; selectByMouse: true
             onAccepted: { provider.search(text.trim()); focus = false }
@@ -147,10 +149,13 @@ Rectangle {
                 visible: searchInput.text === "" && !searchInput.activeFocus
             }
         }
-        Image {
-            anchors.right: parent.right; anchors.rightMargin: 16 * root.uiScale; anchors.verticalCenter: parent.verticalCenter
-            width: 40 * root.uiScale; height: width; source: "image://theme/icon-m-search?" + palette.primaryColor
-            MouseArea { anchors.fill: parent; anchors.margins: -16; onClicked: { provider.search(searchInput.text.trim()); searchInput.focus = false } }
+        Item {
+            anchors.right: parent.right; width: root.buttonSize; height: parent.height
+            Image {
+                anchors.centerIn: parent; width: 46 * root.uiScale; height: width
+                source: "image://theme/icon-m-search?" + palette.primaryColor
+            }
+            MouseArea { anchors.fill: parent; onClicked: { provider.search(searchInput.text.trim()); searchInput.focus = false } }
         }
     }
     Text {
@@ -218,7 +223,7 @@ Rectangle {
                 id: detailControls
                 property var entries: root.detail.actions || []
                 y: parent.height - height; width: parent.width
-                height: entries.length ? 60 * root.uiScale : 0; spacing: 12 * root.uiScale
+                height: entries.length ? root.buttonSize : 0; spacing: 12 * root.uiScale
                 Repeater {
                     model: detailControls.entries
                     Rectangle {
@@ -248,7 +253,7 @@ Rectangle {
     Row {
         id: controls
         x: root.margin; y: root.height - height - 16 * root.uiScale; width: root.mainWidth
-        height: page.actions && page.actions.length ? 60 * root.uiScale : 0; spacing: 12 * root.uiScale
+        height: page.actions && page.actions.length ? root.buttonSize : 0; spacing: 12 * root.uiScale
         Repeater {
             model: page.actions || []
             Rectangle {
@@ -285,7 +290,7 @@ Rectangle {
         Item {
             id: nowPlaying
             x: sidePanel.pad; y: sideTitle.y + sideTitle.height + 6 * root.uiScale; width: parent.width - 2 * sidePanel.pad
-            height: sidePanel.transport ? 132 * root.uiScale : 0; visible: sidePanel.transport
+            height: sidePanel.transport ? 62 * root.uiScale + root.buttonSize : 0; visible: sidePanel.transport
             Column {
                 width: parent.width
                 Text {
@@ -298,7 +303,8 @@ Rectangle {
                 }
             }
             Row {
-                anchors.horizontalCenter: parent.horizontalCenter; y: 62 * root.uiScale; spacing: 36 * root.uiScale
+                anchors.horizontalCenter: parent.horizontalCenter; y: 62 * root.uiScale
+                spacing: Math.max(0, Math.min(24 * root.uiScale, (nowPlaying.width - 3 * root.buttonSize) / 2))
                 Loader {
                     sourceComponent: iconButton
                     onLoaded: {
@@ -309,7 +315,6 @@ Rectangle {
                 Loader {
                     sourceComponent: iconButton
                     onLoaded: {
-                        item.width = 72 * root.uiScale
                         item.icon = Qt.binding(function() { return root.player && root.player.playing ? "icon-m-pause" : "icon-m-play" })
                         item.clicked.connect(function() { root.player.playPause() })
                     }
@@ -346,7 +351,7 @@ Rectangle {
             id: sideOptions
             property var entries: root.side && root.side.actions ? root.side.actions : []
             x: sidePanel.pad; y: parent.height - height - 12 * root.uiScale; width: parent.width - 2 * sidePanel.pad
-            height: entries.length ? 56 * root.uiScale : 0; spacing: 10 * root.uiScale
+            height: entries.length ? root.buttonSize : 0; spacing: 10 * root.uiScale
             Repeater {
                 model: sideOptions.entries
                 Rectangle {
