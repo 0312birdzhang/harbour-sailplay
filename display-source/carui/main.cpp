@@ -1107,11 +1107,19 @@ public:
             if (code == 0 && status == QProcess::NormalExit) {
                 const QJsonObject data = QJsonDocument::fromJson(process->readAllStandardOutput()).object();
                 emit playerLyricsAvailable(key, data.value("lines").toArray().toVariantList(), data.value("offsetMs").toInt(), data.value("plainText").toString());
+            } else {
+                qWarning("carui: lyrics reader failed exit=%d status=%d: %s", code, int(status),
+                    process->readAllStandardError().left(2048).constData());
+                emit playerLyricsAvailable(key, QVariantList(), 0, QString());
             }
             process->deleteLater();
         });
         connect(process, &QProcess::errorOccurred, this, [this, process, key](QProcess::ProcessError error) {
-            if (error == QProcess::FailedToStart) { m_lyricsPending.remove(key); process->deleteLater(); }
+            if (error == QProcess::FailedToStart) {
+                m_lyricsPending.remove(key);
+                emit playerLyricsAvailable(key, QVariantList(), 0, QString());
+                process->deleteLater();
+            }
         });
         process->start(QStringLiteral("python3"), {QStringLiteral("/opt/sailplay/scripts/player-lyrics.py"), service, track});
         timeout->start(3000);
@@ -1362,6 +1370,10 @@ public:
             m.insert(QStringLiteral("name"), a.name);
             m.insert(QStringLiteral("icon"), a.icon);
             m.insert(QStringLiteral("sdkIntegrated"), a.sdk.valid);
+            QSettings desktop(QStringLiteral("/usr/share/applications/") + a.id + QStringLiteral(".desktop"), QSettings::IniFormat);
+            m.insert(QStringLiteral("backgroundPlayer"), a.id == QLatin1String("jolla-mediaplayer")
+                || a.sdk.mediaTemplate()
+                || !desktop.value(QStringLiteral("Desktop Entry/X-Sailplay-BackgroundService")).toString().isEmpty());
             l.append(m);
         }
         return l;

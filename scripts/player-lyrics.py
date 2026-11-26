@@ -3,7 +3,6 @@
 import hashlib
 import json
 import re
-import sqlite3
 import sys
 import base64
 import math
@@ -105,6 +104,12 @@ def parse(text):
 
 def cached(track, database):
     if not database.is_file():
+        return '', 0
+    try:
+        import sqlite3
+    except ImportError:
+        # Sailfish splits _sqlite3 out of python3-base. Live Core/MPRIS
+        # lyrics remain available without this optional legacy cache reader.
         return '', 0
     with sqlite3.connect(database.as_uri()+'?mode=ro', uri=True, timeout=.1) as connection:
         # Match the exact platform/id hash published by Mconnect's MPRIS service.

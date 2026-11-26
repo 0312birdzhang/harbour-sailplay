@@ -53,12 +53,16 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
       property string lastMusicApp: "b"
       property string lastMusicName: "B"
       property string musicError: ""
+      property string activatedApp: ""
       signal musicAppRequested(string appId)
       signal playerPlaybackFinished(string service, bool success)
-      function availableApps(all) { return [] }
-      function ensureMusicBackend(app) { return true }
+      function availableApps(all) { return [{id:"a",name:"Mconnect",icon:"",backgroundPlayer:true}, {id:"b",name:"Media",icon:"",backgroundPlayer:true}] }
+      function ensureMusicBackend(app) { activatedApp = app || ""; return true }
       function musicAppIcon(app) { return "" }
-      function musicServiceForApp(app, services) { return app === "a" && !aReady ? "" : "org.mpris.MediaPlayer2."+app }
+      function musicServiceForApp(app, services) {
+       var service = "org.mpris.MediaPlayer2."+app
+       return app === "a" && !aReady || services.indexOf(service) < 0 ? "" : service
+      }
       function preferredMusicService(services) { return "org.mpris.MediaPlayer2.b" }
       function rememberMusicPlayer(service) {}
       function playMusicPlayer(service) {}
@@ -68,11 +72,44 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
       interval: 300; repeat: true; running: true
       property int stage: 0
       onTriggered: {
-       if (stage > 0 && (music.mprisController.currentService !== "org.mpris.MediaPlayer2.b" || music.pendingApp !== "")) {
+       if (stage > 0 && stage < 4 && (music.mprisController.currentService !== "org.mpris.MediaPlayer2.b" || music.pendingApp !== "")) {
         console.log("MUSIC_SELECTION_FAIL", stage, music.mprisController.currentService, music.pendingApp)
         Qt.quit(); return
        }
-       if (stage === 3) { console.log("MUSIC_SELECTION_PASS current other-running menu"); Qt.quit(); return }
+       if (stage === 3) {
+        carController.aReady = false
+        music.playerMenuOpen = true
+        stage++; return
+       }
+       if (stage === 4) {
+        if (music.stoppedPlayers.length !== 1 || music.stoppedPlayers[0].id !== "a") {
+         console.log("MUSIC_SELECTION_FAIL stopped player missing"); Qt.quit(); return
+        }
+        function find(item, name) {
+         if (item.objectName === name) return item
+         var children = item.children || []
+         for (var i=0;i<children.length;++i) { var found = find(children[i],name); if(found) return found }
+         return null
+        }
+        var touch = find(music,"stoppedPlayerTouch_a")
+        var menu = find(music,"playerMenu")
+        if (!touch || touch.height <= 0 || !menu || menu.height < touch.height) {
+         console.log("MUSIC_SELECTION_FAIL missing launch button or menu geometry"); Qt.quit(); return
+        }
+        touch.clicked(null)
+        if (carController.activatedApp !== "a" || music.pendingApp !== "a") {
+         console.log("MUSIC_SELECTION_FAIL launch not requested"); Qt.quit(); return
+        }
+        carController.aReady = true
+        music.mprisController.availableServices = ["org.mpris.MediaPlayer2.a", "org.mpris.MediaPlayer2.b"]
+        stage++; return
+       }
+       if (stage === 5) {
+        if (music.mprisController.currentService !== "org.mpris.MediaPlayer2.a" || music.stoppedPlayers.length !== 0) {
+         console.log("MUSIC_SELECTION_FAIL relaunched player not selected"); Qt.quit(); return
+        }
+        console.log("MUSIC_SELECTION_PASS current other-running menu stopped-player-relaunch"); Qt.quit(); return
+       }
        carController.aReady = false
        if (stage === 1) music.mprisController.currentService = "org.mpris.MediaPlayer2.c"
        carController.musicAppRequested("a")

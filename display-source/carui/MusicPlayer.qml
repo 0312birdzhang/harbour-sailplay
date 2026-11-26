@@ -20,12 +20,15 @@ Item {
     property string pendingApp: ""
     property int pendingTicks: 0
     property bool pendingPlayback: true
-    readonly property bool systemPlayerInstalled: {
+    readonly property var stoppedPlayers: {
         var apps = carController.availableApps(true)
-        for (var i=0; i<apps.length; ++i) if (apps[i].id === "jolla-mediaplayer") return true
-        return false
+        var result = []
+        for (var i=0; i<apps.length; ++i) {
+            if (apps[i].backgroundPlayer && !carController.musicServiceForApp(apps[i].id, player.availableServices))
+                result.push(apps[i])
+        }
+        return result
     }
-    readonly property bool systemPlayerRunning: !!carController.musicServiceForApp("jolla-mediaplayer", player.availableServices)
     property string selectedService: ""
     property bool playerMenuOpen: false
     property bool playRequestPending: false
@@ -222,6 +225,7 @@ Item {
         }
         MouseArea { anchors.fill: parent; onClicked: controls.playerMenuOpen = !controls.playerMenuOpen }
         Rectangle {
+            objectName: "playerMenu"
             y: parent.height + 6; width: parent.width
             height: Math.min(4 * playerSelector.rowHeight, playerChoices.contentHeight)
             visible: controls.playerMenuOpen; radius: 14; color: carPalette.card
@@ -230,27 +234,38 @@ Item {
                 id: playerChoices
                 anchors.fill: parent; clip: true
                 model: player.availableClients
-                footer: Rectangle {
-                    objectName: "systemPlayerChoice"
+                footer: Column {
                     width: playerChoices.width
-                    height: controls.systemPlayerInstalled && !controls.systemPlayerRunning ? playerSelector.rowHeight : 0
-                    visible: height > 0
-                    color: "transparent"
-                    Image {
-                        id: systemIcon
-                        x: 12; anchors.verticalCenter: parent.verticalCenter
-                        width: 60; height: 60; fillMode: Image.PreserveAspectFit
-                        property string file: carController.musicAppIcon("jolla-mediaplayer")
-                        source: file ? "file://" + file : ""
-                        visible: source != ""
+                    Repeater {
+                        model: controls.stoppedPlayers
+                        Rectangle {
+                            objectName: "stoppedPlayerChoice_" + modelData.id
+                            width: playerChoices.width
+                            height: playerSelector.rowHeight
+                            color: "transparent"
+                            Image {
+                                id: systemIcon
+                                x: 12; anchors.verticalCenter: parent.verticalCenter
+                                width: 60; height: 60; fillMode: Image.PreserveAspectFit
+                                property string file: modelData.icon || carController.musicAppIcon(modelData.id)
+                                source: file ? "file://" + file : ""
+                                visible: source != ""
+                            }
+                            Text {
+                                x: systemIcon.visible ? 88 : 20; width: parent.width - x - 16; height: parent.height
+                                text: modelData.id === "jolla-mediaplayer" ? qsTranslate("Sailplay", "System Media") : modelData.name
+                                textFormat: Text.PlainText
+                                elide: Text.ElideRight
+                                color: carPalette.text; font.pixelSize: 30; verticalAlignment: Text.AlignVCenter
+                            }
+                            MouseArea {
+                                objectName: "stoppedPlayerTouch_" + modelData.id
+                                anchors.fill: parent
+                                enabled: !controls.playRequestPending
+                                onClicked: controls.selectPlayerApp(modelData.id, controls.playing)
+                            }
+                        }
                     }
-                    Text {
-                        x: systemIcon.visible ? 88 : 20; width: parent.width - x - 16; height: parent.height
-                        text: qsTranslate("Sailplay", "System Media")
-                        elide: Text.ElideRight
-                        color: carPalette.text; font.pixelSize: 30; verticalAlignment: Text.AlignVCenter
-                    }
-                    MouseArea { anchors.fill: parent; onClicked: controls.selectPlayerApp("jolla-mediaplayer", controls.playing) }
                 }
                 delegate: Rectangle {
                     width: playerChoices.width; height: playerSelector.rowHeight

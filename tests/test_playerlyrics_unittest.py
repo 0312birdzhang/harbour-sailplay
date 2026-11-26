@@ -6,10 +6,24 @@ import tempfile
 import unittest
 import json
 import base64
+from unittest import mock
 spec=importlib.util.spec_from_file_location('lyrics',Path(__file__).parents[1]/'scripts/player-lyrics.py')
 lyrics=importlib.util.module_from_spec(spec);spec.loader.exec_module(lyrics)
 
 class LyricsTests(unittest.TestCase):
+    def test_live_lyrics_work_when_sqlite_extension_is_not_installed(self):
+        with mock.patch.dict('sys.modules', {'sqlite3': None}):
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            song = {'platform': 'netease', 'id': '5256046'}
+            class Api:
+                def Request(self, method, args, **kwargs):
+                    return json.dumps({'song': song} if method == 'snapshot' else
+                                      {'lines': [{'time': 1000, 'text': 'live lyric'}]})
+            self.assertEqual(module.live_lyrics(Api(), module.track_id(song))['lines'], [[1.0, 'live lyric']])
+            with tempfile.NamedTemporaryFile() as cache:
+                self.assertEqual(module.cached(module.track_id(song), Path(cache.name)), ('', 0))
+
     def test_identical_translation_is_hidden_without_removing_repeated_verses(self):
         song={'platform':'local','id':'/music/repeated.mp3'}
         class Api:
