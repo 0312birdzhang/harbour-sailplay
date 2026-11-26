@@ -69,7 +69,7 @@ class MediaKeys:
                 'exec env XDG_RUNTIME_DIR=/run/user/100000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100000/dbus/user_bus_socket python3 /opt/sailplay/scripts/media-control.py '+action],
                 stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=4,universal_newlines=True)
             print('Media control {} exit={} {}'.format(action,result.returncode,result.stdout.strip()[:500]),flush=True)
-            return result.returncode == 0 and ' delivered to ' in result.stdout
+            return result.returncode == 0 and any(token in result.stdout for token in (' delivered to ', 'already playing', 'resume skipped'))
         except Exception as error:print('Media control failed {} {}'.format(action,type(error).__name__),flush=True)
         return False
     def command(self,value):

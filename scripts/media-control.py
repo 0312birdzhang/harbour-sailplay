@@ -114,6 +114,38 @@ def control(bus,action,interface,preferred=('', ''),uri=''):
     else:perform()
     return method+' delivered to '+name
 
+def resume_marker_path():
+    return Path.home() / '.config/sailplay/resume-playback'
+
+
+def set_resume_marker(enabled):
+    marker = resume_marker_path()
+    try:
+        if enabled:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text('1\n', encoding='utf-8')
+        elif marker.exists():
+            marker.unlink()
+    except OSError:
+        pass
+
+
+def any_local_playing(bus, interface):
+    for name in bus.list_names():
+        if not str(name).startswith('org.mpris.MediaPlayer2.'):
+            continue
+        if not is_local_player(bus, name):
+            continue
+        try:
+            obj = bus.get_object(name, '/org/mpris/MediaPlayer2')
+            props = interface(obj, 'org.freedesktop.DBus.Properties').GetAll('org.mpris.MediaPlayer2.Player', timeout=1)
+            if str(props.get('PlaybackStatus')) == 'Playing':
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def main():
     action=sys.argv[1] if len(sys.argv)>1 else ''
     if action=='--session-stop':
@@ -125,6 +157,16 @@ def main():
         return
     if action not in ('Play','Pause','PlayPause','Next','Previous','PausePlaying','ResumePreferred','PlayExclusive'):raise ValueError('invalid media action')
     import dbus
+    bus = dbus.SessionBus()
+    if action == 'ResumePreferred':
+        if any_local_playing(bus, dbus.Interface):
+            set_resume_marker(False)
+            print('already playing', flush=True)
+            return
+        if not resume_marker_path().exists():
+            print('resume skipped', flush=True)
+            return
+        set_resume_marker(False)
     preferred=remembered_player()
     uri=''
     if action=='PlayExclusive':
@@ -137,5 +179,8 @@ def main():
             parsed=urlparse(uri)
             if parsed.scheme!='file' or parsed.netloc not in ('','localhost') or not Path(unquote(parsed.path)).is_file():
                 raise ValueError('invalid media file')
-    print(control(dbus.SessionBus(),action,dbus.Interface,preferred,uri),flush=True)
+    result = control(bus,action,dbus.Interface,preferred,uri)
+    if action == 'PausePlaying':
+        set_resume_marker('Pause delivered to ' in result)
+    print(result,flush=True)
 if __name__=='__main__':main()
