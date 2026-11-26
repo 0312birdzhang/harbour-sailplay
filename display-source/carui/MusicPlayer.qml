@@ -30,7 +30,13 @@ Item {
     property bool playerMenuOpen: false
     property bool playRequestPending: false
     property string playbackError: ""
+    function cancelPendingPlayer() {
+        pendingPlay.stop()
+        controls.pendingApp = ""
+        controls.pendingTicks = 0
+    }
     function choosePlayer(service, resumePlaying) {
+        cancelPendingPlayer()
         var resume = resumePlaying === true && controls.playing && player.currentService !== service
         selectedService = service
         player.singleService = true
@@ -56,6 +62,7 @@ Item {
         selectPlayerApp(carController.lastMusicApp, true)
     }
     function selectPlayerApp(appId, play) {
+        cancelPendingPlayer()
         controls.pendingApp = appId
         controls.pendingPlayback = play
         controls.pendingTicks = 0
@@ -109,6 +116,7 @@ Item {
         // Tapping a music app's icon selects that app's player, as its row in
         // the player menu does, instead of showing whichever was selected.
         onMusicAppRequested: {
+            controls.cancelPendingPlayer()
             var service = carController.musicServiceForApp(appId, player.availableServices)
             if (service && service === player.currentService) return
             if (service) controls.choosePlayer(service, true)

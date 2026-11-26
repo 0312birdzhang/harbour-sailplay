@@ -81,6 +81,10 @@ int main(int argc, char **argv)
         // Tabs, a split page and a pinned side panel, as a podcast or music player would ask for.
         qulonglong version = 1;
         QStringList queue = {"q1", "q2"};
+        QString delayedFolder, folderSuffix;
+        qulonglong delayedInvocation = 0;
+        QVariantMap delayedResult;
+        int detailActions = 0;
         const auto folder = [](const QString &id, const QString &title) { return SailplayContent::item(id, title); };
         const auto rootPage = [&]() {
             QVariantMap page = SailplayContent::page("root", "Player");
@@ -105,7 +109,7 @@ int main(int argc, char **argv)
                 page["actions"] = QVariantList{SailplayContent::item("clear", "Clear", "action", "content.clear")};
             } else if (id == "subs") {
                 hints = SailplayContent::presentation("split");
-                entries = QVariantList{folder("p1", "Podcast 1"), folder("p2", "Podcast 2")};
+                entries = QVariantList{folder("p1", "Podcast 1" + folderSuffix), folder("p2", "Podcast 2")};
                 CHECK(SailplayContent::hint(hints, "p1", "/tmp/p1.png"));
                 CHECK(!SailplayContent::hint(hints, "p2", "relative.png"));
             } else if (id == "news") {
@@ -117,10 +121,19 @@ int main(int argc, char **argv)
                     entries.append(SailplayContent::item(id + episode, "Episode " + episode, "action", "content.add",
                                                          {{"id", id + episode}}));
                 CHECK(SailplayContent::hint(hints, id + "a", QString(), "started"));
+                auto disabled = SailplayContent::item("disabled", "Disabled", "action", "content.batch");
+                disabled["enabled"] = false;
+                page["actions"] = QVariantList{SailplayContent::item("batch", "Play all", "action", "content.batch"), disabled};
             }
             page["items"] = entries;
             QVariantMap result{{"content", page}};
             if (!hints.isEmpty()) result.insert("presentation", hints);
+            if (id == delayedFolder) {
+                delayedFolder.clear();
+                delayedInvocation = invocation;
+                delayedResult = result;
+                return;
+            }
             CHECK(provider.complete(invocation, result));
         };
         provider.setActionHandler("content.browse", browse);
@@ -134,6 +147,10 @@ int main(int argc, char **argv)
         provider.setActionHandler("content.add", [&](qulonglong i, const QVariantMap &p) { changeQueue(i, p, false); });
         provider.setActionHandler("content.clear", [&](qulonglong i, const QVariantMap &p) { changeQueue(i, p, true); });
         provider.setActionHandler("content.play", [&](qulonglong i, const QVariantMap &) { CHECK(provider.complete(i)); });
+        provider.setActionHandler("content.batch", [&](qulonglong i, const QVariantMap &) {
+            ++detailActions;
+            CHECK(provider.complete(i));
+        });
         CHECK(provider.start());
         CHECK(QDBusConnection::sessionBus().registerService("org.example.NativeContent"));
         SailplayApplication declaration;
@@ -182,6 +199,37 @@ int main(int argc, char **argv)
         host.selectSide("q1");
         CHECK(waitFor([&]() { return settled(); }));
         CHECK(rows(host.side()).size() == 1 && host.tabs().size() == 2);
+        host.selectTab("subs");
+        CHECK(waitFor([&]() { return settled() && host.detail().value("id") == "p1"; }));
+        CHECK(host.detail().value("actions").toList().size() == 2);
+        host.detailAction("disabled");
+        CHECK(!host.busy() && detailActions == 0);
+        host.detailAction("batch");
+        CHECK(waitFor([&]() { return settled() && detailActions == 1; }));
+        CHECK(activations == 0);
+        // Publications during either secondary request must refresh the main page too.
+        for (const QString &target : {QStringLiteral("p1"), QStringLiteral("queue")}) {
+            delayedFolder = target;
+            delayedInvocation = 0;
+            ++version;
+            CHECK(provider.publish({{"content", rootPage()}, {"contentPresentation", rootHints}}));
+            CHECK(waitFor([&]() { return delayedInvocation != 0; }));
+            folderSuffix += " updated";
+            ++version;
+            CHECK(provider.publish({{"content", rootPage()}, {"contentPresentation", rootHints}}));
+            QElapsedTimer drain;
+            drain.start();
+            while (drain.elapsed() < 50) { QCoreApplication::processEvents(); QThread::msleep(1); }
+            CHECK(host.busy());
+            // Busy details cannot accept another action.
+            host.detailAction("batch");
+            CHECK(detailActions == 1);
+            CHECK(provider.complete(delayedInvocation, delayedResult));
+            CHECK(waitFor(settled));
+            CHECK(host.page().value("version").toULongLong() == version);
+            CHECK(host.items().first().toMap().value("title") == "Podcast 1" + folderSuffix);
+            CHECK(rows(host.detail()).size() == 2 && rows(host.side()).size() == 1);
+        }
         host.close();
         CHECK(host.side().isEmpty() && host.detail().isEmpty() && host.tabs().isEmpty());
         CHECK(waitFor([&]() { return provider.sessionCount() == 0; }));

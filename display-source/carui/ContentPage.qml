@@ -180,6 +180,7 @@ Rectangle {
         }
         // In a split page, the rows of the chosen folder.
         Item {
+            id: detailArea
             visible: body.split
             x: body.masterWidth + root.margin; width: parent.width - x; height: parent.height
             Text {
@@ -196,7 +197,8 @@ Rectangle {
             }
             ContentPane {
                 palette: root.palette; uiScale: root.uiScale
-                y: detailTitle.height + 6 * root.uiScale; width: parent.width; height: parent.height - y
+                y: detailTitle.height + 6 * root.uiScale; width: parent.width
+                height: Math.max(0, detailControls.y - y - 10 * root.uiScale)
                 listName: "contentDetailList"; rowName: "contentDetailRow"
                 items: root.detail.items || []
                 layout: root.detail.layout || "list"
@@ -204,6 +206,34 @@ Rectangle {
                 usable: root.usable
                 onActivated: provider.selectDetail(id)
                 onMoreRequested: provider.moreDetail()
+            }
+            Row {
+                id: detailControls
+                property var entries: root.detail.actions || []
+                y: parent.height - height; width: parent.width
+                height: entries.length ? 60 * root.uiScale : 0; spacing: 12 * root.uiScale
+                Repeater {
+                    model: detailControls.entries
+                    Rectangle {
+                        objectName: "contentDetailAction"
+                        width: Math.max(0, (detailControls.width - detailControls.spacing * (detailControls.entries.length - 1)) / detailControls.entries.length)
+                        height: detailControls.height; radius: 12 * root.uiScale
+                        color: detailActionArea.pressed ? root.tint(palette.highlightColor, 0.3) : root.tint(palette.highlightBackgroundColor, 0.55)
+                        opacity: modelData.enabled ? 1 : 0.4
+                        Text {
+                            anchors.centerIn: parent; width: parent.width - 16 * root.uiScale
+                            horizontalAlignment: Text.AlignHCenter; text: root.plain(modelData.title)
+                            textFormat: Text.PlainText; color: palette.primaryColor
+                            font.pixelSize: 24 * root.uiScale; elide: Text.ElideRight
+                        }
+                        MouseArea {
+                            id: detailActionArea
+                            objectName: "contentDetailActionTouch"
+                            anchors.fill: parent; enabled: root.usable && modelData.enabled
+                            onClicked: provider.detailAction(modelData.id)
+                        }
+                    }
+                }
             }
         }
     }

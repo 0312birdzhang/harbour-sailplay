@@ -47,6 +47,7 @@ public:
     Q_INVOKABLE void select(const QString &id);
     Q_INVOKABLE void selectTab(const QString &id);
     Q_INVOKABLE void selectDetail(const QString &id);
+    Q_INVOKABLE void detailAction(const QString &id);
     Q_INVOKABLE void moreDetail();
     Q_INVOKABLE void selectSide(const QString &id);
     Q_INVOKABLE void sideAction(const QString &id);
@@ -98,6 +99,7 @@ private:
     uint m_paneOffset = 0;
     bool m_detailWanted = false;
     bool m_sideWanted = false;
+    bool m_refreshWanted = false;
     QVariantMap m_page;
     QVariantList m_items;
     QList<Location> m_history;

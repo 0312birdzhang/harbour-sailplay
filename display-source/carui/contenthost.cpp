@@ -36,7 +36,11 @@ SailplayContentHost::SailplayContentHost(QObject *parent) : QObject(parent), m_s
             m_request = 0;
             const QString activated = m_activatedItem;
             m_activatedItem.clear();
-            if (!error.isEmpty()) { fail(message); return; }
+            if (!error.isEmpty()) {
+                if (m_refreshWanted) refresh();
+                fail(message);
+                return;
+            }
             if (!m_pageRequest) {
                 // An action may have changed the pinned folder, such as a queue.
                 m_sideWanted = !m_sideId.isEmpty();
@@ -45,6 +49,7 @@ SailplayContentHost::SailplayContentHost(QObject *parent) : QObject(parent), m_s
                 if (!activated.isEmpty() && m_sideId.isEmpty()) emit itemActivated(activated);
                 return;
             }
+            if (m_refreshWanted) { refresh(); return; }
             if (m_target != Main) { receivePane(result); return; }
             const QVariantMap page = SailplayContent::decode(result.value(QStringLiteral("content"))).toMap();
             if (!SailplayContent::validPage(page) || page.value("id").toString() != m_location.id
@@ -112,6 +117,7 @@ void SailplayContentHost::close()
     m_sideId.clear();
     m_target = Main;
     m_detailWanted = m_sideWanted = false;
+    m_refreshWanted = false;
     m_items.clear();
     m_history.clear();
     m_location = Location();
@@ -133,6 +139,7 @@ void SailplayContentHost::receiveState()
         m_side.clear();
         m_sideId.clear();
         m_detailWanted = m_sideWanted = false;
+        m_refreshWanted = false;
     } else {
         const QVariantMap root = SailplayContent::decode(m_session.state().value(QStringLiteral("content"))).toMap();
         if (!SailplayContent::validRoot(root)) {
@@ -152,7 +159,10 @@ void SailplayContentHost::receiveState()
         }
         if (contentChanged) m_sideWanted = !m_sideId.isEmpty();
         // A pending action remains pending across its own state publication.
-        if (contentChanged && !busy()) refresh();
+        if (contentChanged) {
+            if (busy()) m_refreshWanted = true;
+            else refresh();
+        }
     }
     emit changed();
 }
@@ -306,6 +316,13 @@ void SailplayContentHost::moreDetail()
     requestPane(Detail, m_detail.value("next").toUInt());
 }
 
+void SailplayContentHost::detailAction(const QString &id)
+{
+    for (const QVariant &item : m_detail.value("actions").toList()) {
+        if (item.toMap().value("id").toString() == id) { invokeItem(item.toMap()); return; }
+    }
+}
+
 void SailplayContentHost::selectSide(const QString &id)
 {
     for (const QVariant &item : m_side.value("items").toList()) {
@@ -353,6 +370,7 @@ bool SailplayContentHost::enterTabs(const QVariantMap &page, const QVariantList 
 void SailplayContentHost::refresh()
 {
     m_request = 0;
+    m_refreshWanted = false;
     if (m_location.tabsOwner == QStringLiteral("root") && m_location.query.isEmpty() && !m_root.isEmpty()) {
         // The root's folders may have changed: rebuild its tab bar, keeping the selected tab when it remains.
         const QString selected = m_location.id;
