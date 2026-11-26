@@ -221,7 +221,12 @@ void SailplayNavigationHost::resetSession()
 
 void SailplayNavigationHost::close()
 {
+    if (m_navigating && m_session.ready()) {
+        m_session.invoke(QStringLiteral("navigation.stop"));
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 200);
+    }
     m_navigating = false;
+    m_lastGuidance.clear();
     m_lastRouteOverview.clear();
     resetSession();
     m_declaration = SailplayApplication();
