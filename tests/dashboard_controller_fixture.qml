@@ -8,6 +8,7 @@ QtObject {
     property string currentApp: ""
     property bool dashboardActive: true
     property bool musicActive: false
+    property bool showMusicLyrics: true
     property bool returnToDashboard: true
     property string dashboardMapApp: ""
     property bool dashboardNavigationTemplate: false

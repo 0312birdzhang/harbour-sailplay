@@ -50,6 +50,7 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
     (temp / 'probe.qml').write_text('''import QtQuick 2.0
     Item {
      width: 1200; height: 720
+     property real initialCover: 0
      QtObject {
       id: carController
       property bool dayTheme: false
@@ -74,15 +75,25 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
       function playMusicPlayer(service) {}
      }
      MusicPlayer { id: music; width: 1000 }
+    function find(item, name) {
+      if (item.objectName === name) return item
+      var children = item.children || []
+      for (var index=0; index<children.length; ++index) {
+       var found = find(children[index], name)
+       if (found) return found
+      }
+      return null
+    }
+    function checkCenteredLayout(originalCover, originalButton) {
+      var cover = find(music, "musicArtwork")
+      var info = find(music, "musicTrackInfo")
+      return cover.width > originalCover && Math.abs(cover.x + cover.width / 2 - music.width / 2) < 1
+       && info.width === music.width && info.y >= cover.height && music.height <= music.availableHeight + 1
+       && find(music, "playbackModeButton").width > originalButton
+    }
      function checkPlaybackModes() {
       var p = music.mprisController
       function check(ok, message) { if (!ok) throw new Error(message) }
-      function find(item, name) {
-       if (item.objectName === name) return item
-       var children = item.children || []
-       for (var i=0;i<children.length;++i) { var found=find(children[i],name); if(found) return found }
-       return null
-      }
       var button = find(music, "playbackModeButton")
       var touch = find(music, "playbackModeTouch")
       check(button && touch && button.enabled, "mode button missing/disabled")
@@ -119,9 +130,32 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
      }
      Timer {
       interval: 300; repeat: true; running: true
-      property int stage: 0
+      property int stage: -4
       onTriggered: {
-       if (stage === 0) checkPlaybackModes()
+       if (stage < 0) {
+        var cover = find(music, "musicArtwork")
+        if (stage === -4) {
+         initialCover = cover.width
+         music.availableHeight = 520
+         music.centered = true
+        } else if (stage === -3) {
+         if (!checkCenteredLayout(initialCover, 88)) { console.log("MUSIC_SELECTION_FAIL full centered layout"); Qt.quit(); return }
+         music.compact = true
+         music.availableHeight = 460
+        } else if (stage === -2) {
+         if (!checkCenteredLayout(112, 76)) { console.log("MUSIC_SELECTION_FAIL compact centered layout"); Qt.quit(); return }
+         music.centered = false
+         music.compact = false
+        } else {
+         if (cover.width !== initialCover || cover.x !== 0) { console.log("MUSIC_SELECTION_FAIL restored layout"); Qt.quit(); return }
+         console.log("MUSIC_CENTERED_PASS enlarged bounded full compact")
+        }
+        stage++; return
+       }
+       if (stage === 0) {
+        try { checkPlaybackModes() }
+        catch (error) { console.log("MUSIC_SELECTION_FAIL", error); Qt.quit(); return }
+       }
        if (stage > 0 && stage < 4 && (music.mprisController.currentService !== "org.mpris.MediaPlayer2.b" || music.pendingApp !== "")) {
         console.log("MUSIC_SELECTION_FAIL", stage, music.mprisController.currentService, music.pendingApp)
         Qt.quit(); return
@@ -137,12 +171,6 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
        if (stage === 4) {
         if (music.stoppedPlayers.length !== 1 || music.stoppedPlayers[0].id !== "a") {
          console.log("MUSIC_SELECTION_FAIL stopped player missing"); Qt.quit(); return
-        }
-        function find(item, name) {
-         if (item.objectName === name) return item
-         var children = item.children || []
-         for (var i=0;i<children.length;++i) { var found = find(children[i],name); if(found) return found }
-         return null
         }
         var touch = find(music,"stoppedPlayerTouch_a")
         var menu = find(music,"playerMenu")
@@ -200,6 +228,7 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
     print(output)
     assert result.returncode==0
     assert 'MUSIC_SELECTION_PASS' in output
+    assert 'MUSIC_CENTERED_PASS' in output
     assert 'MUSIC_SELECTION_FAIL' not in output
     assert not any(error in output for error in ('ReferenceError', 'TypeError', 'Cannot assign', 'is not a type'))
     shutil.copyfile(root / 'tests/lyrics_compact_integration.qml', temp / 'lyrics.qml')

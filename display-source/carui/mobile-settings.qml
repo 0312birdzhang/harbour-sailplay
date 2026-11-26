@@ -181,6 +181,16 @@ ApplicationWindow {
                         color: Theme.secondaryColor
                         text: qsTranslate("Sailplay", "SDK maps are detected automatically. The last map used on the car display opens next time.")
                     }
+                    SectionHeader { text: qsTranslate("Sailplay", "Music") }
+                    TextSwitch {
+                        objectName: "musicLyricsSwitch"
+                        property bool saveFailed: false
+                        text: qsTranslate("Sailplay", "Show lyrics")
+                        description: saveFailed ? qsTranslate("Sailplay", "Save failed") : ""
+                        automaticCheck: false
+                        checked: carController.showMusicLyrics
+                        onClicked: saveFailed = !carController.setShowMusicLyrics(!checked)
+                    }
                     Label {
                         x: Theme.horizontalPageMargin; width: parent.width - 2 * Theme.horizontalPageMargin
                         wrapMode: Text.WordWrap; font.pixelSize: Theme.fontSizeSmall; color: Theme.secondaryColor

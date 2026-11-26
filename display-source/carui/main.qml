@@ -236,7 +236,10 @@ Window {
             height: parent.height - y - parent.verticalGap
             radius: 22; color: carPalette.card
             property var player: lockscreenMusic.localController
-            property bool splitMusic: carController.musicActive && width > 1000
+            readonly property bool showLyrics: carController.showMusicLyrics
+            readonly property bool splitMusic: showLyrics && carController.musicActive && width > 1000
+            readonly property real centeredBodyTop: carController.musicActive ? 108 : 20
+            readonly property bool showProgress: !lockscreenMusic.idleCard
             property bool queueOpen: false
             property string artworkKey: player ? String(player.metaData.artUrl || player.metaData.url || "") : ""
             property url artwork: ""
@@ -255,6 +258,7 @@ Window {
             MouseArea { anchors.fill: parent; onClicked: musicCard.openMusic() }
             Rectangle {
                 id: musicQueueButton
+                objectName: "musicQueueButton"
                 anchors.right:parent.right;anchors.rightMargin:carController.musicContentAvailable ? 196 : 16
                 y:16;z:5;width:164;height:76;radius:14;color:carPalette.button
                 visible:carController.musicActive && !!musicCard.player && !!musicCard.player.currentService
@@ -263,20 +267,33 @@ Window {
             }
             Rectangle {
                 id: musicBrowseButton
+                objectName: "musicBrowseButton"
                 anchors.right: parent.right; anchors.rightMargin: 16; y: 16; z: 5
                 width: 164; height: 76; radius: 14; color: carPalette.button
                 visible: carController.musicActive && carController.musicContentAvailable
                 Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Browse"); font.pixelSize: 24; color: carPalette.text }
                 MouseArea { anchors.fill: parent; onClicked: carController.browseMusic() }
             }
+            Item {
+                id: musicPlayerToolbar
+                x: 16; y: 16; height: 76; z: 4
+                width: Math.max(0, Math.min(560, (musicQueueButton.visible ? musicQueueButton.x
+                    : musicBrowseButton.visible ? musicBrowseButton.x : musicCard.width) - 32))
+            }
             MusicPlayer {
                 id: lockscreenMusic
                 objectName: "musicControls"
                 compact: !carController.musicActive
-                width: compact || !musicCard.splitMusic ? parent.width - 64 : Math.min(820, parent.width * .48 - 48)
-                x: compact ? (parent.width - width) / 2 : 32
-                y: compact ? 20 : Math.max(108,
-                    musicCard.splitMusic ? (musicCard.height - height - musicProgress.height - 12) / 2 : 112)
+                centered: !musicCard.showLyrics
+                playerSelectorHost: centered && !compact ? musicPlayerToolbar : null
+                availableHeight: Math.max(0, parent.height - musicCard.centeredBodyTop - 20
+                    - (musicCard.showProgress ? musicProgress.height + 4 : 0))
+                width: centered ? Math.max(0, Math.min(870, parent.width - (compact ? 32 : 64)))
+                    : musicCard.splitMusic ? Math.min(820, parent.width * .48 - 48) : parent.width - 64
+                x: centered || compact ? (parent.width - width) / 2 : 32
+                y: centered ? musicCard.centeredBodyTop + Math.max(0, (availableHeight - height) / 2)
+                    : compact ? 20 : Math.max(108,
+                        musicCard.splitMusic ? (musicCard.height - height - musicProgress.height - 12) / 2 : 112)
                 albumArtSource: musicCard.artwork
                 onClicked: musicCard.openMusic()
             }
@@ -284,9 +301,10 @@ Window {
                 id: musicProgress
                 objectName: "musicProgress"
                 z: 2
-                x: lockscreenMusic.x; width: lockscreenMusic.width; height: carController.musicActive ? 100 : 72
+                x: lockscreenMusic.x; width: lockscreenMusic.width
+                height: musicCard.showLyrics ? (carController.musicActive ? 100 : 72) : 88
                 y: lockscreenMusic.y + lockscreenMusic.height + 4
-                visible: lockscreenMusic.visible && !lockscreenMusic.idleCard
+                visible: lockscreenMusic.visible && musicCard.showProgress
                 property var player: lockscreenMusic.localController
                 // Amber metadata duration is milliseconds; queried MPRIS Position is microseconds.
                 property bool nativeSystemTrack: !!player && carController.playerTrackId(player.metaData.trackId).indexOf("/com/jolla/mediaplayer/track/") === 0
@@ -374,7 +392,7 @@ Window {
                             Rectangle { x: parent.width * parent.progress - width / 2; y: (parent.height - height) / 2; width: 14; height: 14; radius: 7; color: carPalette.text }
                         }
                     }
-                    width: parent.width; height: carController.musicActive ? 72 : 56
+                    width: parent.width; height: carController.musicActive && musicCard.showLyrics ? 72 : 56
                     minimumValue: 0; maximumValue: Math.max(1, musicProgress.durationSeconds)
                     stepSize: 1
                     enabled: !!musicProgress.player && musicProgress.player.canSeek && musicProgress.durationSeconds > 0
@@ -390,29 +408,33 @@ Window {
                     }
                 }
                 Text {
-                    x: 8; y: carController.musicActive ? 76 : 58; color: carPalette.secondary; font.pixelSize: 24
+                    x: 8; y: seekSlider.height + (musicCard.showLyrics && carController.musicActive ? 4 : 2)
+                    color: carPalette.secondary; font.pixelSize: 24
                     text: musicProgress.timeText(seekSlider.pressed ? seekSlider.value : musicProgress.positionSeconds)
                 }
                 Text {
                     anchors.right: parent.right; anchors.rightMargin: 8
-                    y: carController.musicActive ? 76 : 58; color: carPalette.secondary; font.pixelSize: 24
+                    y: seekSlider.height + (musicCard.showLyrics && carController.musicActive ? 4 : 2)
+                    color: carPalette.secondary; font.pixelSize: 24
                     text: musicProgress.durationSeconds > 0 ? musicProgress.timeText(musicProgress.durationSeconds) : "--:--"
                 }
             }
-            LyricsPanel {
-                id: lyricsArea
-                palette: carPalette
-                player: musicProgress.player
-                positionSeconds: musicProgress.positionSeconds
-                trackKey: musicProgress.trackKey
-                expanded: carController.musicActive
+            Loader {
+                active: musicCard.showLyrics
                 x: musicCard.splitMusic ? musicCard.width * .52 : lockscreenMusic.x
                 width: musicCard.splitMusic ? musicCard.width - x - 32 : lockscreenMusic.width
                 // Keep the lyrics below the toolbar with a full 32px gap.
                 y: musicCard.splitMusic ? Math.max(musicQueueButton.y + musicQueueButton.height,
                     musicBrowseButton.y + musicBrowseButton.height) + 32
-                    : musicProgress.y + musicProgress.height + (expanded ? 8 : 24)
+                    : musicProgress.y + musicProgress.height + (carController.musicActive ? 8 : 24)
                 height: Math.max(0, musicCard.height - y - 24)
+                sourceComponent: LyricsPanel {
+                    palette: carPalette
+                    player: musicProgress.player
+                    positionSeconds: musicProgress.positionSeconds
+                    trackKey: musicProgress.trackKey
+                    expanded: carController.musicActive
+                }
             }
             Text {
                 anchors.centerIn: parent; width: parent.width - 64; wrapMode: Text.WordWrap

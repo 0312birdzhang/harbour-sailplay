@@ -11,6 +11,9 @@ Item {
     readonly property var localController: localCurrent ? player : null
     property url albumArtSource
     property bool compact: false
+    property bool centered: false
+    property real availableHeight: 0
+    property Item playerSelectorHost: null
     readonly property bool playing: localCurrent && player.playbackStatus === Mpris.Playing
     // Read the selected player's state so changes in its own UI stay in sync.
     // 0: repeat track, 1: repeat list, 2: shuffle, 3: sequential.
@@ -33,11 +36,14 @@ Item {
             player.loopStatus = mode === 0 ? Mpris.LoopTrack : mode === 3 ? Mpris.LoopNone : Mpris.LoopPlaylist
     }
     readonly property bool idleCard: compact && (!localCurrent || !playing && player.playbackStatus !== Mpris.Paused)
-    readonly property real _squareSize: compact ? 76 : 88
-    readonly property real coverSize: compact ? 112 : Math.min(220, width * .35)
-    readonly property real headerHeight: compact ? 120 : Math.max(220, coverSize)
+    readonly property real _squareSize: centered ? Math.max(0, Math.min(compact ? 88 : 100, width / 4 - 8)) : compact ? 76 : 88
+    readonly property real controlGap: centered ? 12 : 24
+    readonly property real trackGap: 12
+    readonly property real coverSize: centered ? Math.max(0, Math.min(compact ? 208 : 340, width,
+        availableHeight - trackInfo.height - trackGap - controlGap - _squareSize)) : compact ? 112 : Math.min(220, width * .35)
+    readonly property real headerHeight: centered ? trackInfo.y + trackInfo.height : compact ? 120 : Math.max(220, coverSize)
     signal clicked()
-    height: headerHeight + 24 + _squareSize
+    height: headerHeight + controlGap + _squareSize
     visible: true
     property string pendingApp: ""
     property int pendingTicks: 0
@@ -160,46 +166,62 @@ Item {
         }
     }
     Rectangle {
+        objectName: "musicArtwork"
+        x: controls.centered ? (parent.width - width) / 2 : 0
         width: controls.coverSize; height: width; radius: 16; color: carPalette.button
         Image {
             anchors.fill: parent; anchors.margins: 4
             source: controls.idleCard || !controls.localCurrent ? "" : controls.albumArtSource
             fillMode: Image.PreserveAspectFit
         }
-        Text { anchors.centerIn: parent; text: "♫"; color: carPalette.secondary; font.pixelSize: 64; visible: controls.idleCard || !controls.albumArtSource }
+        Text { anchors.centerIn: parent; text: "♫"; color: carPalette.secondary; font.pixelSize: controls.centered ? Math.max(1, parent.width * .36) : 64; visible: controls.idleCard || !controls.albumArtSource }
     }
     Column {
-        x: controls.coverSize + 20; width: Math.max(0, parent.width - x); spacing: controls.compact ? 6 : 12
+        id: trackInfo
+        objectName: "musicTrackInfo"
+        x: controls.centered ? 0 : controls.coverSize + 20
+        y: controls.centered ? controls.coverSize + controls.trackGap : 0
+        width: Math.max(0, parent.width - x); spacing: controls.centered || controls.compact ? 6 : 12
+        readonly property string artist: controls.localCurrent ? (player.metaData.contributingArtist || "").toString() : ""
+        readonly property string album: controls.localCurrent ? player.metaData.albumTitle || "" : ""
         Text {
-            width: parent.width; color: carPalette.text; font.pixelSize: controls.compact ? 28 : 34
+            width: parent.width; color: carPalette.text
+            horizontalAlignment: controls.centered ? Text.AlignHCenter : Text.AlignLeft
+            font.pixelSize: controls.centered ? (controls.compact ? 34 : 44) : (controls.compact ? 28 : 34)
             elide: Text.ElideRight
             text: controls.idleCard ? qsTranslate("Sailplay", "Not Playing")
                                   : controls.localCurrent ? player.metaData.title || player.identity || carController.lastMusicName : carController.lastMusicName
             textFormat: Text.PlainText
-            wrapMode: controls.compact ? Text.NoWrap : Text.Wrap
-            maximumLineCount: controls.compact ? 1 : 2
+            wrapMode: controls.centered || controls.compact ? Text.NoWrap : Text.Wrap
+            maximumLineCount: controls.centered || controls.compact ? 1 : 2
         }
         Text {
-            width: parent.width; color: carPalette.secondary; font.pixelSize: 26
+            width: parent.width; color: carPalette.secondary
+            horizontalAlignment: controls.centered ? Text.AlignHCenter : Text.AlignLeft
+            font.pixelSize: controls.centered ? (controls.compact ? 27 : 30) : 26
             elide: Text.ElideRight
-            text: controls.playbackError || carController.musicError || (controls.idleCard ? carController.lastMusicName : controls.localCurrent ? (player.metaData.contributingArtist || "").toString() : "")
+            text: controls.playbackError || carController.musicError || (controls.idleCard ? carController.lastMusicName
+                : controls.centered && trackInfo.album ? (trackInfo.artist ? trackInfo.artist + " · " + trackInfo.album : trackInfo.album)
+                : trackInfo.artist)
             textFormat: Text.PlainText
+            visible: !controls.centered || !!text
         }
         Text {
             width: parent.width; color: carPalette.secondary; font.pixelSize: 25
-            visible: !controls.compact && !!text
-            elide: Text.ElideRight; text: controls.localCurrent ? player.metaData.albumTitle || "" : ""
+            visible: !controls.centered && !controls.compact && !!text
+            elide: Text.ElideRight; text: trackInfo.album
             textFormat: Text.PlainText
         }
         Text {
             width: parent.width; color: carPalette.secondary; font.pixelSize: 22
+            visible: !controls.centered
             elide: Text.ElideRight; text: controls.idleCard || !controls.localCurrent ? "" : player.identity || ""
             textFormat: Text.PlainText
         }
     }
     MouseArea { width: parent.width; height: controls.headerHeight; onClicked: controls.clicked() }
     Row {
-        y: controls.headerHeight + 24; width: parent.width
+        y: controls.headerHeight + controls.controlGap; width: parent.width
         Repeater {
             model: 3
             Item {
@@ -213,7 +235,7 @@ Item {
                     opacity: enabled ? 1 : 0.35
                     Silica.Icon {
                         anchors.centerIn: parent
-                        width: controls.compact ? 44 : 52; height: width
+                        width: Math.min(controls._squareSize * .65, controls.centered ? 60 : controls.compact ? 44 : 52); height: width
                         color: carPalette.text
                         source: index === 0 ? "image://theme/icon-m-simple-previous"
                               : index === 2 ? "image://theme/icon-m-simple-next"
@@ -245,7 +267,7 @@ Item {
                 opacity: enabled ? 1 : 0.35
                 Canvas {
                     anchors.centerIn: parent
-                    width: controls.compact ? 44 : 52; height: width
+                    width: Math.min(controls._squareSize * .65, controls.centered ? 60 : controls.compact ? 44 : 52); height: width
                     property int mode: controls.playbackMode
                     property color ink: carPalette.text
                     onModeChanged: requestPaint()
@@ -293,7 +315,9 @@ Item {
         id: playerSelector
         objectName: "playerSelector"
         property int rowHeight: 84
-        y: -(height + 16); width: parent.width; height: 76; radius: 14; color: carPalette.button
+        parent: controls.playerSelectorHost || controls
+        y: controls.playerSelectorHost ? 0 : -(height + 16)
+        width: parent.width; height: 76; radius: 14; color: carPalette.button
         visible: !controls.compact
         z: 20
         Image {

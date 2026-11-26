@@ -147,6 +147,10 @@
       <translation>音乐</translation>
     </message>
     <message>
+      <source>Show lyrics</source>
+      <translation>显示歌词</translation>
+    </message>
+    <message>
       <source>No music playing
 Start music on your phone</source>
       <translation>暂无音乐播放

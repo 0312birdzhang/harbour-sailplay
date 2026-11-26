@@ -526,6 +526,7 @@ class CarUiController : public QObject
     Q_PROPERTY(bool followAmbience READ followAmbience NOTIFY themeSettingsChanged)
     Q_PROPERTY(int themeMode READ themeMode NOTIFY themeSettingsChanged)
     Q_PROPERTY(bool musicActive READ musicActive NOTIFY currentAppChanged)
+    Q_PROPERTY(bool showMusicLyrics READ showMusicLyrics NOTIFY showMusicLyricsChanged)
     Q_PROPERTY(bool returnToDashboard READ returnToDashboard NOTIFY currentAppChanged)
     Q_PROPERTY(bool hasRememberedMusic READ hasRememberedMusic NOTIFY rememberedMusicChanged)
     Q_PROPERTY(QString lastMusicApp READ lastMusicApp NOTIFY rememberedMusicChanged)
@@ -548,6 +549,7 @@ public:
           m_content(new SailplayContentHost(this)), m_music(new SailplayMusicHost(this))
     {
         m_loggingEnabled = diagnosticLoggingEnabled();
+        updateMusicSettings();
         m_dashboardMapSetting = QSettings(dashboardConfigPath(), QSettings::IniFormat).value("Dashboard/map").toString();
         m_weatherLocations = dashboardWeatherLocations();
         connect(this, &CarUiController::currentAppChanged, this, [this]() {
@@ -573,6 +575,7 @@ public:
             if (stamp != m_configStamp)
                 reloadConfig();
             updateTheme();
+            updateMusicSettings();
             updateServiceState();
             updateReconnectState();
             const bool logging = diagnosticLoggingEnabled();
@@ -811,6 +814,15 @@ public:
     }
     static QString uiStatePath() {
         return QDir::homePath() + QStringLiteral("/.config/sailplay/ui-state.ini");
+    }
+    bool showMusicLyrics() const { return m_showMusicLyrics; }
+    Q_INVOKABLE bool setShowMusicLyrics(bool show) {
+        QSettings settings(musicSettingsPath(), QSettings::IniFormat);
+        settings.setValue(QStringLiteral("ShowLyrics"), show);
+        settings.sync();
+        if (settings.status() != QSettings::NoError) return false;
+        updateMusicSettings();
+        return true;
     }
     void saveShellView(const QString &view) {
         QDir().mkpath(QFileInfo(uiStatePath()).absolutePath());
@@ -1522,6 +1534,7 @@ signals:
     void playerQueueAvailable(const QString &service, const QVariantList &items, int index, const QString &revision, bool loading, bool error);
     void playerPositionAvailable(const QString &service, const QString &trackKey, double seconds);
     void themeSettingsChanged();
+    void showMusicLyricsChanged();
     void rememberedMusicChanged();
     void musicAppRequested(const QString &appId);
     void dashboardSettingsChanged();
@@ -1539,6 +1552,18 @@ signals:
     void statusChanged();
 
 private:
+    static QString musicSettingsPath() {
+        return QDir::homePath() + QStringLiteral("/.config/sailplay/music.ini");
+    }
+    void updateMusicSettings() {
+        QSettings settings(musicSettingsPath(), QSettings::IniFormat);
+        settings.sync();
+        const bool show = settings.value(QStringLiteral("ShowLyrics"), true).toBool();
+        if (settings.status() != QSettings::NoError || show == m_showMusicLyrics) return;
+        m_showMusicLyrics = show;
+        emit showMusicLyricsChanged();
+    }
+    bool m_showMusicLyrics = true;
     QStringList m_permissionApps;
     void requestCommunicationPermission()
     {

@@ -147,6 +147,10 @@
       <translation>Musique</translation>
     </message>
     <message>
+      <source>Show lyrics</source>
+      <translation>Afficher les paroles</translation>
+    </message>
+    <message>
       <source>No music playing
 Start music on your phone</source>
       <translation>Aucune musique en cours
