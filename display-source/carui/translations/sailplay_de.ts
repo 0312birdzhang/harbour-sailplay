@@ -288,6 +288,10 @@ Musik auf dem Telefon starten</translation>
       <translation>Verarbeitung von Musikcovern</translation>
     </message>
     <message>
+      <source>SailfishOS system integration reference</source>
+      <translation>Referenz für SailfishOS-Systemintegration</translation>
+    </message>
+    <message>
       <source>CarPlay receiver and interoperability testing</source>
       <translation>CarPlay-Empfänger und Kompatibilitätstests</translation>
     </message>

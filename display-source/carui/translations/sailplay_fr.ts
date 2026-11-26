@@ -288,6 +288,10 @@ Lancez la musique sur votre téléphone</translation>
       <translation>Gestion des pochettes musicales</translation>
     </message>
     <message>
+      <source>SailfishOS system integration reference</source>
+      <translation>Référence d'intégration système SailfishOS</translation>
+    </message>
+    <message>
       <source>CarPlay receiver and interoperability testing</source>
       <translation>Récepteur CarPlay et tests de compatibilité</translation>
     </message>

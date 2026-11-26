@@ -133,6 +133,7 @@ Sailplay builds on and learns from the following projects:
 - [Imira](https://github.com/JimKnopfIoT/harbour-imira): virtual compositor, screen capture and convergence implementation; also a reference for PulseAudio latency handling.
 - [sailfish-weather](https://github.com/sailfishos/sailfish-weather): weather components and the Events view weather integration reference.
 - [zzmusic](https://github.com/ZeroX-S/zzmusic): a reference for music artwork handling.
+- [Sailfish Connect](https://github.com/R1tschY/harbour-sailfishconnect): a reference for SailfishOS system integration.
 - [DiPlay](https://github.com/shihabal3amri/DiPlay): a CarPlay receiver used for interoperability testing and audio/input investigation.
 - The Android Auto WPP, AAP, TLS and media implementation follows DiAuto's head-unit code. [DiAuto](https://github.com/shihabal3amri/DiAuto)
 - [Qt](https://www.qt.io/) and Sailfish Silica / Amber.Mpris: the application UI, Wayland compositor and music controls.

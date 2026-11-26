@@ -288,6 +288,10 @@ Start music on your phone</source>
       <translation>音乐封面处理参考</translation>
     </message>
     <message>
+      <source>SailfishOS system integration reference</source>
+      <translation>SailfishOS 系统集成参考</translation>
+    </message>
+    <message>
       <source>CarPlay receiver and interoperability testing</source>
       <translation>CarPlay 接收端与互操作测试</translation>
     </message>

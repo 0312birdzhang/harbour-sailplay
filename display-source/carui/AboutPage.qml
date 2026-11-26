@@ -134,6 +134,7 @@ Page {
                     { name: "Imira", url: "https://github.com/JimKnopfIoT/harbour-imira", detail: qsTranslate("Sailplay", "Virtual display, capture and audio latency") },
                     { name: "sailfish-weather", url: "https://github.com/sailfishos/sailfish-weather", detail: qsTranslate("Sailplay", "Weather components and Events view reference") },
                     { name: "zzmusic", url: "https://github.com/ZeroX-S/zzmusic", detail: qsTranslate("Sailplay", "Music artwork handling") },
+                    { name: "Sailfish Connect", url: "https://github.com/R1tschY/harbour-sailfishconnect", detail: qsTranslate("Sailplay", "SailfishOS system integration reference") },
                     { name: "DiPlay", url: "https://github.com/shihabal3amri/DiPlay", detail: qsTranslate("Sailplay", "CarPlay receiver and interoperability testing") },
                     { name: "Qt", url: "https://www.qt.io/", detail: qsTranslate("Sailplay", "Application UI and music controls") },
                     { name: "Sailfish Silica", url: "https://docs.sailfishos.org/Reference/Silica/", detail: qsTranslate("Sailplay", "Application UI and music controls") },
