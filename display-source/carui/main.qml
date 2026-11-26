@@ -262,6 +262,7 @@ Window {
                 anchors.right:parent.right;anchors.rightMargin:carController.musicContentAvailable ? 196 : 16
                 y:16;z:5;width:164;height:76;radius:14;color:carPalette.button
                 visible:carController.musicActive && !!musicCard.player && !!musicCard.player.currentService
+                    && carController.playerQueueSupported(musicCard.player.currentService)
                 Text {anchors.centerIn:parent;text:qsTranslate("Sailplay","Queue");font.pixelSize:24;color:carPalette.text}
                 MouseArea {anchors.fill:parent;onClicked:musicCard.queueOpen=true}
             }
@@ -452,7 +453,7 @@ Window {
             }
             PlayerQueue {
                 anchors.fill:parent;z:30
-                visible:carController.musicActive && musicCard.queueOpen
+                visible:carController.musicActive && musicCard.queueOpen && musicQueueButton.visible
                 palette:carPalette
                 playing:lockscreenMusic.playing
                 service:musicCard.player ? musicCard.player.currentService : ""

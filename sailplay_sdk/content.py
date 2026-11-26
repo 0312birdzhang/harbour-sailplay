@@ -79,7 +79,7 @@ class ContentBackend(Backend):
     session_type = ContentSessionObject
 
     def __init__(self, service, application_id, actions, state=None, bus=None, path=APP_PATH,
-                 on_lifecycle=None):
+                 on_lifecycle=None, capabilities=()):
         if not {'content.browse', 'content.search'}.issubset(actions):
             raise ValueError('content providers must implement browse and search')
         actions = dict(actions)
@@ -88,7 +88,8 @@ class ContentBackend(Backend):
             actions[name] = lambda parameters, invocation, handler=handler, name=name: handler(
                 validate_query(parameters, search=name == 'content.search'), invocation)
         state = _state_with_presentation({} if state is None else state, content_page())
-        super().__init__(service, application_id, state, actions, ('content',), bus, path, on_lifecycle)
+        super().__init__(service, application_id, state, actions, ('content',) + tuple(capabilities), bus, path,
+                         on_lifecycle)
 
     def publish(self, state):
         value = _state_with_presentation(state)
