@@ -12,6 +12,26 @@ Item {
     property url albumArtSource
     property bool compact: false
     readonly property bool playing: localCurrent && player.playbackStatus === Mpris.Playing
+    // Read the selected player's state so changes in its own UI stay in sync.
+    // 0: repeat track, 1: repeat list, 2: shuffle, 3: sequential.
+    readonly property int playbackMode: !localCurrent ? 3
+        : player.hasLoopStatus && player.loopStatus === Mpris.LoopTrack ? 0
+        : player.hasShuffle && player.shuffle ? 2
+        : player.hasLoopStatus && player.loopStatus === Mpris.LoopPlaylist ? 1 : 3
+    readonly property string playbackModeText: playbackMode === 0 ? qsTranslate("Sailplay", "Repeat track")
+        : playbackMode === 1 ? qsTranslate("Sailplay", "Repeat list")
+        : playbackMode === 2 ? qsTranslate("Sailplay", "Shuffle") : qsTranslate("Sailplay", "Sequential")
+    readonly property bool canCyclePlaybackMode: localCurrent && player.canControl && (player.hasLoopStatus || player.hasShuffle)
+    function cyclePlaybackMode() {
+        if (!canCyclePlaybackMode) return
+        var mode = (playbackMode + 1) % 4
+        // Some players implement only one of the optional MPRIS properties.
+        while ((mode < 2 && !player.hasLoopStatus) || (mode === 2 && !player.hasShuffle))
+            mode = (mode + 1) % 4
+        if (player.hasShuffle) player.shuffle = mode === 2
+        if (player.hasLoopStatus)
+            player.loopStatus = mode === 0 ? Mpris.LoopTrack : mode === 3 ? Mpris.LoopNone : Mpris.LoopPlaylist
+    }
     readonly property bool idleCard: compact && (!localCurrent || !playing && player.playbackStatus !== Mpris.Paused)
     readonly property real _squareSize: compact ? 76 : 88
     readonly property real coverSize: compact ? 112 : Math.min(220, width * .35)
@@ -183,7 +203,7 @@ Item {
         Repeater {
             model: 3
             Item {
-                width: controls.width / 3; height: controls._squareSize
+                width: controls.width / 4; height: controls._squareSize
                 Rectangle {
                     anchors.centerIn: parent; width: controls._squareSize; height: width
                     radius: 14
@@ -210,6 +230,59 @@ Item {
                             else controls.resumeMusic()
                         }
                     }
+                }
+            }
+        }
+        Item {
+            width: controls.width / 4; height: controls._squareSize
+            Rectangle {
+                objectName: "playbackModeButton"
+                anchors.centerIn: parent
+                width: controls._squareSize; height: width
+                radius: 14
+                color: playbackModeTouch.pressed ? carPalette.pressed : carPalette.button
+                enabled: controls.canCyclePlaybackMode
+                opacity: enabled ? 1 : 0.35
+                Canvas {
+                    anchors.centerIn: parent
+                    width: controls.compact ? 44 : 52; height: width
+                    property int mode: controls.playbackMode
+                    property color ink: carPalette.text
+                    onModeChanged: requestPaint()
+                    onInkChanged: requestPaint()
+                    onPaint: {
+                        var c = getContext("2d")
+                        c.clearRect(0, 0, width, height)
+                        c.save(); c.scale(width / 48, height / 48)
+                        c.strokeStyle = ink; c.fillStyle = ink; c.lineWidth = 3
+                        c.lineCap = "round"; c.lineJoin = "round"
+                        function line(points) {
+                            c.beginPath(); c.moveTo(points[0], points[1])
+                            for (var i = 2; i < points.length; i += 2) c.lineTo(points[i], points[i+1])
+                            c.stroke()
+                        }
+                        if (mode === 2) {
+                            line([6,12,13,12,35,36,42,36]); line([36,30,42,36,36,42])
+                            line([6,36,13,36,35,12,42,12]); line([36,6,42,12,36,18])
+                        } else if (mode === 3) {
+                            line([7,10,31,10]); line([7,22,31,22]); line([7,34,42,34])
+                            line([36,28,42,34,36,40])
+                        } else {
+                            line([7,24,7,14,12,9,40,9]); line([34,3,40,9,34,15])
+                            line([41,24,41,34,36,39,8,39]); line([14,33,8,39,14,45])
+                        }
+                        c.restore()
+                    }
+                    Text {
+                        anchors.centerIn: parent; visible: controls.playbackMode === 0
+                        text: "1"; color: carPalette.text; font.pixelSize: 22; font.bold: true
+                    }
+                }
+                MouseArea {
+                    id: playbackModeTouch
+                    objectName: "playbackModeTouch"
+                    anchors.fill: parent
+                    onClicked: controls.cyclePlaybackMode()
                 }
             }
         }

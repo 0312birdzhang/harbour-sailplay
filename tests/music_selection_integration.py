@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
     Item { property Icon icon: Icon {} signal clicked() }
     ''')
     (amber / 'qmldir').write_text('module Amber.Mpris\nMprisController 1.0 MprisController.qml\nsingleton Mpris 1.0 Mpris.qml\n')
-    (amber / 'Mpris.qml').write_text('pragma Singleton\nimport QtQuick 2.0\nQtObject { enum Playback { Stopped, Playing, Paused } }\n')
+    (amber / 'Mpris.qml').write_text('pragma Singleton\nimport QtQuick 2.0\nQtObject { enum Playback { Stopped, Playing, Paused } enum Loop { LoopNone, LoopTrack, LoopPlaylist } }\n')
     (amber / 'MprisController.qml').write_text('''import QtQuick 2.0
     QtObject {
      property bool singleService: true
@@ -33,6 +33,11 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
      property var availableClients: [{service:"org.mpris.MediaPlayer2.BIRD_PC", identity:"BIRD-PC", playbackStatus:1}]
      property int playbackStatus: 2
      property bool canPlay: true
+     property bool canControl: true
+     property bool hasLoopStatus: true
+     property bool hasShuffle: true
+     property int loopStatus: 0
+     property bool shuffle: false
      property bool canPause: true
      property bool canGoNext: true
      property bool canGoPrevious: true
@@ -69,10 +74,54 @@ with tempfile.TemporaryDirectory(prefix='sailplay-music-selection-') as director
       function playMusicPlayer(service) {}
      }
      MusicPlayer { id: music; width: 1000 }
+     function checkPlaybackModes() {
+      var p = music.mprisController
+      function check(ok, message) { if (!ok) throw new Error(message) }
+      function find(item, name) {
+       if (item.objectName === name) return item
+       var children = item.children || []
+       for (var i=0;i<children.length;++i) { var found=find(children[i],name); if(found) return found }
+       return null
+      }
+      var button = find(music, "playbackModeButton")
+      var touch = find(music, "playbackModeTouch")
+      check(button && touch && button.enabled, "mode button missing/disabled")
+      // Click the actual control through a complete cycle, twice.
+      for (var cycle=0;cycle<2;++cycle) {
+       for (var mode=0;mode<4;++mode) {
+        touch.clicked(null)
+        check(music.playbackMode === mode, "wrong mode " + mode)
+        check(p.shuffle === (mode===2), "wrong Shuffle property")
+        check(p.loopStatus === (mode===0 ? 1 : mode===3 ? 0 : 2), "wrong LoopStatus property")
+       }
+      }
+      // External player changes must be reflected without clicking.
+      p.loopStatus=1
+      check(music.playbackMode===0, "external repeat change lost")
+      p.loopStatus=0; p.shuffle=true
+      check(music.playbackMode===2, "external shuffle change lost")
+      p.shuffle=false; p.hasShuffle=false
+      touch.clicked(null); check(music.playbackMode===0, "repeat-only track")
+      touch.clicked(null); check(music.playbackMode===1, "repeat-only list")
+      touch.clicked(null); check(music.playbackMode===3, "repeat-only sequential")
+      p.hasLoopStatus=false; p.hasShuffle=true
+      touch.clicked(null); check(music.playbackMode===2, "shuffle-only random")
+      touch.clicked(null); check(music.playbackMode===3, "shuffle-only sequential")
+      p.hasShuffle=false
+      check(!button.enabled, "unsupported player enabled")
+      p.hasShuffle=true; p.hasLoopStatus=true; p.canControl=false
+      check(!button.enabled, "read-only player enabled")
+      music.cyclePlaybackMode(); check(!p.shuffle && p.loopStatus===0, "read-only player modified")
+      p.canControl=true
+      music.compact=true; check(button.width>0 && button.height===76, "compact mode geometry")
+      music.compact=false; check(button.height===88, "full mode geometry")
+      console.log("PLAYBACK_MODE_PASS cycle external-change capabilities compact full")
+     }
      Timer {
       interval: 300; repeat: true; running: true
       property int stage: 0
       onTriggered: {
+       if (stage === 0) checkPlaybackModes()
        if (stage > 0 && stage < 4 && (music.mprisController.currentService !== "org.mpris.MediaPlayer2.b" || music.pendingApp !== "")) {
         console.log("MUSIC_SELECTION_FAIL", stage, music.mprisController.currentService, music.pendingApp)
         Qt.quit(); return

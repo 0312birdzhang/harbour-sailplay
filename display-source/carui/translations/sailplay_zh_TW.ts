@@ -674,6 +674,10 @@ Start music on your phone</source>
     <message><source>Loading lyrics…</source><translation>正在載入歌詞…</translation></message>
     <message><source>No lyrics available</source><translation>暫無歌詞</translation></message>
     <message><source>Player</source><translation>播放器</translation></message>
+    <message><source>Repeat track</source><translation>單曲循環</translation></message>
+    <message><source>Repeat list</source><translation>列表循環</translation></message>
+    <message><source>Shuffle</source><translation>隨機播放</translation></message>
+    <message><source>Sequential</source><translation>順序播放</translation></message>
   </context>
   <context>
     <name>CarUiController</name>

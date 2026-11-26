@@ -674,6 +674,10 @@ Start music on your phone</source>
     <message><source>Loading lyrics…</source><translation>Загрузка текста…</translation></message>
     <message><source>No lyrics available</source><translation>Текст недоступен</translation></message>
     <message><source>Player</source><translation>Проигрыватель</translation></message>
+    <message><source>Repeat track</source><translation>Повтор трека</translation></message>
+    <message><source>Repeat list</source><translation>Повтор списка</translation></message>
+    <message><source>Shuffle</source><translation>В случайном порядке</translation></message>
+    <message><source>Sequential</source><translation>По порядку</translation></message>
   </context>
   <context>
     <name>CarUiController</name>

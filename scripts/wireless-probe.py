@@ -167,6 +167,12 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
     phase = 'detection'
     received_bytes = 0
     exit_reason = 'duration'
+    # Filled from the accessory's iAP2 IdentificationInformation message.
+    # Keep this separate from the Bluetooth alias: it is the name reported by
+    # the CarPlay head unit itself and is useful when several vehicles are
+    # paired.  A missing or malformed identity must not prevent projection.
+    head_unit_identity = {'name': None, 'model': None, 'manufacturer': None}
+    head_unit_identity_received = False
     logging.info('iAP2 connection start transport=%s role=%s local=%s peer=%s durationSeconds=%s',
                  transport, connection_role, socket_endpoint(sock,'getsockname'), socket_endpoint(sock,'getpeername'), duration)
     handover_started = False
@@ -190,6 +196,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
             session_data = start.as_dict()
             session_data['device_name'] = local_name
             session_data['bluetooth_address'] = local_address
+            session_data['head_unit'] = dict(head_unit_identity)
             if bluetooth_device:
                 session_data['bluetooth_device'] = bluetooth_device
             json.dump(session_data, output)
@@ -360,7 +367,19 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                     logging.info('CSM rx body=%s', payload_hex(frame.body, 4096))
                                 if frame.message_id == 0x1d01:
                                     identity = {}
-                                    for parameter in frame.parameters():
+                                    try:
+                                        identification_parameters = frame.parameters()
+                                    except ValueError as error:
+                                        head_unit_identity_received = True
+                                        logging.warning('head-unit identity unavailable: malformed identification message (%s)',
+                                                        type(error).__name__)
+                                        # Continue the normal iAP2 identification
+                                        # exchange even when optional identity
+                                        # data cannot be decoded.
+                                        outgoing.extend([Frame(0x1d02, b''), Frame(0xaa00, b'')])
+                                        continue
+                                    head_unit_identity_received = True
+                                    for parameter in identification_parameters:
                                         if parameter.id in (0, 1, 2):
                                             identity[parameter.id] = text_value(parameter.payload)
                                         elif parameter.id in (6, 7):
@@ -374,11 +393,26 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                                 peer_received_messages = set(ids)
                                             else:
                                                 peer_sent_messages = set(ids)
-                                    logging.info('accessory identity name=%r model=%r manufacturer=%r',
-                                                 identity.get(0, ''), identity.get(1, ''), identity.get(2, ''))
+                                    # IdentificationInformation is optional in
+                                    # practice and some accessories omit one or
+                                    # more strings.  Record explicit unknowns,
+                                    # then continue with the protocol IDs.
+                                    head_unit_identity.update({
+                                        'name': identity.get(0) or None,
+                                        'model': identity.get(1) or None,
+                                        'manufacturer': identity.get(2) or None,
+                                    })
+                                    logging.info('head-unit identity name=%r model=%r manufacturer=%r',
+                                                 head_unit_identity['name'] or '<unknown>',
+                                                 head_unit_identity['model'] or '<unknown>',
+                                                 head_unit_identity['manufacturer'] or '<unknown>')
+                                    if not all(head_unit_identity.values()):
+                                        logging.warning('head-unit identity incomplete; missing=%s',
+                                                        ','.join(key for key, value in head_unit_identity.items()
+                                                                if not value))
                                     logging.info('identification parameter ids=%s',
                                                  [(parameter.id, len(parameter.payload))
-                                                  for parameter in frame.parameters()])
+                                                  for parameter in identification_parameters])
                                     parse_ea_protocols(frame)
                                     if transport == 'bluetooth' and not offers_wireless_carplay(
                                             peer_sent_messages, peer_received_messages):
@@ -561,6 +595,12 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
         logging.exception('probe failed transport=%s role=%s phase=%s elapsedMs=%.1f receivedBytes=%d',
                           transport, connection_role, phase, (time.monotonic() - started) * 1000, received_bytes)
     finally:
+        if not head_unit_identity_received:
+            logging.warning('head-unit identity unavailable: accessory did not provide IdentificationInformation')
+        elif not head_unit_identity['name']:
+            logging.warning('head-unit name unavailable; model=%r manufacturer=%r',
+                            head_unit_identity['model'] or '<unknown>',
+                            head_unit_identity['manufacturer'] or '<unknown>')
         logging.info('iAP2 connection ended transport=%s role=%s phase=%s reason=%s elapsedMs=%.1f receivedBytes=%d negotiated=%s authenticated=%s',
                      transport, connection_role, phase, 'stopped' if stop.is_set() else exit_reason,
                      (time.monotonic() - started) * 1000, received_bytes, negotiated, authenticated)

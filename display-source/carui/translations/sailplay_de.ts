@@ -674,6 +674,10 @@ Musik auf dem Telefon starten</translation>
     <message><source>Loading lyrics…</source><translation>Liedtext wird geladen…</translation></message>
     <message><source>No lyrics available</source><translation>Kein Liedtext verfügbar</translation></message>
     <message><source>Player</source><translation>Wiedergabeprogramm</translation></message>
+    <message><source>Repeat track</source><translation>Titel wiederholen</translation></message>
+    <message><source>Repeat list</source><translation>Liste wiederholen</translation></message>
+    <message><source>Shuffle</source><translation>Zufallswiedergabe</translation></message>
+    <message><source>Sequential</source><translation>Der Reihe nach</translation></message>
   </context>
   <context>
     <name>CarUiController</name>
