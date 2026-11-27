@@ -19,6 +19,8 @@ MANEUVERS = frozenset(('unknown', 'continue', 'slight-left', 'slight-right',
 FIELDS = frozenset(('state', 'mode', 'maneuver', 'exitNumber', 'drivingSide',
                    'nextDistanceMeters', 'remainingDistanceMeters', 'remainingSeconds',
                    'currentRoad', 'nextRoad', 'destination', 'updatedMs'))
+OPTIONAL_FIELDS = frozenset(('speedMps', 'speedLimitMps'))
+ALL_FIELDS = FIELDS | OPTIONAL_FIELDS
 MAX_AGE_MS = 10000
 
 
@@ -34,7 +36,7 @@ def unsigned(value, maximum=MAX_UINT64):
 
 def validate_guidance(value, now_ms=None):
     """Validate a complete wire model and discard guidance in terminal states."""
-    if not isinstance(value, dict) or set(value) != FIELDS:
+    if not isinstance(value, dict) or not (FIELDS <= set(value) <= ALL_FIELDS):
         raise Fault('InvalidArgument', 'guidance must contain the Navigation1 fields')
     state = value['state']
     if not isinstance(state, str) or state not in STATES:
@@ -55,20 +57,31 @@ def validate_guidance(value, now_ms=None):
         if (not isinstance(number, (int, float)) or isinstance(number, (bool, Boolean))
                 or not 0 <= number <= sys.float_info.max):
             raise Fault('InvalidArgument', 'navigation distances must be finite nonnegative meters')
+    for key in OPTIONAL_FIELDS:
+        if key in value:
+            number = value[key]
+            if (not isinstance(number, (int, float)) or isinstance(number, (bool, Boolean))
+                    or not -sys.float_info.max <= number <= sys.float_info.max):
+                raise Fault('InvalidArgument', 'navigation speeds must be finite meters per second')
     for key in ('currentRoad', 'nextRoad', 'destination'):
         text = value[key]
         if not isinstance(text, str) or len(text) > 1024 or '\0' in text:
             raise Fault('InvalidArgument', 'navigation text must be bounded UTF-8')
     if state != 'active':
         return _empty_guidance(state, int(value['updatedMs']))
-    return {key: (float(value[key]) if key.endswith('DistanceMeters') else value[key])
-            for key in FIELDS}
+    result = {key: (float(value[key]) if key.endswith('DistanceMeters') else value[key])
+              for key in FIELDS}
+    for key in OPTIONAL_FIELDS:
+        number = float(value.get(key, -1.0))
+        result[key] = number if number >= 0 else -1.0
+    return result
 
 
 def _empty_guidance(state, updated_ms):
     return dict(state=state, mode='driving', maneuver='unknown', exitNumber=0,
                 drivingSide='right', nextDistanceMeters=0.0, remainingDistanceMeters=0.0,
-                remainingSeconds=0, currentRoad='', nextRoad='', destination='', updatedMs=updated_ms)
+                remainingSeconds=0, currentRoad='', nextRoad='', destination='', updatedMs=updated_ms,
+                speedMps=-1.0, speedLimitMps=-1.0)
 
 
 def guidance(state='idle', updated_ms=None, **values):

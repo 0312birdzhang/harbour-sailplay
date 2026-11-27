@@ -44,8 +44,9 @@ bool validGuidance(const QVariantMap &value)
         QStringLiteral("exitNumber"), QStringLiteral("drivingSide"), QStringLiteral("nextDistanceMeters"),
         QStringLiteral("remainingDistanceMeters"), QStringLiteral("remainingSeconds"), QStringLiteral("currentRoad"),
         QStringLiteral("nextRoad"), QStringLiteral("destination"), QStringLiteral("updatedMs")};
-    const QStringList keys = value.keys();
-    if (QSet<QString>::fromList(keys) != fields) return false;
+    const QSet<QString> optionalFields = {QStringLiteral("speedMps"), QStringLiteral("speedLimitMps")};
+    const QSet<QString> keys = QSet<QString>::fromList(value.keys());
+    if (!keys.contains(fields) || !(keys - fields - optionalFields).isEmpty()) return false;
     const QMap<QString, QStringList> enums = {
         {QStringLiteral("state"), {QStringLiteral("idle"), QStringLiteral("active"), QStringLiteral("unavailable"),
                                   QStringLiteral("stopped"), QStringLiteral("arrived")}},
@@ -68,6 +69,13 @@ bool validGuidance(const QVariantMap &value)
         const QVariant number = value.value(key);
         if ((!unsignedInteger(number) && number.type() != QVariant::Double)
             || !std::isfinite(number.toDouble()) || number.toDouble() < 0) return false;
+    }
+    for (const QString &key : optionalFields) {
+        if (!value.contains(key)) continue;
+        const QVariant number = value.value(key);
+        if ((number.type() != QVariant::Double && number.type() != QVariant::Int && number.type() != QVariant::LongLong
+                && number.type() != QVariant::UInt && number.type() != QVariant::ULongLong)
+            || !std::isfinite(number.toDouble())) return false;
     }
     for (const QString &key : {QStringLiteral("currentRoad"), QStringLiteral("nextRoad"), QStringLiteral("destination")}) {
         const QVariant text = value.value(key);
@@ -92,6 +100,8 @@ QVariantMap clearedGuidance(const QVariantMap &value, const QString &state)
     result[QStringLiteral("nextDistanceMeters")] = 0.0;
     result[QStringLiteral("remainingDistanceMeters")] = 0.0;
     result[QStringLiteral("remainingSeconds")] = qulonglong(0);
+    result[QStringLiteral("speedMps")] = -1.0;
+    result[QStringLiteral("speedLimitMps")] = -1.0;
     for (const QString &key : {QStringLiteral("currentRoad"), QStringLiteral("nextRoad"), QStringLiteral("destination")})
         result[key] = QString();
     return result;

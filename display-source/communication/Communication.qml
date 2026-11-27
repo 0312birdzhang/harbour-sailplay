@@ -23,6 +23,7 @@ Window {
     CarUi.CarPalette {
         id: palette
         day: dayTheme
+        ambience: followAmbience
     }
     function submit(action, parameters) {
         if (!renderer.ready || pending) return

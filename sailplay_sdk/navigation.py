@@ -15,6 +15,8 @@ def wire_guidance(value):
     value['exitNumber'] = dbus.UInt32(value['exitNumber'])
     value['nextDistanceMeters'] = dbus.Double(value['nextDistanceMeters'])
     value['remainingDistanceMeters'] = dbus.Double(value['remainingDistanceMeters'])
+    value['speedMps'] = dbus.Double(value['speedMps'])
+    value['speedLimitMps'] = dbus.Double(value['speedLimitMps'])
     return wire_dictionary(value)
 
 

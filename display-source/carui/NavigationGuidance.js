@@ -4,6 +4,10 @@ function distance(meters) {
     return meters >= 1000 ? (meters / 1000).toFixed(1) + " km" : Math.round(meters) + " m"
 }
 
+function speedKmh(mps) {
+    return Math.round(mps * 3.6)
+}
+
 function symbol(maneuver, drivingSide, exitNumber) {
     var symbols = {
         "continue": "↑", "slight-left": "↖", "slight-right": "↗",

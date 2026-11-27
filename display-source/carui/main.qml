@@ -248,6 +248,8 @@ Window {
             readonly property real centeredBodyTop: carController.musicActive ? 108 : 20
             readonly property bool showProgress: !lockscreenMusic.idleCard
             property bool queueOpen: false
+            readonly property bool queueSupported: carController.musicActive && !!musicCard.player
+                && !!musicCard.player.currentService && carController.playerQueueSupported(musicCard.player.currentService)
             property string artworkKey: player ? String(player.metaData.artUrl || player.metaData.url || "") : ""
             property url artwork: ""
             onArtworkKeyChanged: refreshArtwork()
@@ -262,14 +264,17 @@ Window {
             function openMusic() {
                 carController.openMusic()
             }
+            Item {
+                id: musicMainView
+                anchors.fill: parent
+                visible: !playerQueue.visible
             MouseArea { anchors.fill: parent; onClicked: musicCard.openMusic() }
             Rectangle {
                 id: musicQueueButton
                 objectName: "musicQueueButton"
                 anchors.right:parent.right;anchors.rightMargin:carController.musicContentAvailable ? 196 : 16
                 y:16;z:5;width:164;height:76;radius:14;color:carPalette.button
-                visible:carController.musicActive && !!musicCard.player && !!musicCard.player.currentService
-                    && carController.playerQueueSupported(musicCard.player.currentService)
+                visible:musicCard.queueSupported
                 Text {anchors.centerIn:parent;text:qsTranslate("Sailplay","Queue");font.pixelSize:24;color:carPalette.text}
                 MouseArea {anchors.fill:parent;onClicked:musicCard.queueOpen=true}
             }
@@ -460,9 +465,11 @@ Window {
                 Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Open music app"); font.pixelSize: 24; color: carPalette.text }
                 MouseArea { anchors.fill: parent; onClicked: carController.ensureMusicBackend() }
             }
+            }
             PlayerQueue {
+                id: playerQueue
                 anchors.fill:parent;z:30
-                visible:carController.musicActive && musicCard.queueOpen && musicQueueButton.visible
+                visible:musicCard.queueOpen && musicCard.queueSupported
                 palette:carPalette
                 playing:lockscreenMusic.playing
                 service:musicCard.player ? musicCard.player.currentService : ""

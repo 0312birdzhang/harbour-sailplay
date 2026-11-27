@@ -265,6 +265,67 @@ Rectangle {
             }
         }
 
+        Rectangle {
+            id: speedBadge
+            objectName: "navigationSpeedBadge"
+            anchors.left: routePreview.visible ? routePreview.right : parent.left
+            anchors.leftMargin: routePreview.visible ? 12 : 16
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 16
+            readonly property real speedMps: displayGuidance.speedMps !== undefined ? displayGuidance.speedMps : -1
+            readonly property real speedLimitMps: displayGuidance.speedLimitMps !== undefined ? displayGuidance.speedLimitMps : -1
+            readonly property bool hasSpeed: speedMps >= 0
+            readonly property bool hasLimit: speedLimitMps > 0
+            readonly property bool exceeded: hasSpeed && hasLimit && speedMps > speedLimitMps
+            visible: mapMode && !compact && !panelOpen && showGuidance && (hasSpeed || hasLimit)
+            height: Math.max(64, routePreview.visible ? routePreview.height : 64)
+            width: speedRow.width + 28
+            radius: 14
+            color: palette.card
+            opacity: 0.93
+            MouseArea { anchors.fill: parent }
+            Row {
+                id: speedRow
+                anchors.centerIn: parent
+                spacing: 12
+                Row {
+                    visible: speedBadge.hasSpeed
+                    spacing: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    Text {
+                        objectName: "navigationSpeedValue"
+                        text: speedBadge.hasSpeed ? String(Guidance.speedKmh(speedBadge.speedMps)) : ""
+                        color: speedBadge.exceeded ? "#e53935" : palette.text
+                        font.pixelSize: 28
+                        font.bold: true
+                        anchors.baseline: speedUnit.baseline
+                    }
+                    Text {
+                        id: speedUnit
+                        text: "km/h"
+                        color: palette.secondary
+                        font.pixelSize: 18
+                    }
+                }
+                Rectangle {
+                    objectName: "navigationSpeedLimit"
+                    visible: speedBadge.hasLimit
+                    width: 44; height: 44; radius: 22
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: "white"
+                    border.color: "#d32f2f"
+                    border.width: 4
+                    Text {
+                        anchors.centerIn: parent
+                        text: speedBadge.hasLimit ? String(Guidance.speedKmh(speedBadge.speedLimitMps)) : ""
+                        color: "#111111"
+                        font.pixelSize: 18
+                        font.bold: true
+                    }
+                }
+            }
+        }
+
         MapDestinationPanel {
             id: destinationPanel
             objectName: "navigationDestinationPanel"

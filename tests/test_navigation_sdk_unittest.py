@@ -17,7 +17,7 @@ from carplay_proto.navigationsender import NavigationSender
 from carplay_proto.wire import Frame, encode_param
 from sailplay_sdk.contract import NAVIGATION_INTERFACE, signatures
 from sailplay_sdk.discovery import discover, read_declaration
-from sailplay_sdk.guidance import FIELDS, guidance, validate_guidance
+from sailplay_sdk.guidance import ALL_FIELDS, FIELDS, guidance, validate_guidance
 from sailplay_sdk.model import Fault, MAX_UINT64
 
 
@@ -34,9 +34,16 @@ class GuidanceTests(unittest.TestCase):
 
     def test_complete_model_and_si_units(self):
         value = validate_guidance(active_guidance(), 20000)
-        self.assertEqual(set(value), FIELDS)
+        self.assertEqual(set(value), ALL_FIELDS)
         self.assertEqual(value['nextDistanceMeters'], 200.0)
         self.assertEqual(value['remainingSeconds'], 300)
+        self.assertEqual(value['speedMps'], -1.0)
+        self.assertEqual(value['speedLimitMps'], -1.0)
+        legacy = {key: value[key] for key in FIELDS}
+        self.assertEqual(validate_guidance(legacy, 20000)['speedMps'], -1.0)
+        moving = validate_guidance(dict(active_guidance(), speedMps=15.5, speedLimitMps=16.67), 20000)
+        self.assertEqual(moving['speedMps'], 15.5)
+        self.assertEqual(moving['speedLimitMps'], 16.67)
 
     def test_missing_and_unknown_fields_fail(self):
         for key in FIELDS:
@@ -54,7 +61,10 @@ class GuidanceTests(unittest.TestCase):
                  ('remainingSeconds', True), ('updatedMs', True), ('updatedMs', -1),
                  ('nextDistanceMeters', float('nan')), ('nextDistanceMeters', float('inf')),
                  ('nextDistanceMeters', -1), ('nextDistanceMeters', 1 << 4096),
-                 ('nextDistanceMeters', True), ('currentRoad', 'x\0y'),
+                 ('nextDistanceMeters', True), ('speedMps', float('nan')),
+                 ('speedMps', float('inf')), ('speedMps', True),
+                 ('speedLimitMps', float('nan')), ('speedLimitMps', True),
+                 ('currentRoad', 'x\0y'),
                  ('nextRoad', 'x' * 1025), ('destination', None))
         for key, invalid in cases:
             value = active_guidance()

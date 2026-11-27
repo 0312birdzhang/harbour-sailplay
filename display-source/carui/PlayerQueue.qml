@@ -13,7 +13,8 @@ Rectangle {
     property bool playingItem: false
     property bool playing: false
     signal closed()
-    radius: 22; color: palette.card
+    // musicCard, which hosts this panel, already draws the surface.
+    radius: 22; color: "transparent"
     onVisibleChanged: if(visible)refresh()
     onServiceChanged: {items=[];revision="";currentIndex=-1;playingItem=false;if(visible)refresh()}
     function refresh() {

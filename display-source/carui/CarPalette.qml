@@ -10,7 +10,7 @@ QtObject {
     // ambience accent. With the headlight or scheduled themes, which may
     // disagree with the phone's light or dark scheme, the fixed day and night
     // colours below are used instead.
-    readonly property bool ambience: carController.followAmbience === true
+    property bool ambience: typeof carController !== "undefined" && carController.followAmbience === true
     property ConfigurationValue appBackground: ConfigurationValue {
         key: "/desktop/jolla/background/portrait/app_picture_filename"
         defaultValue: ""

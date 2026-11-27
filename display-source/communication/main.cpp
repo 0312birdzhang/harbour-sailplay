@@ -90,9 +90,13 @@ int main(int argc, char **argv)
     SailplayThemeSettings theme;
     theme.update();
     engine.rootContext()->setContextProperty(QStringLiteral("dayTheme"), theme.dayTheme());
+    engine.rootContext()->setContextProperty(QStringLiteral("followAmbience"), theme.followAmbience());
     QTimer themeTimer;
     QObject::connect(&themeTimer, &QTimer::timeout, &engine, [&]() {
-        if (theme.update()) engine.rootContext()->setContextProperty(QStringLiteral("dayTheme"), theme.dayTheme());
+        if (theme.update()) {
+            engine.rootContext()->setContextProperty(QStringLiteral("dayTheme"), theme.dayTheme());
+            engine.rootContext()->setContextProperty(QStringLiteral("followAmbience"), theme.followAmbience());
+        }
     });
     themeTimer.start(1000);
     const auto updateState = [&]() {

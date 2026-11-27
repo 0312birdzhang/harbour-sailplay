@@ -29,7 +29,7 @@ Rectangle {
     readonly property real buttonSize: 76 * uiScale
     // Width left to browsing once the side panel has taken its share.
     property real mainWidth: width - 2 * margin - (side ? sidePanel.width + margin : 0)
-    color: palette.overlayBackgroundColor
+    color: palette.surface
     radius: 22
     clip: true
 

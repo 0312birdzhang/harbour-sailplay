@@ -28,7 +28,8 @@ def organicmaps_snapshot(snapshot):
                       nextDistanceMeters=meters(raw['nextDistance'], raw['nextDistanceUnit']),
                       remainingDistanceMeters=meters(raw['remainingDistance'], raw['remainingDistanceUnit']),
                       remainingSeconds=min(raw['remainingSeconds'], (1 << 64) - 1),
-                      currentRoad=raw['currentRoad'], nextRoad=raw['nextRoad'], destination=raw['destination'])
+                      currentRoad=raw['currentRoad'], nextRoad=raw['nextRoad'], destination=raw['destination'],
+                      speedMps=raw.get('speedMps', -1.0), speedLimitMps=raw.get('speedLimitMps', -1.0))
     return dict(providerId='organicmaps-legacy',
                 instanceId='{}:{}'.format(snapshot['pid'], snapshot['startTicks']),
                 sequence=snapshot['sequence'],

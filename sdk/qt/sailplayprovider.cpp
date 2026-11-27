@@ -486,14 +486,22 @@ QVariantMap SailplayProvider::navigationGuidance(const QString &state)
         {QStringLiteral("exitNumber"), uint(0)}, {QStringLiteral("nextDistanceMeters"), 0.0},
         {QStringLiteral("remainingDistanceMeters"), 0.0}, {QStringLiteral("remainingSeconds"), qulonglong(0)},
         {QStringLiteral("currentRoad"), QString()}, {QStringLiteral("nextRoad"), QString()},
-        {QStringLiteral("destination"), QString()}, {QStringLiteral("updatedMs"), boottimeMs()}};
+        {QStringLiteral("destination"), QString()}, {QStringLiteral("updatedMs"), boottimeMs()},
+        {QStringLiteral("speedMps"), -1.0}, {QStringLiteral("speedLimitMps"), -1.0}};
 }
 
 bool SailplayProvider::validGuidance(const QVariantMap &value)
 {
     const QVariantMap defaults = navigationGuidance();
-    if (value.keys() != defaults.keys()) return false;
+    const QStringList optionalFields = {QStringLiteral("speedMps"), QStringLiteral("speedLimitMps")};
+    for (auto field = value.cbegin(); field != value.cend(); ++field) {
+        if (!defaults.contains(field.key())) return false;
+    }
     for (auto field = defaults.cbegin(); field != defaults.cend(); ++field) {
+        if (!value.contains(field.key())) {
+            if (optionalFields.contains(field.key())) continue;
+            return false;
+        }
         if (value.value(field.key()).type() != field.value().type()) return false;
     }
     const QMap<QString, QStringList> enums = {
@@ -512,6 +520,9 @@ bool SailplayProvider::validGuidance(const QVariantMap &value)
     for (const QString &key : {QStringLiteral("nextDistanceMeters"), QStringLiteral("remainingDistanceMeters")}) {
         const double distance = value.value(key).toDouble();
         if (!std::isfinite(distance) || distance < 0) return false;
+    }
+    for (const QString &key : optionalFields) {
+        if (value.contains(key) && !std::isfinite(value.value(key).toDouble())) return false;
     }
     for (const QString &key : {QStringLiteral("currentRoad"), QStringLiteral("nextRoad"), QStringLiteral("destination")}) {
         const QString text = value.value(key).toString();
