@@ -68,8 +68,8 @@ class Service:
                     continue
                 self.configs[index] = VideoConfig(index, width, height, 60 if frame_rate == 1 else 30,
                                                  margin_width, margin_height)
-        elif self.codec in (1, 2, 4) and self.audio_type == 3:
-            self.kind = 'audio'
+        elif self.codec in (1, 2, 4) and self.audio_type in (1, 2, 3):
+            self.kind = 'audio' if self.audio_type == 3 else ('guidance_audio' if self.audio_type == 1 else 'system_audio')
             for index, config in enumerate(sink.messages(3)):
                 rate, bits, channels = config.integer(1), config.integer(2), config.integer(3)
                 if bits != 16 or channels not in (1, 2) or rate not in (8000, 16000, 24000, 32000, 44100, 48000):
@@ -92,6 +92,8 @@ class Discovery:
             self.services[service.id] = service
         self.video = self.choose('video')
         self.audio = self.choose('audio', required=False)
+        self.guidance_audio = self.choose('guidance_audio', required=False)
+        self.system_audio = self.choose('system_audio', required=False)
         self.input = self.choose('input', required=False)
         self.sensor = self.choose('sensor', required=False)
         self.navigation = self.choose('navigation', required=False)
