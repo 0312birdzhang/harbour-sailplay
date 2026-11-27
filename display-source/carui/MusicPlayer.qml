@@ -372,13 +372,14 @@ Item {
     Row {
         objectName: "nowPlayingExtendedActions"
         visible: !controls.compact
+        anchors.horizontalCenter: parent.horizontalCenter
         y: controls.headerHeight + controls.controlGap + controls._squareSize + controls.extraRowGap
-        width: parent.width; height: controls.extraRowHeight
-        spacing: 12
-        readonly property real buttonWidth: Math.max(0, (width - spacing * 2) / 3)
+        height: controls.extraRowHeight
+        spacing: Math.max(12, Math.min(24, (controls.width - 3 * buttonWidth) / 4))
+        readonly property real buttonWidth: Math.max(76, Math.min(controls._squareSize * 1.25, (controls.width - 32) / 3))
         Rectangle {
             objectName: "seekBack15Button"
-            width: parent.buttonWidth; height: parent.height; radius: 12
+            width: parent.buttonWidth; height: parent.height; radius: 14
             color: carPalette.ambience
                 ? (seekBackTouch.pressed ? Qt.rgba(carPalette.highlightColor.r, carPalette.highlightColor.g, carPalette.highlightColor.b, 0.35)
                     : Qt.rgba(carPalette.highlightBackgroundColor.r, carPalette.highlightBackgroundColor.g, carPalette.highlightBackgroundColor.b, 0.55))
@@ -399,7 +400,7 @@ Item {
         }
         Rectangle {
             objectName: "playbackRateButton"
-            width: parent.buttonWidth; height: parent.height; radius: 12
+            width: parent.buttonWidth; height: parent.height; radius: 14
             color: carPalette.ambience
                 ? (rateTouch.pressed ? Qt.rgba(carPalette.highlightColor.r, carPalette.highlightColor.g, carPalette.highlightColor.b, 0.35)
                     : Qt.rgba(carPalette.highlightBackgroundColor.r, carPalette.highlightBackgroundColor.g, carPalette.highlightBackgroundColor.b, 0.55))
@@ -420,7 +421,7 @@ Item {
         }
         Rectangle {
             objectName: "seekForward15Button"
-            width: parent.buttonWidth; height: parent.height; radius: 12
+            width: parent.buttonWidth; height: parent.height; radius: 14
             color: carPalette.ambience
                 ? (seekFwdTouch.pressed ? Qt.rgba(carPalette.highlightColor.r, carPalette.highlightColor.g, carPalette.highlightColor.b, 0.35)
                     : Qt.rgba(carPalette.highlightBackgroundColor.r, carPalette.highlightBackgroundColor.g, carPalette.highlightBackgroundColor.b, 0.55))
