@@ -61,6 +61,13 @@ Window {
         }
         onErrorOccurred: { window.pending = 0; window.pickingRecipient = false; window.notice = message }
     }
+    Rectangle {
+        id: panel
+        anchors.fill: parent
+        anchors.margins: Math.round(16 * window.height / 720)
+        radius: Math.round(22 * window.height / 720)
+        color: palette.surface
+        clip: true
     Item {
         id: content
         anchors.fill: parent
@@ -150,6 +157,7 @@ Window {
         CarUi.ContentPage {
             x: 0; y: callPanel.y + callPanel.height + (callPanel.height > 0 ? window.gap : 0)
             width: parent.width; height: Math.max(0, footer.y - y - window.gap)
+            color: "transparent"
             palette: window.colors
             uiScale: window.uiScale
             provider: browser
@@ -278,5 +286,6 @@ Window {
                 ? (!phoneApp && window.smsReply ? communicationState.smsError || "" : "")
                 : qsTranslate("Sailplay", "Connecting"))
         }
+    }
     }
 }

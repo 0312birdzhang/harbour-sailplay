@@ -836,9 +836,16 @@ public:
             auto fitBackdrop = [backdrop, viewport]() { backdrop->setSize(QSizeF(viewport->width(), viewport->height())); };
             QObject::connect(viewport, &QQuickItem::widthChanged, backdrop, fitBackdrop);
             QObject::connect(viewport, &QQuickItem::heightChanged, backdrop, fitBackdrop);
+            auto syncBackdropVisible = [backdrop, item, surface]() {
+                const QString t = surface ? surface->title() : QString();
+                const bool transparentShellApp = t == QLatin1String("Sailplay Phone")
+                    || t == QLatin1String("Sailplay Messages");
+                backdrop->setVisible(item->isVisible() && !transparentShellApp);
+            };
+            syncBackdropVisible();
             // Hidden apps keep their viewport; never cover the car shell.
-            QObject::connect(item, &QQuickItem::visibleChanged, backdrop,
-                             [backdrop, item]() { backdrop->setVisible(item->isVisible()); });
+            QObject::connect(item, &QQuickItem::visibleChanged, backdrop, syncBackdropVisible);
+            QObject::connect(surface, &QWaylandSurface::titleChanged, backdrop, syncBackdropVisible);
             item->setZ(m_nextContentZ++);
             item->setOpacity(0);
             surface->setProperty("sailplayViewportReady", false);

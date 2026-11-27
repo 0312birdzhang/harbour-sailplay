@@ -229,7 +229,10 @@ Item {
                 Rectangle {
                     anchors.centerIn: parent; width: controls._squareSize; height: width
                     radius: 14
-                    color: transportTouch.pressed ? carPalette.pressed : carPalette.button
+                    color: carPalette.ambience
+                        ? (transportTouch.pressed ? Qt.rgba(carPalette.highlightColor.r, carPalette.highlightColor.g, carPalette.highlightColor.b, 0.35)
+                            : Qt.rgba(carPalette.highlightBackgroundColor.r, carPalette.highlightBackgroundColor.g, carPalette.highlightBackgroundColor.b, 0.55))
+                        : (transportTouch.pressed ? carPalette.pressed : carPalette.button)
                     enabled: index === 0 ? (controls.localCurrent && !controls.idleCard && player.canGoPrevious) : index === 2 ? (controls.localCurrent && !controls.idleCard && player.canGoNext)
                               : controls.playing ? player.canPause : !pendingPlay.running && !controls.playRequestPending
                     opacity: enabled ? 1 : 0.35
@@ -262,14 +265,17 @@ Item {
                 anchors.centerIn: parent
                 width: controls._squareSize; height: width
                 radius: 14
-                color: playbackModeTouch.pressed ? carPalette.pressed : carPalette.button
+                color: carPalette.ambience
+                    ? (playbackModeTouch.pressed ? Qt.rgba(carPalette.highlightColor.r, carPalette.highlightColor.g, carPalette.highlightColor.b, 0.35)
+                        : Qt.rgba(carPalette.highlightBackgroundColor.r, carPalette.highlightBackgroundColor.g, carPalette.highlightBackgroundColor.b, 0.55))
+                    : (playbackModeTouch.pressed ? carPalette.pressed : carPalette.button)
                 enabled: controls.canCyclePlaybackMode
                 opacity: enabled ? 1 : 0.35
                 Canvas {
                     anchors.centerIn: parent
                     width: Math.min(controls._squareSize * .65, controls.centered ? 60 : controls.compact ? 44 : 52); height: width
                     property int mode: controls.playbackMode
-                    property color ink: carPalette.text
+                    property color ink: playbackModeTouch.pressed ? carPalette.highlightColor : carPalette.text
                     onModeChanged: requestPaint()
                     onInkChanged: requestPaint()
                     onPaint: {
@@ -317,7 +323,11 @@ Item {
         property int rowHeight: 84
         parent: controls.playerSelectorHost || controls
         y: controls.playerSelectorHost ? 0 : -(height + 16)
-        width: parent.width; height: 88; radius: 14; color: carPalette.button
+        width: parent.width; height: 88; radius: 14
+        color: carPalette.ambience
+            ? (selectorTouch.pressed ? Qt.rgba(carPalette.highlightColor.r, carPalette.highlightColor.g, carPalette.highlightColor.b, 0.35)
+                : Qt.rgba(carPalette.highlightBackgroundColor.r, carPalette.highlightBackgroundColor.g, carPalette.highlightBackgroundColor.b, 0.55))
+            : (selectorTouch.pressed ? carPalette.pressed : carPalette.button)
         visible: !controls.compact
         z: 20
         Image {
@@ -333,14 +343,14 @@ Item {
             x: selectorIcon.visible ? 92 : 20; width: parent.width - x - 80; height: parent.height
             text: (controls.localCurrent ? player.identity : "") || carController.lastMusicName || qsTranslate("Sailplay", "Player")
             textFormat: Text.PlainText; elide: Text.ElideRight
-            verticalAlignment: Text.AlignVCenter; font.pixelSize: 32; color: carPalette.text
+            verticalAlignment: Text.AlignVCenter; font.pixelSize: 32; color: selectorTouch.pressed ? carPalette.highlightColor : carPalette.text
         }
         Silica.Icon {
             anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
-            width: 48; height: 48; color: carPalette.text
+            width: 48; height: 48; color: selectorTouch.pressed ? carPalette.highlightColor : carPalette.text
             source: controls.playerMenuOpen ? "image://theme/icon-m-up" : "image://theme/icon-m-down"
         }
-        MouseArea { anchors.fill: parent; onClicked: controls.playerMenuOpen = !controls.playerMenuOpen }
+        MouseArea { id: selectorTouch; anchors.fill: parent; onClicked: controls.playerMenuOpen = !controls.playerMenuOpen }
         Rectangle {
             objectName: "playerMenu"
             y: parent.height + 6; width: parent.width

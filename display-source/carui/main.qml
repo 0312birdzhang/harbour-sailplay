@@ -43,12 +43,22 @@ Window {
         source: carPalette.wallpaper
         smooth: true; asynchronous: true
     }
-    Rectangle {
+    Item {
         id: dock
-        width: Math.round(140 * root.scale) / root.scale; height: parent.height; color: carPalette.dock
-        Text { y: 25; anchors.horizontalCenter: parent.horizontalCenter; text: root.clockText; color: carPalette.text; font.pixelSize: 37; font.bold: true }
-        Row {
-            anchors.horizontalCenter: parent.horizontalCenter; y: 83; spacing: 7
+        width: Math.round(140 * root.scale) / root.scale; height: parent.height
+        Rectangle {
+            id: dockPill
+            x: 12; y: 16; width: parent.width - 12; height: parent.height - 32
+            radius: 22
+            color: carPalette.ambience ? carPalette.surface : carPalette.dock
+            border.width: carPalette.ambience ? 1 : 0
+            border.color: Qt.rgba(carPalette.text.r, carPalette.text.g, carPalette.text.b, carPalette.day ? 0.12 : 0.16)
+            readonly property int appTop: 176
+            readonly property int appStep: 112
+            readonly property int appSlots: Math.max(3, Math.floor((Math.max(0, height - appTop - 108) + (appStep - 90)) / appStep))
+            Text { y: 14; anchors.horizontalCenter: parent.horizontalCenter; text: root.clockText; color: carPalette.text; font.pixelSize: 36; font.bold: true }
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter; y: 70; spacing: 7
             Row {
                 visible: root.status.mobileSupported === true; spacing: 3; height: 24
                 Repeater {
@@ -79,7 +89,7 @@ Window {
             }
         }
         Row {
-            y: 127; anchors.horizontalCenter: parent.horizontalCenter; spacing: 8
+            y: 112; anchors.horizontalCenter: parent.horizontalCenter; spacing: 8
             Rectangle {
                 width: 38; height: 20; radius: 4; color: "transparent"; border.width: 2; border.color: root.battery >= 0 ? carPalette.text : carPalette.disabled
                 Rectangle { x: 4; y: 4; height: 12; width: Math.max(0, 30 * root.battery / 100); radius: 1; color: root.status.charging ? "#55dc83" : root.battery <= 20 ? "#ff675c" : carPalette.text }
@@ -89,9 +99,9 @@ Window {
             Text { text: root.battery < 0 ? "—" : root.battery + "%"; color: carPalette.text; font.pixelSize: 18 }
         }
         Repeater {
-            model: carController.dockApps.slice(0, 3)
+            model: carController.dockApps.slice(0, dockPill.appSlots)
             Rectangle {
-                x: 25; y: 207 + index * 121; width: 90; height: 90; radius: 21; color: dockTouch.pressed ? carPalette.pressed : carPalette.ambience && modelData.icon ? "transparent" : carPalette.surface
+                anchors.horizontalCenter: parent.horizontalCenter; y: dockPill.appTop + index * dockPill.appStep; width: 90; height: 90; radius: 21; color: dockTouch.pressed ? carPalette.pressed : carPalette.ambience && modelData.icon ? "transparent" : carPalette.surface
                 Image { anchors.centerIn: parent; width: 78; height: 78; fillMode: Image.PreserveAspectFit; source: modelData.icon ? "file://" + modelData.icon : ""; visible: source !== "" }
                 Text { anchors.centerIn: parent; text: modelData.icon ? "" : modelData.name.charAt(0); color: carPalette.text; font.pixelSize: 38 }
                 // The ambience glow marks the application on screen.
@@ -107,10 +117,11 @@ Window {
             }
         }
         Rectangle {
-            x: 25; y: parent.height - 108; width: 90; height: 86; radius: 22; color: homeTouch.pressed ? carPalette.pressed : "transparent"
+            anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - 96; width: 90; height: 86; radius: 22; color: homeTouch.pressed ? carPalette.pressed : "transparent"
             Grid { id: homeGrid; visible: carController.dashboardActive || (!carController.returnToDashboard && (carController.musicActive || carController.currentApp !== "")); anchors.centerIn: parent; columns: 3; spacing: 5; Repeater { model: 9; Rectangle { width: 11; height: 11; radius: 3; color: carPalette.text } } }
             Text { visible: !homeGrid.visible; anchors.centerIn: parent; text: "◫"; color: carPalette.text; font.pixelSize: 42 }
             MouseArea { id: homeTouch; anchors.fill: parent; onClicked: carController.homeClicked() }
+        }
         }
     }
     Silica.SlideshowView {
@@ -214,14 +225,16 @@ Window {
         Rectangle {
             objectName: "dashboardMapCard"
             visible: !carController.musicActive
-            x: 0; y: parent.verticalGap; width: parent.mapWidth + 16; height: parent.height - 2 * parent.verticalGap
-            radius: 22; color: carPalette.surface
+            x: 16; y: parent.verticalGap; width: parent.mapWidth; height: parent.height - 2 * parent.verticalGap
+            radius: 22; color: carPalette.surface; clip: true
             Text { anchors.centerIn: parent; width: parent.width - 40; wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter; color: carPalette.secondary; font.pixelSize: 26
                 visible: !carController.dashboardMapApp
                 text: qsTranslate("Sailplay", "Install a map app with Sailplay SDK support") }
             NavigationCard {
                 anchors.fill: parent
+                anchors.margins: 10
+                radius: 14
                 visible: carController.dashboardNavigationTemplate
                 provider: carController.navigation
                 palette: carPalette
@@ -264,6 +277,10 @@ Window {
             function openMusic() {
                 carController.openMusic()
             }
+            function buttonColor(pressed) {
+                if (pressed) return carPalette.ambience ? Qt.rgba(carPalette.highlightColor.r, carPalette.highlightColor.g, carPalette.highlightColor.b, 0.35) : carPalette.pressed
+                return carPalette.ambience ? Qt.rgba(carPalette.highlightBackgroundColor.r, carPalette.highlightBackgroundColor.g, carPalette.highlightBackgroundColor.b, 0.55) : carPalette.button
+            }
             Item {
                 id: musicMainView
                 anchors.fill: parent
@@ -273,19 +290,19 @@ Window {
                 id: musicQueueButton
                 objectName: "musicQueueButton"
                 anchors.right:parent.right;anchors.rightMargin:carController.musicContentAvailable ? 216 : 16
-                y:16;z:5;width:184;height:88;radius:14;color:carPalette.button
+                y:16;z:5;width:184;height:88;radius:14;color:musicCard.buttonColor(queueButtonTouch.pressed)
                 visible:musicCard.queueSupported
-                Text {anchors.centerIn:parent;text:qsTranslate("Sailplay","Queue");font.pixelSize:28;color:carPalette.text}
-                MouseArea {anchors.fill:parent;onClicked:musicCard.queueOpen=true}
+                Text {anchors.centerIn:parent;text:qsTranslate("Sailplay","Queue");font.pixelSize:28;color:queueButtonTouch.pressed ? carPalette.highlightColor : carPalette.text}
+                MouseArea {id:queueButtonTouch;anchors.fill:parent;onClicked:musicCard.queueOpen=true}
             }
             Rectangle {
                 id: musicBrowseButton
                 objectName: "musicBrowseButton"
                 anchors.right: parent.right; anchors.rightMargin: 16; y: 16; z: 5
-                width: 184; height: 88; radius: 14; color: carPalette.button
+                width: 184; height: 88; radius: 14; color: musicCard.buttonColor(browseButtonTouch.pressed)
                 visible: carController.musicActive && carController.musicContentAvailable
-                Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Browse"); font.pixelSize: 28; color: carPalette.text }
-                MouseArea { anchors.fill: parent; onClicked: carController.browseMusic() }
+                Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Browse"); font.pixelSize: 28; color: browseButtonTouch.pressed ? carPalette.highlightColor : carPalette.text }
+                MouseArea { id: browseButtonTouch; anchors.fill: parent; onClicked: carController.browseMusic() }
             }
             Item {
                 id: musicPlayerToolbar
@@ -460,10 +477,10 @@ Window {
             Rectangle {
                 anchors.bottom: parent.bottom; anchors.bottomMargin: 20
                 anchors.horizontalCenter: parent.horizontalCenter
-                width: parent.width - 64; height: 56; radius: 16; color: carPalette.button
+                width: parent.width - 64; height: 56; radius: 16; color: musicCard.buttonColor(openMusicTouch.pressed)
                 visible: !lockscreenMusic.visible
-                Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Open music app"); font.pixelSize: 24; color: carPalette.text }
-                MouseArea { anchors.fill: parent; onClicked: carController.ensureMusicBackend() }
+                Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Open music app"); font.pixelSize: 24; color: openMusicTouch.pressed ? carPalette.highlightColor : carPalette.text }
+                MouseArea { id: openMusicTouch; anchors.fill: parent; onClicked: carController.ensureMusicBackend() }
             }
             }
             PlayerQueue {
