@@ -1221,6 +1221,44 @@ public:
             watcher->deleteLater();
         });
     }
+    Q_INVOKABLE double playerMaxRate(const QString &service) {
+        if (!service.startsWith(QLatin1String("org.mpris.MediaPlayer2."))) return 1.0;
+        QDBusMessage call = QDBusMessage::createMethodCall(service,
+            QStringLiteral("/org/mpris/MediaPlayer2"),
+            QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
+        call.setArguments({QStringLiteral("org.mpris.MediaPlayer2.Player"), QStringLiteral("MaximumRate")});
+        const QDBusMessage reply = QDBusConnection::sessionBus().call(call, QDBus::Block, 300);
+        if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
+            const double value = reply.arguments().first().value<QDBusVariant>().variant().toDouble();
+            if (value > 0) return value;
+        }
+        return 1.0;
+    }
+    Q_INVOKABLE double playerRate(const QString &service) {
+        if (!service.startsWith(QLatin1String("org.mpris.MediaPlayer2."))) return 1.0;
+        QDBusMessage call = QDBusMessage::createMethodCall(service,
+            QStringLiteral("/org/mpris/MediaPlayer2"),
+            QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
+        call.setArguments({QStringLiteral("org.mpris.MediaPlayer2.Player"), QStringLiteral("Rate")});
+        const QDBusMessage reply = QDBusConnection::sessionBus().call(call, QDBus::Block, 300);
+        if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
+            const double value = reply.arguments().first().value<QDBusVariant>().variant().toDouble();
+            if (value > 0) return value;
+        }
+        return 1.0;
+    }
+    Q_INVOKABLE void setPlayerRate(const QString &service, double rate) {
+        if (!service.startsWith(QLatin1String("org.mpris.MediaPlayer2.")) || !(rate > 0 && rate <= 4.0)) return;
+        QDBusMessage call = QDBusMessage::createMethodCall(service,
+            QStringLiteral("/org/mpris/MediaPlayer2"),
+            QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Set"));
+        call.setArguments({QStringLiteral("org.mpris.MediaPlayer2.Player"), QStringLiteral("Rate"),
+            QVariant::fromValue(QDBusVariant(rate))});
+        auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(call), this);
+        connect(watcher, &QDBusPendingCallWatcher::finished, this, [watcher]() {
+            watcher->deleteLater();
+        });
+    }
     bool serviceRunning() const { return m_serviceRunning; }
     QString serviceState() const { return m_serviceState; }
     QString serviceError() const { return m_serviceError; }

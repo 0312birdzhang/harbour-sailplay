@@ -204,7 +204,15 @@ QVariantMap SailplayContent::item(const QString &id, const QString &title, const
 
 bool SailplayContent::validPage(const QVariantMap &value)
 {
-    if (!keys(value, {"id", "title", "version", "items", "actions", "searchEnabled", "message", "messageKind", "offset", "hasMore"})
+    static const QSet<QString> required = {
+        QStringLiteral("id"), QStringLiteral("title"), QStringLiteral("version"),
+        QStringLiteral("items"), QStringLiteral("actions"), QStringLiteral("searchEnabled"),
+        QStringLiteral("message"), QStringLiteral("messageKind"), QStringLiteral("offset"),
+        QStringLiteral("hasMore")
+    };
+    static const QSet<QString> optional = {QStringLiteral("presentation")};
+    const QSet<QString> actual = QSet<QString>::fromList(value.keys());
+    if (!actual.contains(required) || !(actual - required - optional).isEmpty()
         || !text(value.value("id"), 256, true) || !text(value.value("title")) || !text(value.value("message"))
         || value.value("messageKind").type() != QVariant::String
         || !QStringList{"none", "info", "warning", "error"}.contains(value.value("messageKind").toString())

@@ -68,8 +68,9 @@ SailplayContentHost::SailplayContentHost(QObject *parent) : QObject(parent), m_s
                 return;
             }
             m_versionRetries = 0;
-            const QVariantMap presentation =
-                SailplayContent::cleanPresentation(result.value(QStringLiteral("presentation")), page);
+            const QVariant rawPresentation = result.contains(QStringLiteral("presentation"))
+                ? result.value(QStringLiteral("presentation")) : page.value(QStringLiteral("presentation"));
+            const QVariantMap presentation = SailplayContent::cleanPresentation(rawPresentation, page);
             const QVariantList incoming = withoutSide(page,
                 SailplayContent::presentedItems(page.value("items").toList(), presentation));
             if (!m_offset && enterTabs(page, incoming, presentation)) return;

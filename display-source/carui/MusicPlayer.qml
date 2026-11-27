@@ -37,20 +37,33 @@ Item {
     }
     readonly property bool liveStream: localCurrent && playing && !(player.metaData.duration > 0)
     readonly property var playbackRates: [1.0, 1.25, 1.5, 2.0]
-    readonly property real currentRate: localCurrent && player.rate > 0 ? player.rate : 1.0
-    readonly property bool canChangeRate: localCurrent && !idleCard && player.canControl && player.maximumRate > 1.0
+    property real maxRate: 1.0
+    property real currentRate: 1.0
+    readonly property bool canChangeRate: localCurrent && !idleCard && player.canControl && maxRate > 1.0
+    function refreshRateInfo() {
+        if (!localCurrent || !player.currentService) { maxRate = 1.0; currentRate = 1.0; return }
+        maxRate = carController.playerMaxRate(player.currentService)
+        currentRate = carController.playerRate(player.currentService)
+    }
     function cyclePlaybackRate() {
         if (!canChangeRate) return
         var rates = playbackRates
         var next = rates[0]
         for (var i = 0; i < rates.length; ++i) {
-            if (rates[i] > currentRate + 0.05 && rates[i] <= player.maximumRate + 0.01) {
+            if (rates[i] > currentRate + 0.05 && rates[i] <= maxRate + 0.01) {
                 next = rates[i]
                 break
             }
         }
-        player.rate = next
+        currentRate = next
+        carController.setPlayerRate(player.currentService, next)
     }
+    Connections {
+        target: player
+        onCurrentServiceChanged: controls.refreshRateInfo()
+        onPlaybackStatusChanged: controls.refreshRateInfo()
+    }
+    Component.onCompleted: refreshRateInfo()
     function formatRate(r) {
         var rounded = Math.round(r * 100) / 100
         return (rounded === Math.floor(rounded) ? rounded.toFixed(0) : rounded.toString()) + "x"
