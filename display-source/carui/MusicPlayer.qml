@@ -35,15 +35,41 @@ Item {
         if (player.hasLoopStatus)
             player.loopStatus = mode === 0 ? Mpris.LoopTrack : mode === 3 ? Mpris.LoopNone : Mpris.LoopPlaylist
     }
+    readonly property bool liveStream: localCurrent && playing && !(player.metaData.duration > 0)
+    readonly property var playbackRates: [1.0, 1.25, 1.5, 2.0]
+    readonly property real currentRate: localCurrent && player.rate > 0 ? player.rate : 1.0
+    readonly property bool canChangeRate: localCurrent && !idleCard && player.canControl && player.maximumRate > 1.0
+    function cyclePlaybackRate() {
+        if (!canChangeRate) return
+        var rates = playbackRates
+        var next = rates[0]
+        for (var i = 0; i < rates.length; ++i) {
+            if (rates[i] > currentRate + 0.05 && rates[i] <= player.maximumRate + 0.01) {
+                next = rates[i]
+                break
+            }
+        }
+        player.rate = next
+    }
+    function formatRate(r) {
+        var rounded = Math.round(r * 100) / 100
+        return (rounded === Math.floor(rounded) ? rounded.toFixed(0) : rounded.toString()) + "x"
+    }
+    function seekOffsetSeconds(deltaSeconds) {
+        if (!localCurrent || idleCard || !player.canSeek) return
+        player.seek(deltaSeconds * 1000000)
+    }
     readonly property bool idleCard: compact && (!localCurrent || !playing && player.playbackStatus !== Mpris.Paused)
     readonly property real _squareSize: centered ? Math.max(0, Math.min(compact ? 88 : 100, width / 4 - 8)) : compact ? 76 : 88
+    readonly property real extraRowHeight: compact ? 0 : 54
+    readonly property real extraRowGap: compact ? 0 : 12
     readonly property real controlGap: centered ? 12 : 24
     readonly property real trackGap: 12
     readonly property real coverSize: centered ? Math.max(0, Math.min(compact ? 208 : 340, width,
-        availableHeight - trackInfo.height - trackGap - controlGap - _squareSize)) : compact ? 112 : Math.min(220, width * .35)
+        availableHeight - trackInfo.height - trackGap - controlGap - _squareSize - extraRowGap - extraRowHeight)) : compact ? 112 : Math.min(220, width * .35)
     readonly property real headerHeight: centered ? trackInfo.y + trackInfo.height : compact ? 120 : Math.max(220, coverSize)
     signal clicked()
-    height: headerHeight + controlGap + _squareSize
+    height: headerHeight + controlGap + _squareSize + extraRowGap + extraRowHeight
     visible: true
     property string pendingApp: ""
     property int pendingTicks: 0
@@ -175,6 +201,20 @@ Item {
             fillMode: Image.PreserveAspectFit
         }
         Text { anchors.centerIn: parent; text: "♫"; color: carPalette.secondary; font.pixelSize: controls.centered ? Math.max(1, parent.width * .36) : 64; visible: controls.idleCard || !controls.albumArtSource }
+        Rectangle {
+            objectName: "liveStreamBadge"
+            visible: controls.liveStream
+            anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 8
+            width: liveLabel.implicitWidth + 16; height: 28; radius: 8
+            color: "#d93025"
+            Text {
+                id: liveLabel
+                anchors.centerIn: parent
+                text: "LIVE"
+                color: "#ffffff"
+                font.pixelSize: 16; font.bold: true
+            }
+        }
     }
     Column {
         id: trackInfo
@@ -312,6 +352,77 @@ Item {
                     anchors.fill: parent
                     onClicked: controls.cyclePlaybackMode()
                 }
+            }
+        }
+    }
+    Row {
+        objectName: "nowPlayingExtendedActions"
+        visible: !controls.compact
+        y: controls.headerHeight + controls.controlGap + controls._squareSize + controls.extraRowGap
+        width: parent.width; height: controls.extraRowHeight
+        spacing: 12
+        readonly property real buttonWidth: Math.max(0, (width - spacing * 2) / 3)
+        Rectangle {
+            objectName: "seekBack15Button"
+            width: parent.buttonWidth; height: parent.height; radius: 12
+            color: carPalette.ambience
+                ? (seekBackTouch.pressed ? Qt.rgba(carPalette.highlightColor.r, carPalette.highlightColor.g, carPalette.highlightColor.b, 0.35)
+                    : Qt.rgba(carPalette.highlightBackgroundColor.r, carPalette.highlightBackgroundColor.g, carPalette.highlightBackgroundColor.b, 0.55))
+                : (seekBackTouch.pressed ? carPalette.pressed : carPalette.button)
+            enabled: controls.localCurrent && !controls.idleCard && player.canSeek && !controls.liveStream
+            opacity: enabled ? 1 : 0.35
+            Text {
+                anchors.centerIn: parent
+                text: "-15s"
+                color: seekBackTouch.pressed ? carPalette.highlightColor : carPalette.text
+                font.pixelSize: 24; font.bold: true
+            }
+            MouseArea {
+                id: seekBackTouch
+                anchors.fill: parent
+                onClicked: controls.seekOffsetSeconds(-15)
+            }
+        }
+        Rectangle {
+            objectName: "playbackRateButton"
+            width: parent.buttonWidth; height: parent.height; radius: 12
+            color: carPalette.ambience
+                ? (rateTouch.pressed ? Qt.rgba(carPalette.highlightColor.r, carPalette.highlightColor.g, carPalette.highlightColor.b, 0.35)
+                    : Qt.rgba(carPalette.highlightBackgroundColor.r, carPalette.highlightBackgroundColor.g, carPalette.highlightBackgroundColor.b, 0.55))
+                : (rateTouch.pressed ? carPalette.pressed : carPalette.button)
+            enabled: controls.canChangeRate
+            opacity: enabled ? 1 : 0.35
+            Text {
+                anchors.centerIn: parent
+                text: controls.formatRate(controls.currentRate)
+                color: rateTouch.pressed ? carPalette.highlightColor : carPalette.text
+                font.pixelSize: 24; font.bold: true
+            }
+            MouseArea {
+                id: rateTouch
+                anchors.fill: parent
+                onClicked: controls.cyclePlaybackRate()
+            }
+        }
+        Rectangle {
+            objectName: "seekForward15Button"
+            width: parent.buttonWidth; height: parent.height; radius: 12
+            color: carPalette.ambience
+                ? (seekFwdTouch.pressed ? Qt.rgba(carPalette.highlightColor.r, carPalette.highlightColor.g, carPalette.highlightColor.b, 0.35)
+                    : Qt.rgba(carPalette.highlightBackgroundColor.r, carPalette.highlightBackgroundColor.g, carPalette.highlightBackgroundColor.b, 0.55))
+                : (seekFwdTouch.pressed ? carPalette.pressed : carPalette.button)
+            enabled: controls.localCurrent && !controls.idleCard && player.canSeek && !controls.liveStream
+            opacity: enabled ? 1 : 0.35
+            Text {
+                anchors.centerIn: parent
+                text: "+15s"
+                color: seekFwdTouch.pressed ? carPalette.highlightColor : carPalette.text
+                font.pixelSize: 24; font.bold: true
+            }
+            MouseArea {
+                id: seekFwdTouch
+                anchors.fill: parent
+                onClicked: controls.seekOffsetSeconds(15)
             }
         }
     }
