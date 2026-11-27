@@ -27,7 +27,16 @@ bool keys(const QVariantMap &value, const QStringList &expected)
 
 bool validItem(const QVariantMap &value)
 {
-    if (!keys(value, {"id", "title", "subtitle", "kind", "action", "parameters", "enabled"})
+    static const QSet<QString> required = {
+        QStringLiteral("id"), QStringLiteral("title"), QStringLiteral("subtitle"),
+        QStringLiteral("kind"), QStringLiteral("action"), QStringLiteral("parameters"),
+        QStringLiteral("enabled")
+    };
+    static const QSet<QString> optional = {
+        QStringLiteral("image"), QStringLiteral("playback"), QStringLiteral("progress")
+    };
+    const QSet<QString> actual = QSet<QString>::fromList(value.keys());
+    if (!actual.contains(required) || !(actual - required - optional).isEmpty()
         || !text(value.value("id"), 256, true) || !text(value.value("title"), 1024, true)
         || !text(value.value("subtitle")) || !text(value.value("action"), 256)
         || !text(value.value("kind"), 256, true)
@@ -76,7 +85,7 @@ QVariant SailplayContent::decode(const QVariant &value)
 
 namespace {
 const QStringList layouts = {QStringLiteral("list"), QStringLiteral("grid"), QStringLiteral("wide"),
-                             QStringLiteral("split")};
+                             QStringLiteral("split"), QStringLiteral("row")};
 const QStringList playbackStates = {QStringLiteral("unplayed"), QStringLiteral("started"),
                                     QStringLiteral("playing"), QStringLiteral("finished")};
 
@@ -141,13 +150,18 @@ QVariantMap SailplayContent::cleanPresentation(const QVariant &value, const QVar
         const QVariant playback = entry.value(QStringLiteral("playback"));
         if (playback.type() == QVariant::String && playbackStates.contains(playback.toString()))
             kept.insert(QStringLiteral("playback"), playback.toString());
+        const QVariant progress = entry.value(QStringLiteral("progress"));
+        if (progress.canConvert<double>()) {
+            const double ratio = progress.toDouble();
+            if (ratio >= 0.0 && ratio <= 1.0) kept.insert(QStringLiteral("progress"), ratio);
+        }
         if (!kept.isEmpty()) hints.insert(id, kept);
     }
     if (!hints.isEmpty()) result.insert(QStringLiteral("items"), hints);
     return result;
 }
 
-// Rows for display: each one with the "image" and "playback" of its hints, empty when absent.
+// Rows for display: each one with the "image", "playback" and optional "progress" of its hints or item fields.
 QVariantList SailplayContent::presentedItems(const QVariantList &items, const QVariantMap &presentation)
 {
     const QVariantMap hints = presentation.value(QStringLiteral("items")).toMap();
@@ -155,8 +169,20 @@ QVariantList SailplayContent::presentedItems(const QVariantList &items, const QV
     for (const QVariant &row : items) {
         QVariantMap item = row.toMap();
         const QVariantMap entry = hints.value(item.value(QStringLiteral("id")).toString()).toMap();
-        item.insert(QStringLiteral("image"), entry.value(QStringLiteral("image")).toString());
-        item.insert(QStringLiteral("playback"), entry.value(QStringLiteral("playback")).toString());
+        const QString hintImage = entry.value(QStringLiteral("image")).toString();
+        const QString itemImage = validImage(item.value(QStringLiteral("image"))) ? item.value(QStringLiteral("image")).toString() : QString();
+        item.insert(QStringLiteral("image"), !hintImage.isEmpty() ? hintImage : itemImage);
+        const QString hintPlayback = entry.value(QStringLiteral("playback")).toString();
+        const QString rawPlayback = item.value(QStringLiteral("playback")).toString();
+        const QString itemPlayback = playbackStates.contains(rawPlayback) ? rawPlayback : QString();
+        item.insert(QStringLiteral("playback"), !hintPlayback.isEmpty() ? hintPlayback : itemPlayback);
+        if (entry.contains(QStringLiteral("progress"))) {
+            item.insert(QStringLiteral("progress"), entry.value(QStringLiteral("progress")).toDouble());
+        } else if (item.contains(QStringLiteral("progress")) && item.value(QStringLiteral("progress")).canConvert<double>()) {
+            const double ratio = item.value(QStringLiteral("progress")).toDouble();
+            if (ratio >= 0.0 && ratio <= 1.0) item.insert(QStringLiteral("progress"), ratio);
+            else item.remove(QStringLiteral("progress"));
+        }
         result.append(item);
     }
     return result;
