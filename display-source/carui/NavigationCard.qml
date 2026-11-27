@@ -225,8 +225,22 @@ Rectangle {
             readonly property real buttonSize: Math.max(0, Math.min(76,
                 (mapOverlay.height - y - bottomInset - 2 * spacing) / 3))
             visible: mapMode && !compact
+            property bool headingUp: navigating
+            function positionLabel() {
+                var mode = mapState && mapState.positionMode ? String(mapState.positionMode).toLowerCase() : ""
+                if (mode === "follow-and-rotate" || mode === "heading") return "▲"
+                if (mode === "follow" || mode === "north") return "N↑"
+                if (mode === "not-follow" || mode === "pending") return "◎"
+                return headingUp ? "▲" : "N↑"
+            }
+            function positionHighlighted() {
+                var mode = mapState && mapState.positionMode ? String(mapState.positionMode).toLowerCase() : ""
+                if (mode === "follow-and-rotate" || mode === "heading") return true
+                if (mode === "follow" || mode === "north" || mode === "not-follow" || mode === "pending") return false
+                return headingUp
+            }
             Repeater {
-                model: [{label: "◎", command: "position"}, {label: "+", command: "zoom-in"}, {label: "−", command: "zoom-out"}]
+                model: [{label: "position", command: "position"}, {label: "+", command: "zoom-in"}, {label: "−", command: "zoom-out"}]
                 Rectangle {
                     objectName: "navigationMapControl_" + modelData.command
                     width: mapControls.buttonSize
@@ -234,8 +248,20 @@ Rectangle {
                     radius: 14
                     color: palette.card
                     opacity: 0.93
-                    Text { anchors.centerIn: parent; text: modelData.label; color: palette.text; font.pixelSize: 38 }
-                    MouseArea { anchors.fill: parent; onClicked: provider.mapControl(modelData.command) }
+                    Text {
+                        anchors.centerIn: parent
+                        text: modelData.command === "position" ? mapControls.positionLabel() : modelData.label
+                        color: modelData.command === "position" && mapControls.positionHighlighted() ? palette.highlightColor : palette.text
+                        font.pixelSize: modelData.command === "position" ? 30 : 38
+                        font.bold: modelData.command === "position"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            if (modelData.command === "position") mapControls.headingUp = !mapControls.headingUp
+                            provider.mapControl(modelData.command)
+                        }
+                    }
                 }
             }
         }
