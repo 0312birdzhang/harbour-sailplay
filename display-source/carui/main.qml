@@ -245,7 +245,7 @@ Window {
             property var player: lockscreenMusic.localController
             readonly property bool showLyrics: carController.showMusicLyrics
             readonly property bool splitMusic: showLyrics && carController.musicActive && width > 1000
-            readonly property real centeredBodyTop: carController.musicActive ? 108 : 20
+            readonly property real centeredBodyTop: carController.musicActive ? 120 : 20
             readonly property bool showProgress: !lockscreenMusic.idleCard
             property bool queueOpen: false
             readonly property bool queueSupported: carController.musicActive && !!musicCard.player
@@ -272,24 +272,24 @@ Window {
             Rectangle {
                 id: musicQueueButton
                 objectName: "musicQueueButton"
-                anchors.right:parent.right;anchors.rightMargin:carController.musicContentAvailable ? 196 : 16
-                y:16;z:5;width:164;height:76;radius:14;color:carPalette.button
+                anchors.right:parent.right;anchors.rightMargin:carController.musicContentAvailable ? 216 : 16
+                y:16;z:5;width:184;height:88;radius:14;color:carPalette.button
                 visible:musicCard.queueSupported
-                Text {anchors.centerIn:parent;text:qsTranslate("Sailplay","Queue");font.pixelSize:24;color:carPalette.text}
+                Text {anchors.centerIn:parent;text:qsTranslate("Sailplay","Queue");font.pixelSize:28;color:carPalette.text}
                 MouseArea {anchors.fill:parent;onClicked:musicCard.queueOpen=true}
             }
             Rectangle {
                 id: musicBrowseButton
                 objectName: "musicBrowseButton"
                 anchors.right: parent.right; anchors.rightMargin: 16; y: 16; z: 5
-                width: 164; height: 76; radius: 14; color: carPalette.button
+                width: 184; height: 88; radius: 14; color: carPalette.button
                 visible: carController.musicActive && carController.musicContentAvailable
-                Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Browse"); font.pixelSize: 24; color: carPalette.text }
+                Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Browse"); font.pixelSize: 28; color: carPalette.text }
                 MouseArea { anchors.fill: parent; onClicked: carController.browseMusic() }
             }
             Item {
                 id: musicPlayerToolbar
-                x: 16; y: 16; height: 76; z: 4
+                x: 16; y: 16; height: 88; z: 4
                 width: Math.max(0, Math.min(560, (musicQueueButton.visible ? musicQueueButton.x
                     : musicBrowseButton.visible ? musicBrowseButton.x : musicCard.width) - 32))
             }

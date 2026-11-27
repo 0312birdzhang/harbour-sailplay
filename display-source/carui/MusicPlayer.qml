@@ -317,27 +317,27 @@ Item {
         property int rowHeight: 84
         parent: controls.playerSelectorHost || controls
         y: controls.playerSelectorHost ? 0 : -(height + 16)
-        width: parent.width; height: 76; radius: 14; color: carPalette.button
+        width: parent.width; height: 88; radius: 14; color: carPalette.button
         visible: !controls.compact
         z: 20
         Image {
             id: selectorIcon
             objectName: "playerSelectorIcon"
             x: 12; anchors.verticalCenter: parent.verticalCenter
-            width: 56; height: 56; fillMode: Image.PreserveAspectFit
+            width: 64; height: 64; fillMode: Image.PreserveAspectFit
             property string file: carController.musicAppIcon((controls.localCurrent ? player.desktopEntry : "") || carController.lastMusicApp)
             source: file ? "file://" + file : ""
             visible: source != ""
         }
         Text {
-            x: selectorIcon.visible ? 84 : 20; width: parent.width - x - 76; height: parent.height
+            x: selectorIcon.visible ? 92 : 20; width: parent.width - x - 80; height: parent.height
             text: (controls.localCurrent ? player.identity : "") || carController.lastMusicName || qsTranslate("Sailplay", "Player")
             textFormat: Text.PlainText; elide: Text.ElideRight
-            verticalAlignment: Text.AlignVCenter; font.pixelSize: 30; color: carPalette.text
+            verticalAlignment: Text.AlignVCenter; font.pixelSize: 32; color: carPalette.text
         }
         Silica.Icon {
             anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
-            width: 44; height: 44; color: carPalette.text
+            width: 48; height: 48; color: carPalette.text
             source: controls.playerMenuOpen ? "image://theme/icon-m-up" : "image://theme/icon-m-down"
         }
         MouseArea { anchors.fill: parent; onClicked: controls.playerMenuOpen = !controls.playerMenuOpen }

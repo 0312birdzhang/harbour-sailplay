@@ -26,7 +26,7 @@ Rectangle {
     property bool usable: !!provider && provider.ready && !provider.busy
     property real margin: 20 * uiScale
     // Match the map toolbar, including the visible icon and its touch target.
-    readonly property real buttonSize: 76 * uiScale
+    readonly property real buttonSize: 88 * uiScale
     // Width left to browsing once the side panel has taken its share.
     property real mainWidth: width - 2 * margin - (side ? sidePanel.width + margin : 0)
     color: palette.surface

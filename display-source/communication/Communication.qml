@@ -7,7 +7,7 @@ Window {
     visible: true
     width: 1280
     height: 720
-    color: palette.background
+    color: palette.ambience ? "transparent" : palette.background
     title: phoneApp ? "Sailplay Phone" : "Sailplay Messages"
     property bool composing: false
     property var pending: 0
@@ -24,6 +24,16 @@ Window {
         id: palette
         day: dayTheme
         ambience: followAmbience
+    }
+    function tint(colour, alpha) { return Qt.rgba(colour.r, colour.g, colour.b, alpha) }
+    function buttonColor(pressed) {
+        if (pressed) return palette.ambience ? tint(palette.highlightColor, 0.35) : palette.pressed
+        return palette.ambience ? tint(palette.highlightBackgroundColor, 0.55) : palette.button
+    }
+    function dismissKeyboard() {
+        recipient.focus = false
+        message.focus = false
+        Qt.inputMethod.hide()
     }
     function submit(action, parameters) {
         if (!renderer.ready || pending) return
@@ -56,6 +66,11 @@ Window {
         anchors.fill: parent
         anchors.margins: 20 * window.uiScale
         anchors.bottomMargin: 20 * window.uiScale + (Qt.inputMethod.visible ? Math.min(window.height / 2, Qt.inputMethod.keyboardRectangle.height) : 0)
+        MouseArea {
+            anchors.fill: parent
+            z: -1
+            onClicked: window.dismissKeyboard()
+        }
         Row {
             id: toolbar
             width: parent.width
@@ -66,20 +81,25 @@ Window {
                 height: parent.height
                 verticalAlignment: Text.AlignVCenter
                 text: phoneApp ? qsTranslate("Sailplay", "Phone") : qsTranslate("Sailplay", "Messages")
-                color: palette.text
+                color: palette.highlightColor
                 font.pixelSize: 32 * window.uiScale
             }
             Rectangle {
                 id: toolbarAction
-                width: Math.min(248 * window.uiScale, toolbar.width * 0.35); height: parent.height; radius: 12; color: palette.button
+                width: Math.min(248 * window.uiScale, toolbar.width * 0.35); height: parent.height; radius: 14
+                color: window.buttonColor(toolbarActionTouch.pressed)
                 Text {
                     anchors.centerIn: parent; width: parent.width - 16 * window.uiScale
                     horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
-                    color: palette.text; font.pixelSize: 26 * window.uiScale
+                    color: toolbarActionTouch.pressed ? palette.highlightColor : palette.text; font.pixelSize: 26 * window.uiScale
                     text: window.composing ? qsTranslate("Sailplay", "Browse")
                           : phoneApp ? qsTranslate("Sailplay", "Dial pad") : qsTranslate("Sailplay", "New message")
                 }
-                MouseArea { anchors.fill: parent; onClicked: { window.replyAccount = ""; window.composing = !window.composing } }
+                MouseArea {
+                    id: toolbarActionTouch
+                    anchors.fill: parent
+                    onClicked: { window.dismissKeyboard(); window.replyAccount = ""; window.composing = !window.composing }
+                }
             }
         }
         Flickable {
@@ -97,7 +117,7 @@ Window {
                 Repeater {
                     model: phoneApp ? window.calls : []
                     Rectangle {
-                        width: callBar.width; height: 70 * window.uiScale; radius: 12; color: palette.card
+                        width: callBar.width; height: 70 * window.uiScale; radius: 12; color: palette.surface
                         Text {
                             x: 16 * window.uiScale; width: Math.max(0, callActions.x - x - window.gap); height: parent.height
                             verticalAlignment: Text.AlignVCenter; color: palette.text; font.pixelSize: 26 * window.uiScale
@@ -120,10 +140,10 @@ Window {
                     }
                 }
                 Rectangle {
-                    width: callBar.width; height: visible ? 54 * window.uiScale : 0; radius: 10; color: palette.button
+                    width: callBar.width; height: visible ? 54 * window.uiScale : 0; radius: 12; color: window.buttonColor(muteTouch.pressed)
                     visible: phoneApp && window.calls.length > 0
-                    Text { anchors.centerIn: parent; text: communicationState.muted ? qsTranslate("Sailplay", "Unmute microphone") : qsTranslate("Sailplay", "Mute microphone"); color: palette.text; font.pixelSize: 24 * window.uiScale }
-                    MouseArea { anchors.fill: parent; enabled: !window.pending; onClicked: window.submit("phone.mute", {muted: !communicationState.muted}) }
+                    Text { anchors.centerIn: parent; text: communicationState.muted ? qsTranslate("Sailplay", "Unmute microphone") : qsTranslate("Sailplay", "Mute microphone"); color: muteTouch.pressed ? palette.highlightColor : palette.text; font.pixelSize: 24 * window.uiScale }
+                    MouseArea { id: muteTouch; anchors.fill: parent; enabled: !window.pending; onClicked: window.submit("phone.mute", {muted: !communicationState.muted}) }
                 }
             }
         }
@@ -166,11 +186,15 @@ Window {
                 spacing: window.gap
                 Rectangle {
                     id: recipientBox
-                    width: parent.width; height: 76 * window.uiScale; radius: 12; color: palette.card
+                    width: parent.width; height: 76 * window.uiScale; radius: 14; color: palette.surface
+                    border.width: recipient.activeFocus ? 2 : (palette.ambience ? 1 : 0)
+                    border.color: recipient.activeFocus ? palette.highlightColor : window.tint(palette.highlightColor, 0.25)
                     TextInput {
                         id: recipient
                         objectName: "communicationRecipient"
                         anchors.fill: parent; anchors.margins: 14 * window.uiScale
+                        activeFocusOnPress: !phoneApp
+                        onActiveFocusChanged: if (phoneApp && activeFocus) { focus = false; Qt.inputMethod.hide() }
                         color: palette.text; font.pixelSize: 34 * window.uiScale; verticalAlignment: TextInput.AlignVCenter
                         horizontalAlignment: phoneApp ? TextInput.AlignHCenter : TextInput.AlignLeft
                         maximumLength: 64; inputMethodHints: Qt.ImhDialableCharactersOnly; clip: true
@@ -187,8 +211,8 @@ Window {
                             width: (dialGrid.width - 2 * dialGrid.spacing) / 3
                             height: Math.max(48 * window.uiScale, Math.min(112 * window.uiScale,
                                 (composer.height - recipientBox.height - formActions.height - 2 * form.spacing - 3 * dialGrid.spacing) / 4))
-                            radius: 10; color: touch.pressed ? palette.pressed : palette.button
-                            Text { anchors.centerIn: parent; text: modelData; color: palette.text; font.pixelSize: 38 * window.uiScale }
+                            radius: 14; color: window.buttonColor(touch.pressed)
+                            Text { anchors.centerIn: parent; text: modelData; color: touch.pressed ? palette.highlightColor : palette.text; font.pixelSize: 38 * window.uiScale }
                             MouseArea {
                                 id: touch
                                 property bool held: false
@@ -206,7 +230,9 @@ Window {
                     }
                 }
                 Rectangle {
-                    width: parent.width; height: Math.max(70 * window.uiScale, composer.height - recipientBox.height - formActions.height - 2 * form.spacing); radius: 12; color: palette.card
+                    width: parent.width; height: Math.max(70 * window.uiScale, composer.height - recipientBox.height - formActions.height - 2 * form.spacing); radius: 14; color: palette.surface
+                    border.width: message.activeFocus ? 2 : (palette.ambience ? 1 : 0)
+                    border.color: message.activeFocus ? palette.highlightColor : window.tint(palette.highlightColor, 0.25)
                     visible: !phoneApp
                     Flickable {
                         anchors.fill: parent; anchors.margins: 14 * window.uiScale
@@ -224,18 +250,21 @@ Window {
                     id: formActions
                     width: parent.width; height: 72 * window.uiScale; spacing: window.gap
                     Rectangle {
-                        width: (parent.width - parent.spacing) / 2; height: parent.height; radius: 12; color: palette.button
-                        Text { anchors.centerIn: parent; text: phoneApp ? "⌫" : qsTranslate("Sailplay", "Clear"); color: palette.text; font.pixelSize: 28 * window.uiScale }
-                        MouseArea { anchors.fill: parent; onClicked: { if (phoneApp) recipient.text = recipient.text.slice(0, -1); else message.text = "" } }
+                        width: (parent.width - parent.spacing) / 2; height: parent.height; radius: 14; color: window.buttonColor(clearTouch.pressed)
+                        Text { anchors.centerIn: parent; text: phoneApp ? "⌫" : qsTranslate("Sailplay", "Clear"); color: clearTouch.pressed ? palette.highlightColor : palette.text; font.pixelSize: 28 * window.uiScale }
+                        MouseArea { id: clearTouch; anchors.fill: parent; onClicked: { window.dismissKeyboard(); if (phoneApp) recipient.text = recipient.text.slice(0, -1); else message.text = "" } }
                     }
                     Rectangle {
-                        width: (parent.width - parent.spacing) / 2; height: parent.height; radius: 12; color: palette.positive
+                        width: (parent.width - parent.spacing) / 2; height: parent.height; radius: 14; color: palette.positive
                         opacity: renderer.ready && !window.pending && window.canSend ? 1 : 0.5
                         Text { anchors.centerIn: parent; text: phoneApp ? qsTranslate("Sailplay", "Call") : qsTranslate("Sailplay", "Send"); color: palette.actionText; font.pixelSize: 28 * window.uiScale }
                         MouseArea {
                             anchors.fill: parent; enabled: renderer.ready && !window.pending && window.canSend
-                            onClicked: window.submit(phoneApp ? "phone.dial" : "messages.send",
-                                phoneApp ? {number: recipient.text.trim()} : {number: recipient.text.trim(), message: message.text, account: window.replyAccount})
+                            onClicked: {
+                                window.dismissKeyboard()
+                                window.submit(phoneApp ? "phone.dial" : "messages.send",
+                                    phoneApp ? {number: recipient.text.trim()} : {number: recipient.text.trim(), message: message.text, account: window.replyAccount})
+                            }
                         }
                     }
                 }
