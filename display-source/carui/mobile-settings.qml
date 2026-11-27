@@ -118,6 +118,12 @@ ApplicationWindow {
                 contentHeight: content.height
                 PullDownMenu {
                     MenuItem {
+                        objectName: "resetAudioMenuItem"
+                        text: qsTranslate("Sailplay", "Reset audio stream")
+                        enabled: carController.projectionConnectionState === "projecting"
+                        onClicked: carController.resetAudioStream()
+                    }
+                    MenuItem {
                         objectName: "aboutMenuItem"
                         text: qsTranslate("Sailplay", "About")
                         onClicked: pageStack.push(Qt.resolvedUrl("AboutPage.qml"))

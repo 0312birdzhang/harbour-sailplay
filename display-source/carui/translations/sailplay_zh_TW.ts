@@ -248,6 +248,10 @@ Start music on your phone</source>
       <translation>關於</translation>
     </message>
     <message>
+      <source>Reset audio stream</source>
+      <translation>重設音訊串流</translation>
+    </message>
+    <message>
       <source>Version %1</source>
       <translation>版本 %1</translation>
     </message>

@@ -336,6 +336,14 @@ class ScreenFeedback:
                     elif changed:
                         raise RuntimeError('HU resource notification rejected')
                     print('Screen ownership response owner={} status={} command_status={} accepted={}'.format(owner,status,command_status,accepted),flush=True)
+                if self.audio is not None and os.path.exists('/tmp/sailplay-audio-reopen'):
+                    try:
+                        os.unlink('/tmp/sailplay-audio-reopen')
+                    except OSError:
+                        pass
+                    print('Manual audio stream reset requested', flush=True)
+                    self.reopen_attempts=0
+                    self.try_reopen()
                 if self.reopen_at is not None and time.monotonic()>=self.reopen_at:
                     self.try_reopen()
                 if time.monotonic()<next_feedback:

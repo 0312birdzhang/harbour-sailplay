@@ -1259,6 +1259,13 @@ public:
             watcher->deleteLater();
         });
     }
+    Q_INVOKABLE void resetAudioStream() {
+        QFile trigger(QStringLiteral("/tmp/sailplay-audio-reopen"));
+        if (trigger.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            trigger.write("1\n");
+            trigger.close();
+        }
+    }
     bool serviceRunning() const { return m_serviceRunning; }
     QString serviceState() const { return m_serviceState; }
     QString serviceError() const { return m_serviceError; }
