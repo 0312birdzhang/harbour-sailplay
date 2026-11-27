@@ -272,7 +272,7 @@ Window {
             Connections {
                 target: carController
                 onArtworkAvailable: if (key === musicCard.artworkKey) musicCard.artwork = localUrl
-                onCurrentAppChanged: if(!carController.musicActive)musicCard.queueOpen=false
+                onCurrentAppChanged: if(!carController.musicActive) { musicCard.queueOpen = false; lockscreenMusic.playerMenuOpen = false }
             }
             function openMusic() {
                 carController.openMusic()
@@ -304,9 +304,16 @@ Window {
                 Text { anchors.centerIn: parent; text: qsTranslate("Sailplay", "Browse"); font.pixelSize: 28; color: browseButtonTouch.pressed ? carPalette.highlightColor : carPalette.text }
                 MouseArea { id: browseButtonTouch; anchors.fill: parent; onClicked: carController.browseMusic() }
             }
+            MouseArea {
+                objectName: "playerMenuBackdrop"
+                anchors.fill: parent
+                z: 19
+                visible: lockscreenMusic.playerMenuOpen
+                onClicked: lockscreenMusic.playerMenuOpen = false
+            }
             Item {
                 id: musicPlayerToolbar
-                x: 16; y: 16; height: 88; z: 4
+                x: 16; y: 16; height: 88; z: 20
                 width: Math.max(0, Math.min(560, (musicQueueButton.visible ? musicQueueButton.x
                     : musicBrowseButton.visible ? musicBrowseButton.x : musicCard.width) - 32))
             }
@@ -315,7 +322,7 @@ Window {
                 objectName: "musicControls"
                 compact: !carController.musicActive
                 centered: !musicCard.showLyrics
-                playerSelectorHost: centered && !compact ? musicPlayerToolbar : null
+                playerSelectorHost: !compact ? musicPlayerToolbar : null
                 availableHeight: Math.max(0, parent.height - musicCard.centeredBodyTop - 20
                     - (musicCard.showProgress ? musicProgress.height + 4 : 0))
                 width: centered ? Math.max(0, Math.min(870, parent.width - (compact ? 32 : 64)))
