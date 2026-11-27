@@ -91,6 +91,18 @@ dbus-user.call org.sailplay.Client.*=org.sailplay.Navigation1.GuidanceChanged@/o
 dbus-user.call org.sailplay.Client.*=org.freedesktop.DBus.Properties.PropertiesChanged@/org/sailplay/v1/*
 ```
 
+A provider that cannot install a profile in `/etc/sailjail/permissions`, such
+as an application published in the Jolla Store (Harbour accepts no files
+there), can call `SailplayProvider::setBroadcastSignals(true)` before `start()`.
+Its session signals are then broadcast and need no `dbus-user.call` rule: the
+Sailfish D-Bus proxy passes broadcasts from a sandboxed application and drops
+signals addressed to a name it has no rule for. Sessions keep their own object
+path, so clients receive the same signals through their existing matches.
+Method calls stay restricted to the session owner, while the published state
+and request results become observable by other peers on the session bus, as
+MPRIS metadata already is. Providers that publish private data should keep the
+directed default and a profile.
+
 The installed Sailfish D-Bus proxy uses the caller's well-known name to apply
 these permissions to its unique owner. A sandboxed SDK client also needs
 `dbus-user.own org.sailplay.Client.*` in its permission profile. Clients making

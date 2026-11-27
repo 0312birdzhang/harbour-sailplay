@@ -35,6 +35,12 @@ public:
     int activeSessionCount() const;
     int pendingCount() const { return m_pending.size(); }
     bool invocationActive(qulonglong invocation) const;
+    // Send session signals as broadcasts instead of addressing them to the
+    // session owner. A Sailjail provider then needs no dbus-user.call rules,
+    // so it can ship without a profile in /etc/sailjail/permissions. Other
+    // peers on the session bus can then observe the published state.
+    void setBroadcastSignals(bool broadcast) { m_broadcastSignals = broadcast; }
+    bool broadcastSignals() const { return m_broadcastSignals; }
     void setActionHandler(const QString &action,
                           const std::function<void(qulonglong, const QVariantMap &)> &handler);
     bool complete(qulonglong invocation, const QVariantMap &result = QVariantMap());
@@ -98,6 +104,7 @@ private:
     bool m_navigation = false;
     bool m_content = false;
     bool m_valid = false;
+    bool m_broadcastSignals = false;
 };
 
 #endif

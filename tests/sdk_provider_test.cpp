@@ -298,7 +298,31 @@ int main(int argc, char **argv)
     CHECK(dup2(originalInput, STDIN_FILENO) >= 0);
     close(originalInput);
     CHECK(clientNames(bus) == originalNames);
-    puts("QT_SDK_PROVIDER_PASS canonical-signatures caller-ownership directed-signals hidden-leases owner-loss limits media-host activity backend-replacement teardown");
+    {
+        // A provider without Sailjail call rules broadcasts its session signals:
+        // the session owner still receives them, and so does any other peer.
+        const QString broadcastPath = QStringLiteral("/org/sailplay/broadcast/App");
+        SailplayProvider broadcaster(bus, QStringLiteral("fixture-broadcast"),
+            QVariantMap{{QStringLiteral("playing"), false}});
+        CHECK(!broadcaster.broadcastSignals());
+        broadcaster.setBroadcastSignals(true);
+        CHECK(broadcaster.broadcastSignals() && broadcaster.start(broadcastPath));
+        const auto opened = call(owner, broadcastPath, appInterface, QStringLiteral("OpenSession"),
+            QVariantList() << QStringLiteral("car") << QStringList());
+        CHECK(opened.type() == QDBusMessage::ReplyMessage);
+        const QString path = qvariant_cast<QDBusObjectPath>(opened.arguments().first()).path();
+        SignalProbe sessionOwner, observer;
+        CHECK(owner.connect(service, path, sessionInterface, QStringLiteral("StateChanged"), &sessionOwner, SLOT(StateChanged(qulonglong,QVariantMap))));
+        CHECK(stranger.connect(service, path, sessionInterface, QStringLiteral("StateChanged"), &observer, SLOT(StateChanged(qulonglong,QVariantMap))));
+        CHECK(owner.connect(service, path, propertiesInterface, QStringLiteral("PropertiesChanged"), &sessionOwner, SLOT(PropertiesChanged(QString,QVariantMap,QStringList))));
+        CHECK(broadcaster.publish(QVariantMap{{QStringLiteral("playing"), true}}));
+        CHECK(waitFor([&]() { return sessionOwner.states == 1 && observer.states == 1; }));
+        CHECK(call(owner, path, sessionInterface, QStringLiteral("SetActive"), QVariantList() << false).type() == QDBusMessage::ReplyMessage);
+        CHECK(waitFor([&]() { return sessionOwner.properties == 1; }));
+        CHECK(call(stranger, path, sessionInterface, QStringLiteral("GetSnapshot")).errorName() == QStringLiteral("org.sailplay.Error1.NotOwner"));
+        CHECK(call(owner, path, sessionInterface, QStringLiteral("Close")).type() == QDBusMessage::ReplyMessage);
+    }
+    puts("QT_SDK_PROVIDER_PASS canonical-signatures caller-ownership directed-signals broadcast-signals hidden-leases owner-loss limits media-host activity backend-replacement teardown");
     return 0;
 }
 

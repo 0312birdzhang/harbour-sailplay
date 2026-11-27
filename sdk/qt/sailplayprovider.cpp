@@ -352,7 +352,11 @@ bool SailplayProvider::handleMessage(const QDBusMessage &message, const QDBusCon
 void SailplayProvider::sendSignal(const QString &path, const Session &session, const QString &interface,
                                  const QString &member, const QVariantList &arguments)
 {
-    QDBusMessage signal = QDBusMessage::createTargetedSignal(session.owner, path, interface, member);
+    // Each session has its own object path, so a broadcast still reaches only
+    // the matches of that session; see setBroadcastSignals().
+    QDBusMessage signal = m_broadcastSignals
+        ? QDBusMessage::createSignal(path, interface, member)
+        : QDBusMessage::createTargetedSignal(session.owner, path, interface, member);
     signal.setArguments(arguments);
     m_bus.send(signal);
 }
