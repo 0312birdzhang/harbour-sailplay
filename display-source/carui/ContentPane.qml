@@ -35,10 +35,26 @@ Item {
             property string playback: ""
             property real size: 34 * pane.uiScale
             width: size; height: size; visible: playback !== ""
-            Silica.GlassItem {
+            Row {
                 visible: playback === "playing"
-                anchors.centerIn: parent; width: parent.width * 1.9; height: width
-                color: pane.palette.highlightColor; falloffRadius: 0.2; radius: 0.2; cache: false
+                anchors.centerIn: parent
+                spacing: 3 * pane.uiScale
+                Repeater {
+                    model: 3
+                    Rectangle {
+                        width: 5 * pane.uiScale
+                        height: 10 * pane.uiScale
+                        radius: 2 * pane.uiScale
+                        color: pane.palette.highlightColor
+                        anchors.bottom: parent.bottom
+                        SequentialAnimation on height {
+                            running: playback === "playing"
+                            loops: Animation.Infinite
+                            NumberAnimation { to: (index === 1 ? 26 : 20) * pane.uiScale; duration: 280 + index * 90 }
+                            NumberAnimation { to: (index === 1 ? 10 : 7) * pane.uiScale; duration: 260 + index * 70 }
+                        }
+                    }
+                }
             }
             Rectangle {
                 visible: playback === "unplayed"
@@ -80,6 +96,54 @@ Item {
                 fillMode: Image.PreserveAspectCrop; sourceSize.width: 320; sourceSize.height: 320
                 visible: status === Image.Ready
             }
+        }
+    }
+
+    ListView {
+        id: horizontalRow
+        objectName: pane.listName + "Row"
+        anchors.fill: parent
+        visible: pane.layout === "row"
+        orientation: ListView.Horizontal
+        clip: true; spacing: 14 * pane.uiScale; boundsBehavior: Flickable.StopAtBounds
+        model: visible ? pane.items : []
+        delegate: Rectangle {
+            objectName: pane.rowName
+            property bool lit: pane.lit(modelData)
+            width: Math.min(220 * pane.uiScale, Math.max(150 * pane.uiScale, horizontalRow.height * 0.72))
+            height: horizontalRow.height
+            radius: 14 * pane.uiScale; clip: true
+            color: rowCardArea.pressed ? pane.tint(palette.highlightColor, 0.3)
+                 : lit ? pane.tint(palette.highlightColor, 0.16) : pane.tint(palette.highlightBackgroundColor, 0.55)
+            opacity: modelData.enabled ? 1 : 0.4
+            Loader {
+                id: cardArt
+                sourceComponent: picture
+                x: 10 * pane.uiScale; y: 10 * pane.uiScale
+                width: parent.width - 20 * pane.uiScale
+                height: Math.max(60 * pane.uiScale, parent.height - 84 * pane.uiScale)
+                onLoaded: { item.source = modelData.image || ""; item.label = pane.plain(modelData.title) }
+            }
+            Loader {
+                active: !!modelData.playback; sourceComponent: badge
+                anchors.right: cardArt.right; anchors.bottom: cardArt.bottom; anchors.margins: 6 * pane.uiScale
+                onLoaded: item.playback = modelData.playback
+            }
+            Column {
+                x: 10 * pane.uiScale; y: cardArt.y + cardArt.height + 8 * pane.uiScale
+                width: parent.width - 20 * pane.uiScale; spacing: 2 * pane.uiScale
+                Text {
+                    width: parent.width; text: pane.plain(modelData.title); textFormat: Text.PlainText
+                    color: lit ? palette.highlightColor : palette.primaryColor
+                    font.pixelSize: 22 * pane.uiScale; maximumLineCount: 1; elide: Text.ElideRight
+                }
+                Text {
+                    width: parent.width; text: pane.plain(modelData.subtitle); textFormat: Text.PlainText
+                    color: lit ? palette.secondaryHighlightColor : palette.secondaryColor
+                    font.pixelSize: 18 * pane.uiScale; maximumLineCount: 1; elide: Text.ElideRight; visible: text !== ""
+                }
+            }
+            MouseArea { id: rowCardArea; anchors.fill: parent; enabled: pane.usable && modelData.enabled; onClicked: pane.activated(modelData.id) }
         }
     }
 
@@ -132,7 +196,7 @@ Item {
                 anchors.right: parent.right; anchors.rightMargin: 14 * pane.uiScale; anchors.verticalCenter: parent.verticalCenter
                 spacing: 4 * pane.uiScale
                 Loader {
-                    active: !!modelData.playback && modelData.playback !== "playing"; sourceComponent: badge
+                    active: !!modelData.playback; sourceComponent: badge
                     anchors.verticalCenter: parent.verticalCenter
                     onLoaded: item.playback = modelData.playback
                 }
@@ -143,6 +207,13 @@ Item {
                 }
             }
             MouseArea { id: area; anchors.fill: parent; enabled: pane.usable && modelData.enabled; onClicked: pane.activated(modelData.id) }
+            Rectangle {
+                visible: typeof modelData.progress === "number" && modelData.progress > 0 && modelData.progress <= 1
+                anchors.left: parent.left; anchors.bottom: parent.bottom
+                height: 4 * pane.uiScale
+                width: visible ? parent.width * Math.max(0, Math.min(1, modelData.progress)) : 0
+                color: pane.palette.highlightColor
+            }
         }
         footer: Item {
             width: list.width; height: pane.hasMore ? 84 * pane.uiScale : 0; visible: pane.hasMore
