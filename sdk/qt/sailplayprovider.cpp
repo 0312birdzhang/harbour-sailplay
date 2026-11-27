@@ -491,13 +491,15 @@ QVariantMap SailplayProvider::navigationGuidance(const QString &state)
         {QStringLiteral("remainingDistanceMeters"), 0.0}, {QStringLiteral("remainingSeconds"), qulonglong(0)},
         {QStringLiteral("currentRoad"), QString()}, {QStringLiteral("nextRoad"), QString()},
         {QStringLiteral("destination"), QString()}, {QStringLiteral("updatedMs"), boottimeMs()},
-        {QStringLiteral("speedMps"), -1.0}, {QStringLiteral("speedLimitMps"), -1.0}};
+        {QStringLiteral("speedMps"), -1.0}, {QStringLiteral("speedLimitMps"), -1.0},
+        {QStringLiteral("lanes"), QVariantList()}};
 }
 
 bool SailplayProvider::validGuidance(const QVariantMap &value)
 {
     const QVariantMap defaults = navigationGuidance();
-    const QStringList optionalFields = {QStringLiteral("speedMps"), QStringLiteral("speedLimitMps")};
+    const QStringList optionalFields = {QStringLiteral("speedMps"), QStringLiteral("speedLimitMps"),
+                                        QStringLiteral("lanes")};
     for (auto field = value.cbegin(); field != value.cend(); ++field) {
         if (!defaults.contains(field.key())) return false;
     }
@@ -525,7 +527,7 @@ bool SailplayProvider::validGuidance(const QVariantMap &value)
         const double distance = value.value(key).toDouble();
         if (!std::isfinite(distance) || distance < 0) return false;
     }
-    for (const QString &key : optionalFields) {
+    for (const QString &key : {QStringLiteral("speedMps"), QStringLiteral("speedLimitMps")}) {
         if (value.contains(key) && !std::isfinite(value.value(key).toDouble())) return false;
     }
     for (const QString &key : {QStringLiteral("currentRoad"), QStringLiteral("nextRoad"), QStringLiteral("destination")}) {
