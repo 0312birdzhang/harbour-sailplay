@@ -63,7 +63,6 @@ Item {
         onCurrentServiceChanged: controls.refreshRateInfo()
         onPlaybackStatusChanged: controls.refreshRateInfo()
     }
-    Component.onCompleted: refreshRateInfo()
     function formatRate(r) {
         var rounded = Math.round(r * 100) / 100
         return (rounded === Math.floor(rounded) ? rounded.toFixed(0) : rounded.toString()) + "x"
@@ -179,6 +178,7 @@ Item {
         // Prepare the remembered background service, but Play is sent by the
         // transport only after the head unit's audio channel is ready.
         carController.ensureMusicBackend()
+        refreshRateInfo()
     }
     MprisController {
         id: player
