@@ -9,6 +9,16 @@ with application launching, reverse touch input, music playback controls and a
 map/weather/music dashboard. The Sailplay phone app manages the service, car
 connection, visible applications and display settings.
 
+## Screenshots
+
+| Dashboard | Home |
+| :---: | :---: |
+| ![Dashboard](screenshots/dashboard.jpg) | ![Home](screenshots/home.jpg) |
+
+| Now Playing | Phone |
+| :---: | :---: |
+| ![Now Playing](screenshots/now-playing.jpg) | ![Phone](screenshots/phone.jpg) |
+
 ## Documentation
 
 - SDK v1 application/session and navigation contracts, Qt/Python bindings, navigation templates and runnable examples. [Application SDK](sdk/README.md)
