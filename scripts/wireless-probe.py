@@ -35,7 +35,8 @@ from carplay_proto.wireless import (parse_wifi_configuration, offers_wireless_ca
 from carplay_proto.navigation import NavigationSubscription, START as NAV_START, STOP as NAV_STOP
 from carplay_proto.navigationproviders import ProviderNavigationFeed
 from carplay_proto.navigationsender import NavigationSender
-from carplay_proto.navigationsender import NavigationSender
+from carplay_proto.nowplaying import (NowPlayingFeed, NowPlayingSender, NowPlayingSubscription,
+                                      START as NP_START, STOP as NP_STOP)
 
 PHONE_UUID = '00000000-deca-fade-deca-deafdecacafe'
 ACCESSORY_UUID = '00000000-deca-fade-deca-deafdecacaff'
@@ -246,9 +247,11 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
     navigation_sender = NavigationSender()
     navigation_batch = []
     snapshot = None
-    navigation_sender = NavigationSender()
-    navigation_batch = []
-    snapshot = None
+    now_playing = NowPlayingSubscription()
+    now_playing_feed = NowPlayingFeed()
+    now_playing_sender = NowPlayingSender()
+    now_playing_check_at = 0
+    now_playing_snapshot = None
     sock.settimeout(0.2)
     try:
         authenticator = PinnedAccessory(accessory_key) if accessory_key else None
@@ -273,16 +276,18 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
             if sync_at and not local_syn_acked and now >= sync_at:
                 sock.sendall(encode(Packet(SYN | ACK, 0, last_rx, 0, sync_payload)))
                 sync_at = now + 1
+            if authenticated and now_playing.subscribed and now >= now_playing_check_at:
+                now_playing_check_at = now + 2
+                now_playing_snapshot = now_playing_feed.poll()
             if authenticated and pending is None and not outgoing:
                 if not navigation_batch:
                     navigation_batch = navigation_sender.frames(snapshot, navigation, peer_received_messages)
                 if navigation_batch:
                     outgoing.append(navigation_batch.pop(0))
-            if authenticated and pending is None and not outgoing:
-                if not navigation_batch:
-                    navigation_batch = navigation_sender.frames(snapshot, navigation, peer_received_messages)
-                if navigation_batch:
-                    outgoing.append(navigation_batch.pop(0))
+                else:
+                    np_frames = now_playing_sender.frames(now_playing_snapshot, now_playing, peer_received_messages)
+                    if np_frames:
+                        outgoing.extend(np_frames)
             if negotiated and pending is None and outgoing:
                 sequence = (sequence + 1) & 255
                 frame = outgoing.pop(0)
@@ -522,6 +527,16 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                     navigation_check_at = 0
                                     logging.info('navigation subscription message=0x%04x component=%s options=%s', frame.message_id,
                                                  navigation.component, sorted(navigation.options))
+                                elif authenticated and frame.message_id in (NP_START, NP_STOP):
+                                    now_playing.handle(frame)
+                                    now_playing_sender.reset()
+                                    now_playing_check_at = 0
+                                    if frame.message_id == NP_START:
+                                        reply = initial_update(frame, peer_received_messages)
+                                        if reply is not None:
+                                            outgoing.append(reply)
+                                    logging.info('NowPlaying subscription message=0x%04x subscribed=%s',
+                                                 frame.message_id, now_playing.subscribed)
                                 elif authenticated and frame.message_id in INITIAL_UPDATES:
                                     reply = initial_update(frame, peer_received_messages)
                                     if reply is not None:

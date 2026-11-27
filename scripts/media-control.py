@@ -146,6 +146,49 @@ def any_local_playing(bus, interface):
     return False
 
 
+def now_playing_snapshot(bus, interface):
+    best = None
+    for name in bus.list_names():
+        if not str(name).startswith('org.mpris.MediaPlayer2.'):
+            continue
+        if not is_local_player(bus, name):
+            continue
+        try:
+            obj = bus.get_object(name, '/org/mpris/MediaPlayer2')
+            props_iface = interface(obj, 'org.freedesktop.DBus.Properties')
+            props = props_iface.GetAll('org.mpris.MediaPlayer2.Player', timeout=1)
+            status = str(props.get('PlaybackStatus', 'Stopped'))
+            rank = 0 if status == 'Playing' else 1 if status == 'Paused' else 2
+            meta = props.get('Metadata') or {}
+            title = str(meta.get('xesam:title', ''))
+            artists = meta.get('xesam:artist', [])
+            if isinstance(artists, (list, tuple)):
+                artist = ', '.join(str(a) for a in artists if a)
+            else:
+                artist = str(artists or '')
+            album = str(meta.get('xesam:album', ''))
+            length_us = int(meta.get('mpris:length', 0) or 0)
+            pos_us = int(props.get('Position', 0) or 0)
+            try:
+                app = str(props_iface.Get('org.mpris.MediaPlayer2', 'Identity', timeout=1))
+            except Exception:
+                app = str(name).rsplit('.', 1)[-1]
+            entry = (rank, str(name), {
+                'status': status,
+                'title': title,
+                'artist': artist,
+                'album': album,
+                'durationMs': max(0, length_us // 1000),
+                'positionMs': max(0, pos_us // 1000),
+                'app': app,
+            })
+            if best is None or entry[:2] < best[:2]:
+                best = entry
+        except Exception:
+            continue
+    return best[2] if best is not None else {'status': 'Stopped', 'title': '', 'artist': '', 'album': '', 'durationMs': 0, 'positionMs': 0, 'app': ''}
+
+
 def main():
     action=sys.argv[1] if len(sys.argv)>1 else ''
     if action=='--session-stop':
@@ -154,6 +197,10 @@ def main():
         except FileNotFoundError:return
         subprocess.run(['su','defaultuser','-s','/bin/sh','-c',
             'exec env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100000/dbus/user_bus_socket python3 /opt/sailplay/scripts/media-control.py PausePlaying'],timeout=4)
+        return
+    if action == 'NowPlaying':
+        import dbus
+        print(json.dumps(now_playing_snapshot(dbus.SessionBus(), dbus.Interface), ensure_ascii=False), flush=True)
         return
     if action not in ('Play','Pause','PlayPause','Next','Previous','PausePlaying','ResumePreferred','PlayExclusive'):raise ValueError('invalid media action')
     import dbus
