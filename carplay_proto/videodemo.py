@@ -646,7 +646,8 @@ def run_demo(client,address,interface,shared,setup_info,info,path=None,seconds=1
         if live:
             from .screenstream import ScreenStream
             screen=ScreenStream(client,address,interface,shared,display,video,stream_id,width,height,
-                                request_keyframe=pipeline.request_keyframe,packet_profile=packet_profile)
+                                request_keyframe=pipeline.request_keyframe,packet_profile=packet_profile,
+                                resume_record=not marelli_carline(info))
             feedback=ScreenFeedback(client,commands,modes,resume,screen,resource_changed,audio,duck,mode_lock,mode_revision,
                                     reopen_audio=marelli_carline(info))
         if live:

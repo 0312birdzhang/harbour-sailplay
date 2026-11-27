@@ -157,3 +157,16 @@ keys are ignored.
 
 `tests/test_wireless_probe_unittest.py` and `tests/test_media_control_unittest.py`
 replay the descriptor and reports captured from that head unit.
+
+On that head unit the keys stopped after the first screen hand-back (voice
+key, radio, vehicle menu). Each AirPlay `RECORD`, including the one sent when
+the CarPlay screen resumes, makes the unit open a new iAP2 link about 0.2 s
+later, while it keeps numbering its key reports for the link it replaced; the
+reports then fall outside the receive window and the unit soon stops sending
+them. The session is still recording when the screen comes back, so the screen
+resume now skips `RECORD` on Marelli CARLINE units and only repeats the
+screen-only `SETUP`. Other head units keep the previous sequence.
+
+Vehicle validation on a Fiat Scudo: Next and Previous acted on the current
+player before and after nine screen resumes across three sessions, the screen
+returned each time, and a single iAP2 link was negotiated per session.

@@ -10,8 +10,10 @@ from .videodemo import ScreenEncoder
 
 
 class ScreenStream:
-    def __init__(self, client, address, interface, shared, display, video, stream_id, width=1920, height=720, request_keyframe=None, packet_profile='ios'):
+    def __init__(self, client, address, interface, shared, display, video, stream_id, width=1920, height=720, request_keyframe=None, packet_profile='ios',
+                 resume_record=True):
         self.packet_profile=packet_profile
+        self.resume_record=resume_record
         self.width,self.height=width,height
         self.client, self.address, self.interface = client, address, interface
         self.shared, self.display = shared, display
@@ -81,15 +83,21 @@ class ScreenStream:
             self.video = connect(self.address, int(stream['dataPort']), self.interface).sock
             self.encoder = ScreenEncoder(self.shared, stream_id, self.packet_profile)
             self.config, self.need_idr = None, True
-            try:
-                status, _, _ = self.client.request('RECORD', '/')
-            except Exception:
-                self._close_video()
-                raise
-            print('CarPlay screen resume RECORD status={}'.format(status), flush=True)
-            if status != 200:
-                self._close_video()
-                raise RuntimeError('screen resume RECORD rejected')
+            if self.resume_record:
+                try:
+                    status, _, _ = self.client.request('RECORD', '/')
+                except Exception:
+                    self._close_video()
+                    raise
+                print('CarPlay screen resume RECORD status={}'.format(status), flush=True)
+                if status != 200:
+                    self._close_video()
+                    raise RuntimeError('screen resume RECORD rejected')
+            else:
+                # The session is still recording. A second RECORD makes a
+                # Marelli CARLINE unit start another iAP2 link while its
+                # steering-wheel keys stay on the one it replaced.
+                print('CarPlay screen resume without RECORD', flush=True)
             self.desired_owner=1
             self.reopen_required=False
             if self.request_keyframe:

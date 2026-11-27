@@ -44,6 +44,18 @@ class ScreenStreamTests(unittest.TestCase):
         finally:
             stream.close()
 
+    def test_resume_without_record_when_the_head_unit_restarts_iap2_on_it(self):
+        from unittest.mock import Mock
+        client=Mock();client.request.return_value=(200,{},plistlib.dumps({'streams':[{'type':110,'dataPort':1234}]}))
+        stream=ScreenStream(client,'receiver','wlan0',bytes(32),{'uuid':'screen'},Mock(),42,resume_record=False)
+        try:
+            stream.ownership(2)
+            with patch('carplay_proto.screenstream.connect',return_value=SimpleNamespace(sock=Mock())):
+                stream.ownership(1)
+            self.assertEqual([call.args[0] for call in client.request.call_args_list],['TEARDOWN','SETUP'])
+            self.assertTrue(stream.need_idr);self.assertEqual(stream.desired_owner,1)
+        finally:stream.close()
+
     def test_resource_take_blocks_video_before_control_worker_teardown(self):
         from unittest.mock import Mock
         stream=ScreenStream(Mock(),'receiver','wlan0',bytes(32),{'uuid':'screen'},Mock(),42)
