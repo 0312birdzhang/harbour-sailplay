@@ -79,7 +79,7 @@ bool validGuidance(const QVariantMap &value)
             || !std::isfinite(number.toDouble())) return false;
     }
     if (value.contains(QStringLiteral("lanes"))) {
-        const QVariant lanes = value.value(QStringLiteral("lanes"));
+        const QVariant lanes = SailplayContent::decode(value.value(QStringLiteral("lanes")));
         if (lanes.type() != QVariant::List || lanes.toList().size() > 12) return false;
     }
     for (const QString &key : {QStringLiteral("currentRoad"), QStringLiteral("nextRoad"), QStringLiteral("destination")}) {
@@ -370,7 +370,9 @@ void SailplayNavigationHost::receiveState()
         m_guidance.clear();
         removeExport();
     } else {
-        const QVariantMap value = qdbus_cast<QVariantMap>(m_session.state().value(QStringLiteral("navigation")));
+        QVariantMap value = qdbus_cast<QVariantMap>(m_session.state().value(QStringLiteral("navigation")));
+        if (value.contains(QStringLiteral("lanes")))
+            value.insert(QStringLiteral("lanes"), SailplayContent::decode(value.value(QStringLiteral("lanes"))));
         if (!validGuidance(value)) {
             m_session.close();
             fail(translated("Navigation provider returned invalid guidance"));
