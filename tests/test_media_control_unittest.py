@@ -124,6 +124,23 @@ class MediaTests(unittest.TestCase):
             self.assertTrue(m.command({'type':'hidSendReport','uuid':'2','hidReport':data}))
         self.assertEqual([m.pending.get_nowait() for _ in range(3)],['Next','Next','Previous'])
         self.assertTrue(m.pending.empty())
+    def test_iap2_hid_component_keys_from_a_fiat_head_unit(self):
+        # Descriptor and reports captured from a Fiat Scudo: Play, Pause, Next
+        # and Previous as four one-bit fields followed by 28 padding bits.
+        descriptor=bytes.fromhex('050c0901a101050c150025017501950409b009b109b509b68102751c95018101c0')
+        m=MediaKeys.__new__(MediaKeys);m.layouts={};m.pressed={};m.pending=queue.Queue()
+        self.assertFalse(m.iap_report(0x1238,bytes.fromhex('04000000')))
+        m.iap_start(0x1238,descriptor)
+        for report in ('04000000','04000000','00000000','08000000','00000000','01000000','00000000','02000000'):
+            self.assertTrue(m.iap_report(0x1238,bytes.fromhex(report)))
+        self.assertEqual([m.pending.get_nowait() for _ in range(4)],['Next','Previous','Play','Pause'])
+        self.assertTrue(m.pending.empty())
+        m.iap_stop(0x1238)
+        self.assertFalse(m.iap_report(0x1238,bytes.fromhex('04000000')))
+    def test_iap2_hid_component_without_media_keys_is_ignored(self):
+        m=MediaKeys.__new__(MediaKeys);m.layouts={};m.pressed={};m.pending=queue.Queue()
+        m.iap_start(7,bytes.fromhex('05010906a101c0'));m.iap_start(8,b'\x05')
+        self.assertEqual(m.layouts,{})
     def test_pause_only_playing_and_does_not_launch_or_toggle(self):
         obj=Mock();player=Mock();bus=Mock();bus.list_names.return_value=['org.mpris.MediaPlayer2.test'];bus.get_object.return_value=obj
         state={'PlaybackStatus':'Playing','CanPause':True}

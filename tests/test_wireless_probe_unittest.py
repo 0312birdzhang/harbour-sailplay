@@ -162,6 +162,92 @@ class ProbeTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
 
 
+class HidComponentTests(unittest.TestCase):
+    def test_authenticated_link_delivers_hid_start_and_reports(self):
+        from unittest import mock
+        authenticator = mock.Mock(algorithm='fixture', public_key=b'key',
+                                  key_info={'key_bits': 0, 'challenge_bytes': 4})
+        authenticator.begin.return_value = b'once'
+        phone, car = socket.socketpair()
+        stop = threading.Event()
+        seen = []
+        delivered = threading.Event()
+
+        def on_hid(kind, component, data):
+            seen.append((kind, component, data))
+            if len(seen) == 3:
+                delivered.set()
+            if kind == 'stop':
+                raise RuntimeError('a failing handler must not end the link')
+
+        decoder = Decoder()
+        queue = []
+        car.settimeout(2)
+
+        def receive():
+            while not queue:
+                data = car.recv(4096)
+                if not data:
+                    raise AssertionError('the link ended early')
+                queue.extend(decoder.feed(data))
+            return queue.pop(0)
+
+        sent = [0x20]
+
+        def send(frame):
+            sent[0] += 1
+            car.sendall(encode(Packet(ACK, sent[0], last[0], 10, frame.encoded())))
+
+        last = [0]
+
+        def expect(matches):
+            # The link is stop-and-wait: acknowledge every message on the way.
+            while True:
+                packet = receive()
+                if not packet.payload:
+                    continue
+                last[0] = packet.sequence
+                car.sendall(encode(Packet(ACK, sent[0], packet.sequence, 0, None)))
+                if matches(packet.payload):
+                    return
+
+        report = Frame(0x6802, bytes.fromhex('0006000012380008000104000000'))
+        start = Frame(0x6800, bytes.fromhex(
+            '000600001238000600012be9000600020010000500030000250004'
+            '050c0901a101050c150025017501950409b009b109b509b68102751c95018101c0'))
+        with mock.patch.object(module, 'paired_accessory', return_value=authenticator):
+            worker = threading.Thread(target=module.probe, args=(phone, stop, 10), kwargs={
+                'transport': 'airplay', 'paired_pin_path': '/fixture.json', 'on_hid': on_hid})
+            worker.start()
+            try:
+                car.sendall(DETECT)
+                self.assertEqual(receive(), DETECT)
+                car.sendall(encode(Packet(SYN, 0x20, 0, 0, synchronization())))
+                syn = receive()
+                car.sendall(encode(Packet(ACK, 0x20, syn.sequence, 0, None)))
+                expect(lambda payload: payload == Frame(0x1d00, b'').encoded())
+                # Before authentication a report is ignored.
+                send(report)
+                send(Frame(0x1d01, b''))
+                expect(lambda payload: payload == Frame(0xaa00, b'').encoded())
+                send(Frame(0xaa01, encode_param(0, b'certificate')))
+                expect(lambda payload: payload.endswith(b'once'))
+                send(Frame(0xaa03, encode_param(0, b'signature')))
+                expect(lambda payload: payload == Frame(0xaa05, b'').encoded())
+                self.assertEqual(seen, [])
+                for frame in (start, Frame(0x6803, bytes.fromhex('000600001238')), Frame(0x6802, b'\x00'), report):
+                    send(frame)
+                self.assertTrue(delivered.wait(2))
+            finally:
+                stop.set()
+                worker.join(2)
+                car.close()
+        self.assertEqual([(kind, component) for kind, component, data in seen],
+                         [('start', 0x1238), ('stop', 0x1238), ('report', 0x1238)])
+        self.assertEqual(seen[2][2], bytes.fromhex('04000000'))
+        self.assertFalse(worker.is_alive())
+
+
 class UnsupportedAccessoryTests(unittest.TestCase):
     def identify(self, body):
         """Run the probe against an accessory that identifies with body."""
@@ -233,6 +319,22 @@ class IdentificationParsingTests(unittest.TestCase):
                       encode_param(10, b'\x00'))
         self.assertEqual(module.parse_ea_protocols(frame),
                          [(1, 'com.honda.cp.allhonda'), (3, 'com.honda.hondalink.hlc')])
+
+    def test_hid_messages_captured_from_a_fiat_head_unit(self):
+        start = Frame(0x6800, bytes.fromhex(
+            '000600001238000600012be9000600020010000500030000250004'
+            '050c0901a101050c150025017501950409b009b109b509b68102751c95018101c0'))
+        kind, component, descriptor = module.parse_hid_message(start)
+        self.assertEqual((kind, component, len(descriptor), descriptor[:2]), ('start', 0x1238, 33, b'\x05\x0c'))
+        report = Frame(0x6802, bytes.fromhex('0006000012380008000104000000'))
+        self.assertEqual(module.parse_hid_message(report), ('report', 0x1238, bytes.fromhex('04000000')))
+        self.assertEqual(module.parse_hid_message(Frame(0x6803, bytes.fromhex('000600001238'))), ('stop', 0x1238, b''))
+
+    def test_hid_messages_without_component_or_payload_are_rejected(self):
+        for frame in (Frame(0x6802, bytes.fromhex('0008000104000000')), Frame(0x6802, bytes.fromhex('000600001238')),
+                      Frame(0x6800, bytes.fromhex('000600001238')), Frame(0x6802, b'\x00')):
+            with self.assertRaises(ValueError):
+                module.parse_hid_message(frame)
 
     def test_bluetooth_component_ids(self):
         frame = Frame(0x4e03, encode_param(0, b'\x00\x01') + encode_param(0, b'\x01') +

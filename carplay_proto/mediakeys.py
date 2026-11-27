@@ -83,6 +83,21 @@ class MediaKeys:
             except queue.Full:print('Media control queue full',flush=True)
         self.pressed[key]=now
         return True
+    # Some head units declare no AirPlay media HID device and send the
+    # steering-wheel keys as an iAP2 HID component instead.
+    def iap_start(self,component,descriptor):
+        key='iap:{}'.format(component)
+        try:layout=consumer_layout(bytes(descriptor))
+        except (ValueError,IndexError):layout={}
+        self.pressed.pop(key,None)
+        if layout:self.layouts[key]=layout
+        else:self.layouts.pop(key,None)
+        print('Media iAP2 HID component={} mediaKeys={}'.format(component,bool(layout)),flush=True)
+    def iap_stop(self,component):
+        key='iap:{}'.format(component)
+        self.layouts.pop(key,None);self.pressed.pop(key,None)
+    def iap_report(self,component,data):
+        return self.command({'type':'hidSendReport','uuid':'iap:{}'.format(component),'hidReport':bytes(data)})
     def run(self):
         while not self.stop.is_set():
             try:action=self.pending.get(timeout=.1)

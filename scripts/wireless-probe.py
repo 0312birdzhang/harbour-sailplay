@@ -104,6 +104,22 @@ def service_record(channel):
 </record>''' % (PHONE_UUID, IAP_V2_UUID, channel)
 
 
+# StartHID, AccessoryHIDReport and StopHID, sent by the accessory.
+HID_MESSAGES = {0x6800: 'start', 0x6802: 'report', 0x6803: 'stop'}
+
+
+def parse_hid_message(frame):
+    """Return (kind, component, data): the descriptor of a start, the report of a report."""
+    kind = HID_MESSAGES[frame.message_id]
+    values = {parameter.id: parameter.payload for parameter in frame.parameters()}
+    if len(values.get(0, b'')) != 2:
+        raise ValueError('missing HID component identifier')
+    data = values.get({'start': 4, 'report': 1}.get(kind), b'')
+    if kind != 'stop' and not 0 < len(data) <= 4096:
+        raise ValueError('missing or oversized HID ' + ('descriptor' if kind == 'start' else 'report'))
+    return kind, struct.unpack('>H', values[0])[0], bytes(data)
+
+
 class UnsupportedAccessory(Exception):
     """The identified iAP2 accessory is not a wireless CarPlay head unit."""
 
@@ -164,7 +180,7 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
           announce_wireless=False, local_address=None, session_out=None, wifi_handover=False,sustained=False,
           local_name='SailfishOS', paired_pin_path=None, on_authenticated=None,
           transport='bluetooth', connection_role='unknown', bluetooth_device=None,
-          on_unsupported=None):
+          on_unsupported=None, on_hid=None):
     started = time.monotonic()
     phase = 'detection'
     received_bytes = 0
@@ -545,6 +561,24 @@ def probe(sock, stop, duration, certificate_out=None, accessory_key=None,
                                                      reply.message_id, frame.message_id, payload_hex(reply.body))
                                     else:
                                         logging.info('no initial update for request=0x%04x', frame.message_id)
+                                elif frame.message_id in HID_MESSAGES:
+                                    # StartHID carries the report descriptor of an
+                                    # iAP2 HID component (steering-wheel media keys);
+                                    # AccessoryHIDReport carries its key state.
+                                    if not authenticated:
+                                        logging.warning('ignoring HID message before authentication')
+                                        continue
+                                    try:
+                                        kind, component, data = parse_hid_message(frame)
+                                    except ValueError as error:
+                                        logging.warning('invalid HID message=0x%04x: %s', frame.message_id, error)
+                                        continue
+                                    if on_hid:
+                                        try:
+                                            on_hid(kind, component, data)
+                                        except Exception as error:
+                                            logging.warning('HID %s component=%d not handled: %s',
+                                                            kind, component, type(error).__name__)
                                 elif frame.message_id == 0x4e01:
                                     logging.info('Bluetooth component information body=%s', payload_hex(frame.body))
                                 elif frame.message_id == 0x4e03:
@@ -690,7 +724,7 @@ def device_notifications(local_name, local_address, received_message_ids):
 
 
 def airplay_link(sock, stop, local_name='SailfishOS', local_address=None,
-                 accessory_directory='/var/lib/sailplay/accessories'):
+                 accessory_directory='/var/lib/sailplay/accessories', on_hid=None):
     """Run the phone side of an iAP2 link tunnelled through AirPlay.
 
     Authenticates the accessory against the pin saved for the last head unit
@@ -705,7 +739,7 @@ def airplay_link(sock, stop, local_name='SailfishOS', local_address=None,
                 if device else None)
     logging.info('starting over AirPlay; accessory pin=%s', pin_path)
     probe(sock, stop, 0, local_name=local_name, local_address=local_address,
-          paired_pin_path=pin_path, transport='airplay')
+          paired_pin_path=pin_path, transport='airplay', on_hid=on_hid)
 
 
 def bluez_restarted(name, new_owner):
