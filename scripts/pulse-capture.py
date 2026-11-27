@@ -404,12 +404,8 @@ def main():
                 try:pactl('move-sink-input',index,name)
                 except subprocess.SubprocessError:continue
         inputs=pactl('list','sink-inputs')
-        active_streams = private_playback(inputs,sink_index)
-        duck_media = any(classify_stream(it) == 'guidance' and it.get('mute') != 'yes' for it, _ in active_streams)
-        for item,volumes in active_streams:
-            target_pct = '25%' if (duck_media and classify_stream(item) == 'media') else '100%'
-            target_val = 16384 if target_pct == '25%' else 65536
-            if item.get('mute')!='yes' and volumes and all(abs(int(v)-target_val) <= 512 for v in volumes):continue
+        for item,volumes in private_playback(inputs,sink_index):
+            if item.get('mute')!='yes' and volumes and all(int(v)==65536 for v in volumes):continue
             key=item['id']
             remember_stream_restore(recovery,item)
             if key not in recovery['streams']:
@@ -417,8 +413,8 @@ def main():
                     'mute':item.get('mute')=='yes','volumes':volumes}
                 save_recovery(recovery)
             if item.get('mute')=='yes':pactl('set-sink-input-mute',key,'0')
-            if volumes and any(abs(int(v)-target_val) > 512 for v in volumes):pactl('set-sink-input-volume',key,target_pct)
-            print('Audio private playback independent level id='+key+' level='+target_pct,file=sys.stderr,flush=True)
+            if volumes and any(int(v)!=65536 for v in volumes):pactl('set-sink-input-volume',key,'100%')
+            print('Audio private playback independent level id='+key,file=sys.stderr,flush=True)
         # Only private render/monitor levels are normalized; physical outputs
         # and the user's hardware volume are never raised by this path.
         for kind,device in (('sink',name),('source',name+'.monitor')):
