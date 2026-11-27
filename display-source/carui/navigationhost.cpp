@@ -45,8 +45,9 @@ bool validGuidance(const QVariantMap &value)
         QStringLiteral("remainingDistanceMeters"), QStringLiteral("remainingSeconds"), QStringLiteral("currentRoad"),
         QStringLiteral("nextRoad"), QStringLiteral("destination"), QStringLiteral("updatedMs")};
     const QSet<QString> optionalFields = {QStringLiteral("speedMps"), QStringLiteral("speedLimitMps")};
+    const QSet<QString> extraFields = {QStringLiteral("lanes")};
     const QSet<QString> keys = QSet<QString>::fromList(value.keys());
-    if (!keys.contains(fields) || !(keys - fields - optionalFields).isEmpty()) return false;
+    if (!keys.contains(fields) || !(keys - fields - optionalFields - extraFields).isEmpty()) return false;
     const QMap<QString, QStringList> enums = {
         {QStringLiteral("state"), {QStringLiteral("idle"), QStringLiteral("active"), QStringLiteral("unavailable"),
                                   QStringLiteral("stopped"), QStringLiteral("arrived")}},
@@ -76,6 +77,10 @@ bool validGuidance(const QVariantMap &value)
         if ((number.type() != QVariant::Double && number.type() != QVariant::Int && number.type() != QVariant::LongLong
                 && number.type() != QVariant::UInt && number.type() != QVariant::ULongLong)
             || !std::isfinite(number.toDouble())) return false;
+    }
+    if (value.contains(QStringLiteral("lanes"))) {
+        const QVariant lanes = value.value(QStringLiteral("lanes"));
+        if (lanes.type() != QVariant::List || lanes.toList().size() > 12) return false;
     }
     for (const QString &key : {QStringLiteral("currentRoad"), QStringLiteral("nextRoad"), QStringLiteral("destination")}) {
         const QVariant text = value.value(key);
@@ -258,8 +263,12 @@ void SailplayNavigationHost::configureMap(int width, int height)
 void SailplayNavigationHost::requestMap()
 {
     if (!m_active || !mapAvailable() || m_mapSize.isEmpty() || m_mapRequest) return;
-    m_mapRequest = m_session.invoke(QStringLiteral("navigation.map.frame"),
-        {{QStringLiteral("width"), m_mapSize.width()}, {QStringLiteral("height"), m_mapSize.height()}});
+    QVariantMap params{{QStringLiteral("width"), m_mapSize.width()}, {QStringLiteral("height"), m_mapSize.height()}};
+    if (m_session.capabilities().contains(QStringLiteral("navigation-map-independent"))) {
+        params.insert(QStringLiteral("viewport"), QStringLiteral("car"));
+        params.insert(QStringLiteral("independentCamera"), true);
+    }
+    m_mapRequest = m_session.invoke(QStringLiteral("navigation.map.frame"), params);
 }
 
 void SailplayNavigationHost::resetMap()

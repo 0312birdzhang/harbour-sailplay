@@ -20,6 +20,7 @@ FIELDS = frozenset(('state', 'mode', 'maneuver', 'exitNumber', 'drivingSide',
                    'nextDistanceMeters', 'remainingDistanceMeters', 'remainingSeconds',
                    'currentRoad', 'nextRoad', 'destination', 'updatedMs'))
 OPTIONAL_FIELDS = frozenset(('speedMps', 'speedLimitMps'))
+EXTRA_FIELDS = frozenset(('lanes',))
 ALL_FIELDS = FIELDS | OPTIONAL_FIELDS
 MAX_AGE_MS = 10000
 
@@ -36,7 +37,7 @@ def unsigned(value, maximum=MAX_UINT64):
 
 def validate_guidance(value, now_ms=None):
     """Validate a complete wire model and discard guidance in terminal states."""
-    if not isinstance(value, dict) or not (FIELDS <= set(value) <= ALL_FIELDS):
+    if not isinstance(value, dict) or not (FIELDS <= set(value) <= (ALL_FIELDS | EXTRA_FIELDS)):
         raise Fault('InvalidArgument', 'guidance must contain the Navigation1 fields')
     state = value['state']
     if not isinstance(state, str) or state not in STATES:
@@ -74,6 +75,11 @@ def validate_guidance(value, now_ms=None):
     for key in OPTIONAL_FIELDS:
         number = float(value.get(key, -1.0))
         result[key] = number if number >= 0 else -1.0
+    if 'lanes' in value:
+        lanes = value['lanes']
+        if not isinstance(lanes, (list, tuple)) or len(lanes) > 12:
+            raise Fault('InvalidArgument', 'navigation lanes must be a bounded list')
+        result['lanes'] = list(lanes)
     return result
 
 

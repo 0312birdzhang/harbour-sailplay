@@ -125,6 +125,7 @@ Rectangle {
         }
 
         Rectangle {
+            id: mapGuidanceBanner
             objectName: "navigationMapStatus"
             anchors.left: parent.left
             anchors.top: parent.top
@@ -150,6 +151,63 @@ Rectangle {
                 wrapMode: Text.WordWrap
                 maximumLineCount: 2
                 elide: Text.ElideRight
+            }
+        }
+
+        Rectangle {
+            id: speedLimitBadge
+            objectName: "navigationSpeedLimit"
+            readonly property int limitKmh: showGuidance && displayGuidance.speedLimitMps > 0
+                ? Math.round(displayGuidance.speedLimitMps * 3.6) : 0
+            readonly property bool speeding: limitKmh > 0 && displayGuidance.speedMps > displayGuidance.speedLimitMps + 0.5
+            visible: mapMode && !panelOpen && limitKmh > 0
+            anchors.left: mapGuidanceBanner.right
+            anchors.verticalCenter: mapGuidanceBanner.verticalCenter
+            anchors.leftMargin: 12
+            width: compact ? 64 : 76; height: width; radius: width / 2
+            color: speeding ? "#d93025" : "#ffffff"
+            border.color: "#d93025"; border.width: compact ? 5 : 6
+            Text {
+                anchors.centerIn: parent
+                text: speedLimitBadge.limitKmh
+                color: speedLimitBadge.speeding ? "#ffffff" : "#111111"
+                font.pixelSize: compact ? 24 : 30; font.bold: true
+            }
+        }
+
+        Rectangle {
+            id: laneGuidanceBar
+            objectName: "navigationLaneGuidance"
+            readonly property var lanes: showGuidance && displayGuidance.lanes ? displayGuidance.lanes : []
+            visible: mapMode && !panelOpen && lanes.length > 0
+            anchors.left: mapGuidanceBanner.left
+            anchors.top: mapGuidanceBanner.bottom
+            anchors.topMargin: 8
+            width: Math.min(mapGuidanceBanner.width, laneRow.implicitWidth + 24)
+            height: compact ? 44 : 52; radius: 12
+            color: palette.card; opacity: 0.93
+            function laneArrow(lane) {
+                var dirs = lane && lane.directions ? lane.directions : []
+                var d = dirs.length ? String(dirs[0]).toLowerCase() : "straight"
+                if (d.indexOf("uturn") >= 0) return "↺"
+                if (d.indexOf("slight-left") >= 0) return "↖"
+                if (d.indexOf("slight-right") >= 0) return "↗"
+                if (d.indexOf("left") >= 0) return "←"
+                if (d.indexOf("right") >= 0) return "→"
+                return "↑"
+            }
+            Row {
+                id: laneRow
+                anchors.centerIn: parent; spacing: 10
+                Repeater {
+                    model: laneGuidanceBar.lanes
+                    Text {
+                        text: laneGuidanceBar.laneArrow(modelData)
+                        color: modelData && modelData.active ? palette.highlightColor : palette.secondary
+                        opacity: modelData && modelData.active ? 1.0 : 0.45
+                        font.pixelSize: compact ? 26 : 32; font.bold: !!(modelData && modelData.active)
+                    }
+                }
             }
         }
 
@@ -188,8 +246,9 @@ Rectangle {
             anchors.left: parent.left
             anchors.bottom: parent.bottom
             anchors.margins: 16
-            width: Math.max(0, Math.min(mapOverlay.width - 32, navigating ? 300 : 480))
-            height: routeText.height + (previewActions.visible ? 120 : 32)
+            width: Math.max(0, Math.min(mapOverlay.width - 32, navigating ? 340 : 480))
+            height: routeText.height + (alternateRoutesRow.visible ? alternateRoutesRow.height + 12 : 0)
+                + (previewActions.visible ? 120 : alongRouteRow.visible ? alongRouteRow.height + 44 : 32)
             radius: 14
             color: palette.card
             opacity: 0.93
@@ -211,8 +270,54 @@ Rectangle {
                 elide: Text.ElideRight
             }
             Row {
+                id: alternateRoutesRow
+                objectName: "navigationAlternateRoutes"
+                readonly property var routes: !navigating && mapState.routes ? mapState.routes : []
+                visible: routes.length > 1
+                x: 16; y: routeText.y + routeText.height + 8
+                width: parent.width - 32; height: visible ? 44 : 0; spacing: 8
+                Repeater {
+                    model: alternateRoutesRow.routes.slice(0, 3)
+                    Rectangle {
+                        width: Math.max(0, (alternateRoutesRow.width - alternateRoutesRow.spacing * (Math.min(3, alternateRoutesRow.routes.length) - 1)) / Math.min(3, alternateRoutesRow.routes.length))
+                        height: 44; radius: 10
+                        color: modelData && modelData.selected ? palette.accent : palette.button
+                        Text {
+                            anchors.centerIn: parent; width: parent.width - 12
+                            horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+                            text: modelData && modelData.summary ? modelData.summary : ("#" + (index + 1))
+                            color: modelData && modelData.selected ? "#ffffff" : palette.text
+                            font.pixelSize: 18; font.bold: !!(modelData && modelData.selected)
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: if (modelData && modelData.id !== undefined) provider.mapBrowse("selectRoute", {id: String(modelData.id)})
+                        }
+                    }
+                }
+            }
+            Row {
+                id: alongRouteRow
+                objectName: "navigationAlongRouteActions"
+                visible: navigating && browserAvailable
+                x: 16; y: routeText.y + routeText.height + 10
+                width: parent.width - 32; height: visible ? 48 : 0; spacing: 8
+                Repeater {
+                    model: [{label: "⛽", category: "fuel"}, {label: "⚡", category: "charging"}, {label: "P", category: "parking"}]
+                    Rectangle {
+                        width: Math.max(0, (alongRouteRow.width - alongRouteRow.spacing * 2) / 3)
+                        height: 48; radius: 10; color: palette.button
+                        Text { anchors.centerIn: parent; text: modelData.label; color: palette.text; font.pixelSize: 22; font.bold: true }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: { panelOpen = true; provider.mapBrowse("alongRoute", {category: modelData.category}) }
+                        }
+                    }
+                }
+            }
+            Row {
                 id: previewActions
-                x: 16; y: routeText.y + routeText.height + 12; width: parent.width - 32; height: 76; spacing: 12
+                x: 16; y: (alternateRoutesRow.visible ? alternateRoutesRow.y + alternateRoutesRow.height : routeText.y + routeText.height) + 12; width: parent.width - 32; height: 76; spacing: 12
                 visible: !navigating
                 Rectangle {
                     id: routeAction
