@@ -55,9 +55,10 @@ Item {
         var rounded = Math.round(r * 100) / 100
         return (rounded === Math.floor(rounded) ? rounded.toFixed(0) : rounded.toString()) + "x"
     }
+    signal seekRelative(int deltaSeconds)
     function seekOffsetSeconds(deltaSeconds) {
         if (!localCurrent || idleCard || !player.canSeek) return
-        player.seek(deltaSeconds * 1000000)
+        seekRelative(deltaSeconds)
     }
     readonly property bool idleCard: compact && (!localCurrent || !playing && player.playbackStatus !== Mpris.Paused)
     readonly property real _squareSize: centered ? Math.max(0, Math.min(compact ? 88 : 100, width / 4 - 8)) : compact ? 76 : 88

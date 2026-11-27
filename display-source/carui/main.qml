@@ -326,6 +326,12 @@ Window {
                         musicCard.splitMusic ? (musicCard.height - height - musicProgress.height - 12) / 2 : 112)
                 albumArtSource: musicCard.artwork
                 onClicked: musicCard.openMusic()
+                onSeekRelative: {
+                    if (!musicProgress.player || !musicProgress.player.canSeek || musicProgress.durationSeconds <= 0) return
+                    var target = Math.max(0, Math.min(musicProgress.durationSeconds, musicProgress.positionSeconds + deltaSeconds))
+                    carController.seekPlayer(musicProgress.player.currentService, musicProgress.player.metaData.trackId, target)
+                    musicProgress.applyPosition(target)
+                }
             }
             Item {
                 id: musicProgress
