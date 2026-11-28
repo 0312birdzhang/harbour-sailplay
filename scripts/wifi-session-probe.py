@@ -409,7 +409,7 @@ def main():
                     {'Content-Type':'application/x-apple-binary-plist', 'User-Agent':'AirPlay/566.25.21'})
                 print('AirPlay /info status={}, bytes={}'.format(status, len(body)), flush=True)
                 # Public /info does not establish encrypted media keys.
-                if status in (200, 455):
+                if status in (200, 401, 455):
                     from carplay_proto.airplaypair import pair_setup, pair_verify
                     identity_path = '/tmp/sailplay-airplay-identity.json'
                     try:

@@ -98,7 +98,7 @@ class InitialSetupTests(unittest.TestCase):
                 self.assertNotIn('UnboundLocalError', output)
 
     def test_public_info_response_still_pairs_and_uses_successful_setup(self):
-        for status in (200, 455):
+        for status in (200, 401, 455):
             with self.subTest(public_status=status):
                 media, output, _ = self.run_attempts([200], public_status=status)
                 media.assert_called_once()
